@@ -38,11 +38,11 @@ A **polished, maintained OSS package**, telescope included. Done when, *measured
   1.000000, clustering k+assignments identical) and a from-scratch folder run verified end-to-end.
   `bce2059`. *(Remaining before publish: gate the dev-only fixture absolute paths — folded into ship.)*
 - ☐ `eid-l7z4` — prove + document the local path (any OpenAI-compatible server; LM Studio, llama.cpp…).
-- ☐ `eid-b2a9` — resumable card runs (cache by id) so a long run survives a crash.
+- ✅ `eid-b2a9` — resumable card runs (cache by id) so a long run survives a crash.
 
 **3 · Ship v1**
 - ☐ `eid-kgui` — stranger-README + example corpus + `npm publish`.
-- ☐ `eid-qesa` — CI: tests + typecheck on push.
+- ✅ `eid-qesa` — CI: tests + typecheck on push.
 
 **4 · Delight / included differentiator**
 - ☐ `eid-ugn6` — frontier telescope (Semantic Scholar citation ghosts). *In v1 scope.*
