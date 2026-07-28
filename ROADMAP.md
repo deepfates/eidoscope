@@ -15,9 +15,11 @@ not a raw text vector. Everything else — map, deck, telescope, trajectory — 
 
 A **polished, maintained OSS package**, telescope included. Done when, *measured not asserted*:
 
-1. **Standalone** — a stranger runs `eidoscope ./their-folder` with their own key **or** local
-   Ollama; zero dependency on this machine (no local curare checkout, no `curare/.env`).
-2. **Local path proven** end to end (embeddings already local; LLM → Ollama by config).
+1. **Standalone** — a stranger runs `eidoscope ./their-folder` with their own key **or** a local
+   OpenAI-compatible server (LM Studio, etc.); zero dependency on this machine (no local curare
+   checkout, no `curare/.env`).
+2. **Local path proven** end to end (embeddings already local; LLM → any OpenAI-compatible local
+   server, e.g. LM Studio, by config).
 3. **Honest output bar** — axis redundancy `< 0.3` (currently 0.25), summaries accurate, map legible.
 4. **Telescope** — citation-frontier "ghost" papers work on a citation corpus.
 5. **Docs** — a stranger-README + one bundled example corpus (`try it` = one command).
@@ -33,7 +35,7 @@ A **polished, maintained OSS package**, telescope included. Done when, *measured
 **2 · Standalone & installable**
 - ☐ `eid-8hv4` — decouple from curare: use `@huggingface/transformers` + `ml-kmeans` directly,
   real config, drop fixture/absolute paths. *Blocks the whole ship path.*
-- ☐ `eid-l7z4` — prove + document the local (Ollama) path.
+- ☐ `eid-l7z4` — prove + document the local path (any OpenAI-compatible server; LM Studio, llama.cpp…).
 - ☐ `eid-b2a9` — resumable card runs (cache by id) so a long run survives a crash.
 
 **3 · Ship v1**

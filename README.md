@@ -41,7 +41,7 @@ deck, not the app.
 
 Built on **curare** (local embeddings) and **[Ax](https://github.com/ax-llm/ax)** (DSPy for
 TypeScript — the gorm signatures, with validation, retries, traces, and any OpenAI-compatible
-provider incl. Ollama, so cloud or local is one line of config).
+provider incl. local servers like LM Studio, so cloud or local is one line of config).
 
 ## Use it
 
@@ -54,7 +54,7 @@ open eidoscope.html
 ```
 
 Provider is any OpenAI-compatible endpoint (env-overridable): `EIDOSCOPE_API_URL`
-(default OpenRouter; e.g. `http://localhost:11434/v1` for local Ollama), `EIDOSCOPE_MODEL`,
+(default OpenRouter; e.g. `http://localhost:1234/v1` for a local LM Studio server), `EIDOSCOPE_MODEL`,
 `OPENROUTER_API_KEY`. curare's built `dist/` is expected next door (`EIDOSCOPE_CURARE` to override).
 
 ## In the viewer
