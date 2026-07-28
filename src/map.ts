@@ -3,15 +3,16 @@ import { UMAP } from "umap-js";
 import type { Card } from "./card.ts";
 import type { Axis } from "./axes.ts";
 import type { Doc } from "./corpus.ts";
-import { CFG, curare } from "./config.ts";
+import { CFG } from "./config.ts";
+import { getTextEmbeddings, EmbeddingCache } from "./embed.ts";
+import { findOptimalK, clusterEmbeddings } from "./cluster.ts";
 
-// Embed the DECK (curare, local MiniLM) and lay it out (umap-js) — the readers' coordinates.
+// Embed the DECK (local MiniLM) and lay it out (umap-js) — the readers' coordinates.
 // Embeds the cleaned, structured card text, not the raw document: that's what de-noises the map.
 
 export const cardText = (c: Card, axes: Axis[]) => (c.core || "") + " " + axes.map((a) => c.axes[a.key]?.note || "").filter(Boolean).join(". ");
 
 export async function embedCards(cards: Card[], axes: Axis[]): Promise<number[][]> {
-  const { getTextEmbeddings, EmbeddingCache } = await curare();
   const cache = new EmbeddingCache("cache-eidoscope-cards", CFG.embedModel); await cache.load();
   const embs = await getTextEmbeddings(cards.map((c) => ({ id: c.id, text: cardText(c, axes).slice(0, 1200) })), { cache });
   await cache.save();
@@ -21,7 +22,6 @@ export async function embedCards(cards: Card[], axes: Axis[]): Promise<number[][
 // Full-text embedding for the generic path: chunk each document body, embed, mean-pool.
 // (When a loader already provides embeddings — e.g. the readwise fixture — skip this.)
 export async function embedDocs(docs: Doc[]): Promise<number[][]> {
-  const { getTextEmbeddings, EmbeddingCache } = await curare();
   const cache = new EmbeddingCache("cache-eidoscope-fulltext", CFG.embedModel); await cache.load();
   const { chunkWords, maxChunks } = CFG.params;
   const out: number[][] = [];
@@ -51,7 +51,6 @@ export async function projectAndCluster(embs: number[][]) {
   const X = embs.map(unit);
   const xy = normPct(new UMAP({ nComponents: 2, nNeighbors: 15, minDist: 0.15 }).fit(X), 2);
   const xyz = normPct(new UMAP({ nComponents: 3, nNeighbors: 15, minDist: 0.15 }).fit(X), 3);
-  const { findOptimalK, clusterEmbeddings } = await curare();
   const kMax = Math.max(2, Math.min(60, Math.floor(X.length / 4)));  // k must stay < #points
   const k = X.length < 6 ? 1 : findOptimalK(X, kMax);
   const clusters = k <= 1 ? X.map(() => 0) : clusterEmbeddings(X, k).clusters;
@@ -66,7 +65,7 @@ export async function projectAndCluster(embs: number[][]) {
   return { xy, xyz, cluster: clusters as number[], k, hub, nbr };
 }
 
-// verify: (1) curare embeds card text, (2) umap-js + curare-cluster lay out real card embeddings
+// verify: (1) MiniLM embeds card text, (2) umap-js + curare-cluster lay out real card embeddings
 if (import.meta.main) {
   const { loadFixture, fixtureAxes } = await import("./corpus.ts");
   const { cardCorpus } = await import("./card.ts");
@@ -75,7 +74,7 @@ if (import.meta.main) {
   const sample = docs.filter((d) => d.body.length > 2000).slice(0, 12);
   const deck = await cardCorpus(sample, axes, { concurrency: 8 });
   const cardEmbs = await embedCards(deck, axes);
-  console.log(`(1) curare embedded ${cardEmbs.length} cards -> ${cardEmbs[0].length}-dim`);
+  console.log(`(1) embedded ${cardEmbs.length} cards -> ${cardEmbs[0].length}-dim`);
 
   // project the fixture's already-embedded 1350 cards (enough points for a real layout)
   const CE = JSON.parse(readFileSync("/Users/deepfates/Hacking/readwise/triangulation/runs/main/card-embs.json", "utf8"));
@@ -86,5 +85,5 @@ if (import.meta.main) {
   console.log(`    clusters: k=${k}, sizes=[${Array.from({ length: k }, (_, c) => cluster.filter((x) => x === c).length).join(",")}]`);
   console.log(`    hubness range ${Math.min(...hub)}–${Math.max(...hub)}`);
   const ok = cardEmbs[0]?.length === 384 && xy.length === CE.embs.length && k >= 6;
-  console.log(ok ? "\n✅ embed+project stage works — curare embeds, umap-js lays out, curare clusters" : "\n⚠ inspect");
+  console.log(ok ? "\n✅ embed+project stage works — MiniLM embeds, umap-js lays out, kmeans clusters" : "\n⚠ inspect");
 }

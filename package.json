@@ -14,7 +14,10 @@
   },
   "dependencies": {
     "@ax-llm/ax": "^23.0.5",
+    "@huggingface/transformers": "3.8.1",
+    "ml-kmeans": "^6.0.0",
     "ml-pca": "^4.1.1",
+    "sharp": "0.35.3",
     "umap-js": "^1.4.0"
   },
   "bin": {

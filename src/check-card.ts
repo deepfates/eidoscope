@@ -1,12 +1,11 @@
 // Verified slice: run deriveCard on ONE real fixture doc + the real discovered axes.
 // Proves the gorm-via-Ax card works in-grain (typed output, scores aligned to axes).
 import { readFileSync, readdirSync } from "node:fs";
-import { ai } from "@ax-llm/ax";
 import { deriveCard } from "./signatures.ts";
+import { provider } from "./provider.ts";
 
 const FIX = "/Users/deepfates/Hacking/readwise/triangulation/runs/main";
 const MD = "/Users/deepfates/Hacking/readwise/markdown-export";
-const KEY = (readFileSync("/Users/deepfates/Hacking/github/deepfates/curare/.env", "utf8").match(/OPENROUTER_API_KEY=(.+)/) || [])[1].trim();
 
 const axes = JSON.parse(readFileSync(`${FIX}/axes-schema.json`, "utf8")).axes;
 const axesText = axes.map((a: any, i: number) => `${i + 1}. ${a.name}: low="${a.pole_low}" high="${a.pole_high}"`).join("\n");
@@ -16,7 +15,7 @@ const pick = readdirSync(MD).filter(f => f.endsWith(".md")).map(f => ({ f, t: re
 const title = (pick.t.match(/^title:\s*"([^"]+)"/m) || [])[1] || pick.f;
 const text = pick.t.split(/\n---\n/).slice(1).join("\n").replace(/\s+/g, " ").slice(0, 6000);
 
-const llm = ai({ name: "openai", apiKey: KEY, apiURL: "https://openrouter.ai/api/v1", config: { model: "google/gemini-3-flash-preview" } } as any);
+const llm = provider();
 
 const card = await deriveCard.forward(llm, { documentTitle: title, documentBody: text, corpusAxes: axesText });
 
