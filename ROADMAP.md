@@ -49,7 +49,7 @@ A **polished, maintained OSS package**, telescope included. Done when, *measured
 **4 · Delight / included differentiator**
 - ☐ `eid-ugn6` — frontier telescope (Semantic Scholar citation ghosts). *In v1 scope.*
 
-**Post-v1** (off the critical path): deck/spectrum readers, `eid-65ub` perf, `eid-dr7o` orbit-hint bug.
+**Post-v1** (off the critical path): deck/spectrum readers, `eid-65ub` perf, `eid-dr7o` ✅ orbit crash.
 
 ## The standing loop — keep it honest, keep it improving
 
