@@ -1,0 +1,26 @@
+{
+  "name": "eidoscope",
+  "version": "0.0.1",
+  "description": "An instrument for seeing the forms in a corpus — turn documents into interpretable cards on data-discovered axes, then look at their shape from every angle at once.",
+  "type": "module",
+  "license": "MIT",
+  "author": "deepfates (with Claude)",
+  "scripts": {
+    "check:card": "bun run src/check-card.ts",
+    "start": "bun run src/cli.ts",
+    "fixture": "bun run src/cli.ts --fixture",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ax-llm/ax": "^23.0.5",
+    "ml-pca": "^4.1.1",
+    "umap-js": "^1.4.0"
+  },
+  "bin": {
+    "eidoscope": "./src/cli.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.14"
+  }
+}

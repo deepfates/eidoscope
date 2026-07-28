@@ -1,0 +1,11 @@
+node_modules/
+cache-*/
+# run outputs (the deck + map are user artifacts, not source)
+deck.jsonl
+deck-sample.jsonl
+map-data.json
+STATE.md
+eidoscope.html
+eidoscope-fixture.html
+.loader-ticket
+.DS_Store

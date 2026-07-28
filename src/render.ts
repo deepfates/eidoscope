@@ -1,0 +1,121 @@
+// The default reader of the deck: a self-contained, offline HTML explorer. Position is a control,
+// not a truth — switch between the neighbor map (MDE, faithful/meaningless-axes), scatter by any
+// two discovered axes (interpretable), and a draggable 3D orbit. Color by region or any axis,
+// size by influence, click a card for its neighbors. Frontier / deck-view / time are plugins.
+import { writeFileSync, readFileSync } from "node:fs";
+
+export type MapData = {
+  ids: string[]; titles: string[]; cores: string[];
+  notes: Record<string, string>[];
+  axes: { key: string; name: string; low: string; high: string }[];
+  scores: Record<string, number[]>;
+  xy: number[][]; xyz: number[][]; cluster: number[]; k: number; hub: number[]; nbr: number[][];
+  clusters: { c: number; n: number; label: string; cx: number; cy: number }[];
+};
+
+export function renderHTML(D: MapData): string {
+  const nodes = D.ids.map((id, i) => ({
+    id, i, t: (D.titles[i] || "").slice(0, 90), core: D.cores[i] || "", cl: D.cluster[i],
+    xy: D.xy[i], xyz: D.xyz[i], notes: D.notes[i] || {}, hub: D.hub[i] || 0, nbr: D.nbr[i] || [],
+    sc: Object.fromEntries(D.axes.map((a) => [a.key, D.scores[a.key]?.[i] ?? 50])),
+  }));
+  const payload = JSON.stringify({ nodes, axes: D.axes, k: D.k, clusters: D.clusters }).replace(/<\//g, "<\\/");
+  return `<meta charset="utf-8"><title>eidoscope</title><meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root{--bg:#0b0e15;--ink:#eef2fa;--soft:#93a1b7;--hair:#232c3c;--panel:#141b27;--sans:"Inter",system-ui,sans-serif;--mono:ui-monospace,Menlo,monospace}
+:root[data-theme=light]{--bg:#f4f6fa;--ink:#161c28;--soft:#5a6578;--hair:#dde3ee;--panel:#fff}
+*{box-sizing:border-box}html,body{margin:0;height:100%}body{background:var(--bg);color:var(--ink);font-family:var(--sans);overflow:hidden}
+#c{position:fixed;inset:0;width:100%;height:100%;display:block;cursor:grab}#c.drag{cursor:grabbing}
+.pane{position:fixed;background:color-mix(in srgb,var(--panel) 92%,transparent);backdrop-filter:blur(10px);border:1px solid var(--hair);border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.4)}
+#hud{top:14px;left:14px;padding:12px 14px;width:290px}#hud .k{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--soft)}#hud h1{font-size:16px;margin:3px 0 9px;font-weight:800}
+.ctl{display:flex;gap:8px;align-items:center;margin:5px 0;font-size:12px}.ctl label{font-family:var(--mono);font-size:10px;color:var(--soft);width:46px;flex:none}
+select{flex:1;background:var(--bg);border:1px solid var(--hair);border-radius:7px;padding:5px 7px;font:12px var(--sans);color:var(--ink);min-width:0}
+#q{width:100%;margin-top:7px;background:var(--bg);border:1px solid var(--hair);border-radius:7px;padding:6px 9px;font:12px var(--sans);color:var(--ink)}
+.xy{display:none}.xy.on{display:flex}
+#legend{bottom:14px;right:14px;padding:9px 11px;font-size:11px;max-width:250px;max-height:52vh;overflow:auto}#legend .r{display:flex;gap:7px;align-items:center;margin:2px 0}.sw{width:10px;height:10px;border-radius:2px;flex:none}
+#tip{position:fixed;pointer-events:none;opacity:0;transition:opacity .07s;max-width:330px;padding:11px 13px;font-size:11.5px;line-height:1.5;z-index:9}#tip .t{font-weight:700;margin-bottom:4px;font-size:12.5px}#tip .co{margin-bottom:6px}#tip .f{font-family:var(--mono);font-size:10px;color:var(--soft)}
+#detail{top:14px;right:14px;width:290px;max-height:74vh;overflow:auto;padding:13px 15px;display:none;z-index:10}#detail.on{display:block}#detail .t{font-weight:800;font-size:13.5px;margin-bottom:5px}#detail .co{font-size:11.5px;line-height:1.5;color:var(--soft);margin-bottom:9px}#detail h4{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--soft);margin:10px 0 4px}#detail .nb{font-size:11.5px;padding:3px 5px;border-radius:5px;cursor:pointer}#detail .nb:hover{background:color-mix(in srgb,var(--ink) 12%,transparent)}#detail .x{position:absolute;top:9px;right:11px;cursor:pointer;color:var(--soft);font-family:var(--mono)}
+#deck{top:14px;left:50%;transform:translateX(-50%);width:min(940px,88vw);max-height:82vh;overflow:auto;padding:12px 14px;display:none;z-index:11}#deck.on{display:block}
+#deck .top{display:flex;gap:10px;align-items:center;margin-bottom:9px}#deck .top .x{margin-left:auto;cursor:pointer;color:var(--soft);font-family:var(--mono)}
+#deck .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(212px,1fr));gap:8px}
+#deck .card{border:1px solid var(--hair);border-radius:9px;padding:9px 10px;cursor:pointer;background:var(--bg)}#deck .card:hover{border-color:var(--soft)}
+#deck .card .ct{font-weight:700;font-size:12px;margin-bottom:3px;line-height:1.25}#deck .card .cc{font-size:10.5px;color:var(--soft);line-height:1.35;max-height:44px;overflow:hidden;margin-bottom:6px}
+#deck .bar{display:flex;align-items:center;gap:5px;font-family:var(--mono);font-size:8.5px;color:var(--soft);margin:1px 0}#deck .bar span.n{width:56px;overflow:hidden;white-space:nowrap}#deck .bar .track{flex:1;height:4px;border-radius:2px;background:color-mix(in srgb,var(--ink) 13%,transparent);overflow:hidden}#deck .bar .fill{height:100%}
+.ctrl2{position:fixed;top:14px;left:316px;display:flex;gap:8px;z-index:9;font-family:var(--mono);font-size:11px}.ctrl2 button{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--hair);border-radius:7px;padding:6px 9px;cursor:pointer}.ctrl2 button.on{background:var(--ink);color:var(--bg)}
+#axhint{position:fixed;left:0;right:0;bottom:12px;text-align:center;font-family:var(--mono);font-size:11px;color:var(--soft);pointer-events:none}#count{position:fixed;bottom:14px;left:14px;font-family:var(--mono);font-size:11px;color:var(--soft)}
+</style>
+<canvas id="c"></canvas>
+<div id="hud" class="pane"><div class="k">eidoscope 🔭</div><h1>the forms of the corpus</h1>
+<div class="ctl"><label>layout</label><select id="layout"><option value="mde">neighbor map (2D)</option><option value="orbit">3D orbit (drag)</option><option value="axes">axis scatter</option></select></div>
+<div class="ctl xy" id="xrow"><label>x-axis</label><select id="xax"></select></div><div class="ctl xy" id="yrow"><label>y-axis</label><select id="yax"></select></div>
+<div class="ctl"><label>color</label><select id="color"></select></div><div class="ctl"><label>size</label><select id="size"></select></div>
+<input id="q" type="search" placeholder="find a card…"></div>
+<div id="legend" class="pane"></div><div id="tip" class="pane"></div><div id="detail" class="pane"></div><div id="deck" class="pane"></div>
+<div class="ctrl2"><button id="deckbtn">deck</button><button id="labels" class="on">labels</button><button id="reset">reset</button><button id="theme">theme</button></div>
+<div id="axhint"></div><div id="count"></div>
+<script id="data" type="application/json">${payload}</script>
+<script>
+const D=JSON.parse(document.getElementById('data').textContent);const {nodes,axes,k,clusters}=D;const AX=Object.fromEntries(axes.map(a=>[a.key,a]));
+const cv=document.getElementById('c'),ctx=cv.getContext('2d'),tip=document.getElementById('tip'),detailEl=document.getElementById('detail');
+let W,H,DPR=Math.min(2,devicePixelRatio||1),view={s:1,x:0,y:0},hover=null,focus=null,hlCluster=null,layout='mde',xKey=axes[0].key,yKey=axes[1].key,color='cluster',sizeBy='hub',showLabels=true,rotY=0.5,rotX=-0.3;
+const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();const base=()=>Math.min(W,H)*0.44;const maxHub=Math.max(1,...nodes.map(n=>n.hub));
+const jit=(id,s)=>{let h=0;for(let i=0;i<id.length;i++)h=(h*31+id.charCodeAt(i)+s)>>>0;return((h%1000)/1000-0.5)*0.11};
+function proj3(n){const[a,b,cc]=n.xyz,cy=Math.cos(rotY),sy=Math.sin(rotY);let x=a*cy+cc*sy,z=-a*sy+cc*cy;const cx=Math.cos(rotX),sx=Math.sin(rotX);let y=b*cx-z*sx;z=b*sx+z*cx;return[x,y,z]}
+function tgt(n){if(layout==='axes')return[(n.sc[xKey]-50)/50+jit(n.id,1),(n.sc[yKey]-50)/50+jit(n.id,7)];if(layout==='orbit'){const p=proj3(n);n.depth=p[2];return[p[0],p[1]]}return[n.xy[0],n.xy[1]]}
+nodes.forEach(n=>{n.cur=tgt(n).slice(0,2);n.tg=n.cur.slice()});function retarget(){nodes.forEach(n=>{const t=tgt(n);n.tg=[t[0],t[1]]})}
+const S=n=>{const b=base();return{x:W/2+n.cur[0]*b*view.s+view.x,y:H/2-n.cur[1]*b*view.s+view.y}};
+const HUES=[210,28,150,300,45,265,175,110,330,15,85,240,190,60,320,95];
+function colOf(n){if(color==='cluster')return'hsl('+HUES[n.cl%HUES.length]+' 62% 60%)';const t=Math.max(0,Math.min(1,(n.sc[color]||0)/100));return'hsl('+(250-t*250)+' 74% '+(40+t*22)+'%)'}
+function rad(n){let r=2.2;if(sizeBy==='hub')r=1.5+3.4*Math.sqrt(n.hub/maxHub);else if(sizeBy!=='uniform')r=1.5+3*Math.abs((n.sc[sizeBy]||50)-50)/50;if(layout==='orbit')r*=(0.6+0.5*((n.depth||0)+1)/2);return r}
+function hull(pts){if(pts.length<3)return pts;pts=pts.slice().sort((a,b)=>a[0]-b[0]||a[1]-b[1]);const cr=(o,a,b)=>(a[0]-o[0])*(b[1]-o[1])-(a[1]-o[1])*(b[0]-o[0]);const L=[];for(const p of pts){while(L.length>=2&&cr(L[L.length-2],L[L.length-1],p)<=0)L.pop();L.push(p)}const U=[];for(let i=pts.length-1;i>=0;i--){const p=pts[i];while(U.length>=2&&cr(U[U.length-2],U[U.length-1],p)<=0)U.pop();U.push(p)}return L.slice(0,-1).concat(U.slice(0,-1))}
+function draw(){ctx.setTransform(DPR,0,0,DPR,0,0);ctx.clearRect(0,0,W,H);const q=(document.getElementById('q').value||'').toLowerCase();const fs=focus?new Set([focus.i,...focus.nbr]):null;
+  if(hlCluster!=null){const h=hull(nodes.filter(n=>n.cl===hlCluster).map(n=>{const p=S(n);return[p.x,p.y]}));if(h.length>2){ctx.beginPath();ctx.moveTo(h[0][0],h[0][1]);for(const p of h)ctx.lineTo(p[0],p[1]);ctx.closePath();ctx.fillStyle='hsl('+HUES[hlCluster%HUES.length]+' 62% 60% / .1)';ctx.fill();ctx.strokeStyle='hsl('+HUES[hlCluster%HUES.length]+' 62% 60% / .5)';ctx.lineWidth=1.5;ctx.stroke()}}
+  if(focus){const fp=S(focus);ctx.strokeStyle=css('--ink');ctx.globalAlpha=.32;ctx.lineWidth=1;for(const j of focus.nbr){const p=S(nodes[j]);ctx.beginPath();ctx.moveTo(fp.x,fp.y);ctx.lineTo(p.x,p.y);ctx.stroke()}ctx.globalAlpha=1}
+  for(const n of nodes){const p=S(n);if(p.x<-8||p.x>W+8||p.y<-8||p.y>H+8)continue;let al=layout==='orbit'?0.4+0.55*((n.depth||0)+1)/2:0.9;if(q&&!(n.t.toLowerCase().includes(q)||n.core.toLowerCase().includes(q)))al=.05;if(fs&&!fs.has(n.i))al*=.12;if(hlCluster!=null&&n.cl!==hlCluster)al*=.14;ctx.globalAlpha=al;ctx.fillStyle=colOf(n);ctx.beginPath();ctx.arc(p.x,p.y,rad(n),0,7);ctx.fill()}ctx.globalAlpha=1;
+  for(const h of[hover,focus]){if(h){const p=S(h);ctx.strokeStyle=css('--ink');ctx.lineWidth=1.8;ctx.beginPath();ctx.arc(p.x,p.y,rad(h)+3,0,7);ctx.stroke()}}
+  if(showLabels&&color==='cluster'&&hlCluster==null){const cen={};for(const n of nodes){(cen[n.cl]=cen[n.cl]||[0,0,0]);cen[n.cl][0]+=n.cur[0];cen[n.cl][1]+=n.cur[1];cen[n.cl][2]++}ctx.textAlign='center';ctx.font='700 12px var(--sans)';for(const c of clusters){const g=cen[c.c];if(!g)continue;const px=W/2+(g[0]/g[2])*base()*view.s+view.x,py=H/2-(g[1]/g[2])*base()*view.s+view.y;ctx.fillStyle=css('--bg');ctx.globalAlpha=.72;const tw=ctx.measureText(c.label).width;ctx.fillRect(px-tw/2-5,py-9,tw+10,17);ctx.globalAlpha=1;ctx.fillStyle='hsl('+HUES[c.c%HUES.length]+' 62% 62%)';ctx.fillText(c.label,px,py+3)}}
+  document.getElementById('count').textContent=nodes.length+' cards · '+layout+(sizeBy!=='uniform'?' · size='+sizeBy:'');
+  document.getElementById('axhint').innerHTML=layout==='axes'?'← '+esc(AX[xKey].low)+' · <b>'+esc(AX[xKey].name)+'</b> · '+esc(AX[xKey].high)+' →  ↕ '+esc(AX[yKey].name):(layout==='orbit'?'drag to rotate':(focus?'showing '+focus.nbr.length+' nearest — click empty space to clear':'proximity = similarity · click a card for its neighbors'))}
+let raf=null;function tick(){let m=false;for(const n of nodes)for(let d=0;d<2;d++){const df=n.tg[d]-n.cur[d];if(Math.abs(df)>1e-4){n.cur[d]+=df*.16;m=true}else n.cur[d]=n.tg[d]}draw();if(m)raf=requestAnimationFrame(tick);else raf=null}
+function relayout(){retarget();if(!raf)raf=requestAnimationFrame(tick)}
+function pick(mx,my){let b=null,bd=1e9;for(const n of nodes){const p=S(n);const d=(p.x-mx)**2+(p.y-my)**2;const rr=(rad(n)+4)**2;if(d<rr&&d<bd){bd=d;b=n}}return b}
+function tipHTML(n){const top=axes.map(a=>({a,s:n.sc[a.key],note:n.notes[a.key]})).filter(x=>x.note).sort((x,y)=>Math.abs(y.s-50)-Math.abs(x.s-50)).slice(0,4);return'<div class="t">'+esc(n.t)+'</div><div class="co">'+esc(n.core)+'</div><div class="f">hub '+n.hub+' · '+top.map(x=>esc(x.a.name)+' '+x.s).join(' · ')+'</div>'}
+function showDetail(n){focus=n;detailEl.classList.add('on');detailEl.innerHTML='<div class="x" onclick="clearFocus()">✕</div><div class="t">'+esc(n.t)+'</div><div class="co">'+esc(n.core)+'</div><h4>nearest '+n.nbr.length+'</h4>'+n.nbr.map(j=>'<div class="nb" onclick="focusIdx('+j+')">→ '+esc(nodes[j].t)+'</div>').join('');draw()}
+window.clearFocus=()=>{focus=null;detailEl.classList.remove('on');draw()};window.focusIdx=j=>showDetail(nodes[j]);
+let drag=null;cv.addEventListener('mousedown',e=>{drag={x:e.clientX,y:e.clientY,vx:view.x,vy:view.y,ry:rotY,rx:rotX,m:0};cv.classList.add('drag')});
+addEventListener('mouseup',e=>{if(drag&&drag.m<4){const n=pick(e.clientX,e.clientY);if(n)showDetail(n);else clearFocus()}drag=null;cv.classList.remove('drag')});
+addEventListener('mousemove',e=>{if(drag){drag.m+=Math.abs(e.movementX)+Math.abs(e.movementY);if(layout==='orbit'){rotY=drag.ry+(e.clientX-drag.x)*.008;rotX=drag.rx+(e.clientY-drag.y)*.008;relayout()}else{view.x=drag.vx+e.clientX-drag.x;view.y=drag.vy+e.clientY-drag.y;draw()}return}const n=pick(e.clientX,e.clientY);if(n!==hover){hover=n;draw();if(n)tip.innerHTML=tipHTML(n)}if(n){tip.style.opacity=1;tip.style.left=Math.min(e.clientX+14,W-tip.offsetWidth-8)+'px';tip.style.top=Math.min(e.clientY+14,H-tip.offsetHeight-8)+'px'}else tip.style.opacity=0});
+cv.addEventListener('wheel',e=>{e.preventDefault();const f=Math.exp(-e.deltaY*.0015),ns=Math.max(.4,Math.min(22,view.s*f));const wx=(e.clientX-W/2-view.x)/view.s,wy=(e.clientY-H/2-view.y)/view.s;view.s=ns;view.x=e.clientX-W/2-wx*ns;view.y=e.clientY-H/2-wy*ns;draw()},{passive:false});
+function esc(s){return(s||'').toString().replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
+const xax=document.getElementById('xax'),yax=document.getElementById('yax');axes.forEach(a=>{xax.add(new Option(a.name,a.key));yax.add(new Option(a.name,a.key))});xax.value=xKey;yax.value=yKey;
+const lsel=document.getElementById('layout');function syncXY(){const on=layout==='axes';document.getElementById('xrow').classList.toggle('on',on);document.getElementById('yrow').classList.toggle('on',on)}
+lsel.onchange=e=>{layout=e.target.value;syncXY();relayout()};xax.onchange=e=>{xKey=e.target.value;relayout()};yax.onchange=e=>{yKey=e.target.value;relayout()};
+const csel=document.getElementById('color');csel.add(new Option('region','cluster'));axes.forEach(a=>csel.add(new Option('axis: '+a.name,a.key)));csel.value='cluster';csel.onchange=e=>{color=e.target.value;buildLegend();draw()};
+const ssel=document.getElementById('size');ssel.add(new Option('uniform','uniform'));ssel.add(new Option('influence (hub)','hub'));axes.forEach(a=>ssel.add(new Option('commit: '+a.name,a.key)));ssel.value='hub';ssel.onchange=e=>{sizeBy=e.target.value;draw()};
+function buildLegend(){const L=document.getElementById('legend');let h='';if(color==='cluster'){h='<div style="font-family:var(--mono);font-size:10px;color:var(--soft);margin-bottom:5px">'+k+' REGIONS · hover to isolate</div>';for(const c of clusters)h+='<div class="r" data-cl="'+c.c+'"><span class="sw" style="background:hsl('+HUES[c.c%HUES.length]+' 62% 60%)"></span><span>'+esc(c.label)+' <span style="color:var(--soft)">'+c.n+'</span></span></div>'}else{const a=AX[color];h='<div style="font-family:var(--mono);font-size:10px;color:var(--soft);margin-bottom:5px">'+esc(a.name.toUpperCase())+'</div><div class="r"><span class="sw" style="background:hsl(250 74% 40%)"></span>'+esc(a.low)+'</div><div class="r"><span class="sw" style="background:hsl(0 74% 60%)"></span>'+esc(a.high)+'</div>'}L.innerHTML=h;L.querySelectorAll('[data-cl]').forEach(el=>{el.onmouseenter=()=>{hlCluster=+el.dataset.cl;draw()};el.onmouseleave=()=>{hlCluster=null;draw()}})}
+document.getElementById('q').oninput=()=>draw();document.getElementById('labels').onclick=e=>{showLabels=!showLabels;e.target.classList.toggle('on',showLabels);draw()};
+document.getElementById('reset').onclick=()=>{view={s:1,x:0,y:0};rotY=.5;rotX=-.3;clearFocus();relayout()};document.getElementById('theme').onclick=()=>{const r=document.documentElement;r.setAttribute('data-theme',r.getAttribute('data-theme')==='light'?'dark':'light');draw()};
+addEventListener('resize',()=>{DPR=Math.min(2,devicePixelRatio||1);W=innerWidth;H=innerHeight;cv.width=W*DPR;cv.height=H*DPR;draw()});
+// deck-view: the cards as cards. sort by influence or any axis; each shows its eidos as bars.
+let deckSort='hub';
+function buildDeck(){const el=document.getElementById('deck');const opts=['hub',...axes.map(a=>a.key)];
+  const sorted=nodes.slice().sort((a,b)=>deckSort==='hub'?b.hub-a.hub:(b.sc[deckSort]||0)-(a.sc[deckSort]||0));
+  el.innerHTML='<div class="top"><span style="font-family:var(--mono);font-size:10px;color:var(--soft)">DECK · '+nodes.length+' cards · sort</span><select id="dsort" style="flex:0 0 auto;width:210px">'+opts.map(o=>'<option value="'+o+'"'+(o===deckSort?' selected':'')+'>'+(o==='hub'?'influence (hub)':esc(AX[o].name))+'</option>').join('')+'</select><span class="x" onclick="toggleDeck()">✕</span></div><div class="grid">'+
+    sorted.slice(0,240).map(n=>'<div class="card" onclick="focusIdx('+n.i+');toggleDeck()"><div class="ct">'+esc(n.t)+'</div><div class="cc">'+esc(n.core.slice(0,120))+'</div>'+
+      axes.map(a=>{const s=Math.max(0,Math.min(100,n.sc[a.key]||0));return '<div class="bar"><span class="n">'+esc(a.name.slice(0,11))+'</span><span class="track"><span class="fill" style="width:'+s+'%;background:hsl('+(250-s*2.5)+' 70% 55%)"></span></span></div>';}).join('')+
+    '</div>').join('')+'</div>';
+  document.getElementById('dsort').onchange=e=>{deckSort=e.target.value;buildDeck();};}
+window.toggleDeck=()=>{const el=document.getElementById('deck'),on=!el.classList.contains('on');el.classList.toggle('on',on);document.getElementById('deckbtn').classList.toggle('on',on);if(on)buildDeck();};
+document.getElementById('deckbtn').onclick=()=>window.toggleDeck();
+W=innerWidth;H=innerHeight;cv.width=W*DPR;cv.height=H*DPR;buildLegend();syncXY();draw();
+</script>`;
+}
+
+if (import.meta.main) {
+  const D = JSON.parse(readFileSync("/Users/deepfates/Hacking/readwise/triangulation/runs/main/mde-data.json", "utf8"));
+  const html = renderHTML(D);
+  writeFileSync("eidoscope-fixture.html", html);
+  const script = html.match(/<script>([\s\S]*)<\/script>/)![1];
+  try { new Function(script); console.log(`✅ viewer renders — ${(html.length / 1024).toFixed(0)}KB, script parses clean`); }
+  catch (e: any) { console.log("⚠ syntax error:", e.message); }
+}
