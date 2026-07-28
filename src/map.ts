@@ -24,21 +24,27 @@ export async function embedCards(cards: Card[], axes: Axis[]): Promise<number[][
 export async function embedDocs(docs: Doc[]): Promise<number[][]> {
   const cache = new EmbeddingCache("cache-eidoscope-fulltext", CFG.embedModel); await cache.load();
   const { chunkWords, maxChunks } = CFG.params;
-  const out: number[][] = [];
-  for (const d of docs) {
+  // collect EVERY doc's chunks into one list and embed the whole corpus in a single batched pass —
+  // identical vectors (each chunk is embedded independently) but far fewer calls at scale.
+  const items: { id: string; text: string }[] = [];
+  const spans: number[][] = docs.map(() => []);
+  docs.forEach((d, di) => {
     const words = d.body.split(/\s+/).filter(Boolean);
     let chunks: string[] = [];
     for (let i = 0; i < words.length; i += chunkWords) chunks.push(words.slice(i, i + chunkWords).join(" "));
     if (chunks.length > maxChunks) { const step = chunks.length / maxChunks, s: string[] = []; for (let i = 0; i < maxChunks; i++) s.push(chunks[Math.floor(i * step)]); chunks = s; }
     if (!chunks.length) chunks = [d.title];
     chunks[0] = (d.title ? d.title + ". " : "") + chunks[0];
-    const embs = await getTextEmbeddings(chunks.map((text, i) => ({ id: `${d.id}#${i}`, text })), { cache });
-    const dim = embs[0].length, acc = new Array(dim).fill(0);
-    for (const e of embs) for (let j = 0; j < dim; j++) acc[j] += e[j];
-    out.push(acc.map((x) => x / chunks.length));
-  }
+    chunks.forEach((text, ci) => { spans[di].push(items.length); items.push({ id: `${d.id}#${ci}`, text }); });
+  });
+  const embs = await getTextEmbeddings(items, { cache });
   await cache.save();
-  return out;
+  const dim = embs[0]?.length ?? 384;
+  return docs.map((_, di) => {
+    const idx = spans[di], acc = new Array(dim).fill(0);
+    for (const i of idx) for (let j = 0; j < dim; j++) acc[j] += embs[i][j];
+    return acc.map((x) => x / (idx.length || 1));
+  });
 }
 
 const unit = (v: number[]) => { let n = 0; for (const x of v) n += x * x; n = Math.sqrt(n) || 1; return v.map((x) => x / n); };

@@ -17,6 +17,7 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
   console.error(`\n[1/5] discovering axes from ${docs.length} docs…`);
   const { axes, realDims, projections } = await discoverAxes(embeddings, docs.map((d) => d.title.slice(0, 64)), { llm });
   console.error(`  ${axes.length} crisp axes (${realDims} real dims)`);
+  if (docs.length < 50) console.error(`  ⚠ small corpus (${docs.length} docs) — PCA axes get noisy below ~50-100 docs; the distinctness guard below will show it`);
 
   console.error(`[2/5] carding ${docs.length} docs over ${axes.length} axes…`);
   let n = 0;
