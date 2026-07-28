@@ -49,7 +49,7 @@ A **polished, maintained OSS package**, telescope included. Done when, *measured
 **4 · Delight / included differentiator**
 - ✅ `eid-ugn6` — frontier telescope: data (S2 edges/impact/ranked, live-verified) + ghosts (verified) + viewer (rings/edges toggles, QA’d) + `--frontier` wiring. The differentiator, done.
 
-**Post-v1** (off the critical path): deck/spectrum readers, `eid-65ub` perf, `eid-dr7o` ✅ orbit crash.
+**Post-v1** (off the critical path): deck/spectrum readers, `eid-65ub` ✅ perf (batched embed), `eid-dr7o` ✅ orbit crash.
 
 ## The standing loop — keep it honest, keep it improving
 
