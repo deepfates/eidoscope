@@ -34,8 +34,8 @@ export function loadFolder(dir: string, opts: { limit?: number; minChars?: numbe
   return opts.limit ? docs.slice(0, opts.limit) : docs;
 }
 
-const FIX = "/Users/deepfates/Hacking/readwise/triangulation/runs/main";
-const MD = "/Users/deepfates/Hacking/readwise/markdown-export";
+const FIX = process.env.EIDOSCOPE_FIXTURE ?? "/Users/deepfates/Hacking/readwise/triangulation/runs/main";
+const MD = process.env.EIDOSCOPE_FIXTURE_MD ?? "/Users/deepfates/Hacking/readwise/markdown-export";
 
 const strip = (raw: string) =>
   raw.split(/\n---\n/).slice(1).join("\n")

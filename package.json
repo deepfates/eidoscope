@@ -27,5 +27,33 @@
   "devDependencies": {
     "@types/bun": "^1.3.14",
     "playwright": "^1.62.0"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "ROADMAP.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deepfates/eidoscope.git"
+  },
+  "homepage": "https://github.com/deepfates/eidoscope#readme",
+  "bugs": "https://github.com/deepfates/eidoscope/issues",
+  "keywords": [
+    "embeddings",
+    "corpus",
+    "cartography",
+    "visualization",
+    "llm",
+    "concept-bottleneck",
+    "semantic-map",
+    "interpretability",
+    "ax",
+    "dspy",
+    "readwise"
+  ],
+  "engines": {
+    "bun": ">=1.0"
   }
 }
