@@ -11,8 +11,9 @@ export type Card = { id: string; title: string; cat?: string; date?: number; cor
 export const axesPrompt = (axes: Axis[]) =>
   axes.map((a, i) => `${i + 1}. ${a.name}: low="${a.pole_low}" high="${a.pole_high}"`).join("\n");
 
-export async function cardCorpus(docs: Doc[], axes: Axis[], opts: { llm?: any; concurrency?: number; excerptChars?: number; onProgress?: (n: number) => void } = {}): Promise<Card[]> {
+export async function cardCorpus(docs: Doc[], axes: Axis[], opts: { llm?: any; sig?: any; concurrency?: number; excerptChars?: number; onProgress?: (n: number) => void } = {}): Promise<Card[]> {
   const llm = opts.llm ?? provider();
+  const sig = opts.sig ?? deriveCard;
   const conc = opts.concurrency ?? 12, cut = opts.excerptChars ?? 7000;
   const corpusAxes = axesPrompt(axes);
   const out: Card[] = [], q = [...docs];
@@ -21,7 +22,7 @@ export async function cardCorpus(docs: Doc[], axes: Axis[], opts: { llm?: any; c
     while (q.length) {
       const d = q.pop()!;
       try {
-        const c: any = await deriveCard.forward(llm, { documentTitle: d.title, documentBody: d.body.slice(0, cut), corpusAxes });
+        const c: any = await sig.forward(llm, { documentTitle: d.title, documentBody: d.body.slice(0, cut), corpusAxes });
         const ax: Record<string, { score: number; note: string }> = {};
         axes.forEach((a, i) => { ax[a.key] = { score: Number(c.axisScores?.[i] ?? 50), note: String(c.axisNotes?.[i] ?? "") }; });
         out.push({ id: d.id, title: d.title, cat: d.cat, date: d.date, core: String(c.coreSummary ?? ""), axes: ax });
