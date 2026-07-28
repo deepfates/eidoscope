@@ -47,7 +47,7 @@ A **polished, maintained OSS package**, telescope included. Done when, *measured
 - ✅ `eid-qesa` — CI: tests + typecheck on push.
 
 **4 · Delight / included differentiator**
-- ☐ `eid-ugn6` — frontier telescope (Semantic Scholar citation ghosts). *In v1 scope.*
+- ◑ `eid-ugn6` — frontier telescope: ✅ data layer (S2 edges/impact/ranked frontier, verified live); ☐ viewer ghosts+edges. *In v1 scope.*
 
 **Post-v1** (off the critical path): deck/spectrum readers, `eid-65ub` perf, `eid-dr7o` ✅ orbit crash.
 
