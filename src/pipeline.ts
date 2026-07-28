@@ -7,11 +7,12 @@ import { provider } from "./provider.ts";
 import { renderHTML, type MapData } from "./render.ts";
 import { trajectory } from "./trajectory.ts";
 import { scoreRedundancy } from "./redundancy.ts";
+import { fetchFrontier, buildGhosts } from "./frontier.ts";
 import { loadFixture, type Doc } from "./corpus.ts";
 
 // The full instrument, end to end: docs (+embeddings) -> discover axes -> card -> embed cards ->
 // project + cluster -> name regions -> deck.jsonl + map-data.json + eidoscope.html.
-export async function run(docs: Doc[], embeddings: number[][]) {
+export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?: boolean } = {}) {
   const llm = provider();
   console.error(`\n[1/5] discovering axes from ${docs.length} docs…`);
   const { axes, realDims } = await discoverAxes(embeddings, docs.map((d) => d.title.slice(0, 64)), { llm });
@@ -45,6 +46,16 @@ export async function run(docs: Doc[], embeddings: number[][]) {
     scores: Object.fromEntries(axes.map((a) => [a.key, deck.map((c) => c.axes[a.key]?.score ?? 50)])),
     xy, xyz, cluster, k, hub, nbr, clusters,
   };
+  if (opts.frontier) {
+    console.error(`[frontier] telescope — Semantic Scholar citations…`);
+    const fr = await fetchFrontier(docs, { cacheFile: "s2-cache.json" });
+    D.cite = fr.cite; D.citec = fr.citec;
+    if (fr.corpusArxiv) {
+      const nEdges = fr.cite.reduce((a, e) => a + e.length, 0);
+      D.ghosts = await buildGhosts(fr.ranked, D.axes.map((a) => ({ pc: 0, var: 0, coherence: 5, key: a.key, name: a.name, pole_low: a.low, pole_high: a.high })), xy, embs, { topN: 80, cacheFile: "s2-abs-cache.json" });
+      console.error(`  ${fr.corpusArxiv} arxiv docs · ${nEdges} citation edges · ${fr.ranked.length} frontier papers · ${D.ghosts.length} ghosts placed`);
+    } else console.error(`  no arxiv ids in corpus — frontier skipped (clean no-op)`);
+  }
   writeFileSync("map-data.json", JSON.stringify(D));
   writeFileSync("eidoscope.html", renderHTML(D));
   // honest-measurement guard: are the discovered axes actually distinct lenses?

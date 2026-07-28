@@ -11,6 +11,8 @@ export type MapData = {
   scores: Record<string, number[]>;
   xy: number[][]; xyz: number[][]; cluster: number[]; k: number; hub: number[]; nbr: number[][];
   clusters: { c: number; n: number; label: string; cx: number; cy: number }[];
+  cite?: number[][]; citec?: number[];  // intra-corpus citation edges + impact (frontier telescope)
+  ghosts?: { title: string; arxiv: string; url: string; n: number; core: string; xy: [number, number]; sim: number }[];
 };
 
 export function renderHTML(D: MapData): string {
@@ -19,7 +21,7 @@ export function renderHTML(D: MapData): string {
     xy: D.xy[i], xyz: D.xyz[i], notes: D.notes[i] || {}, hub: D.hub[i] || 0, nbr: D.nbr[i] || [],
     sc: Object.fromEntries(D.axes.map((a) => [a.key, D.scores[a.key]?.[i] ?? 50])),
   }));
-  const payload = JSON.stringify({ nodes, axes: D.axes, k: D.k, clusters: D.clusters }).replace(/<\//g, "<\\/");
+  const payload = JSON.stringify({ nodes, axes: D.axes, k: D.k, clusters: D.clusters, ghosts: D.ghosts || [], cite: D.cite || [], citec: D.citec || [] }).replace(/<\//g, "<\\/");
   return `<meta charset="utf-8"><title>eidoscope</title><meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
 :root{--bg:#0b0e15;--ink:#eef2fa;--soft:#93a1b7;--hair:#232c3c;--panel:#141b27;--sans:"Inter",system-ui,sans-serif;--mono:ui-monospace,Menlo,monospace}
@@ -52,11 +54,11 @@ select{flex:1;background:var(--bg);border:1px solid var(--hair);border-radius:7p
 <div class="ctl"><label>color</label><select id="color"></select></div><div class="ctl"><label>size</label><select id="size"></select></div>
 <input id="q" type="search" placeholder="find a card…"></div>
 <div id="legend" class="pane"></div><div id="tip" class="pane"></div><div id="detail" class="pane"></div><div id="deck" class="pane"></div>
-<div class="ctrl2"><button id="deckbtn">deck</button><button id="labels" class="on">labels</button><button id="reset">reset</button><button id="theme">theme</button></div>
+<div class="ctrl2"><button id="deckbtn">deck</button><button id="labels" class="on">labels</button>${(D.ghosts && D.ghosts.length) ? '<button id="frontbtn">frontier</button>' : ""}${(D.cite && D.cite.some((e) => e.length)) ? '<button id="citebtn">cite edges</button>' : ""}<button id="reset">reset</button><button id="theme">theme</button></div>
 <div id="axhint"></div><div id="count"></div>
 <script id="data" type="application/json">${payload}</script>
 <script>
-const D=JSON.parse(document.getElementById('data').textContent);const {nodes,axes,k,clusters}=D;const AX=Object.fromEntries(axes.map(a=>[a.key,a]));
+const D=JSON.parse(document.getElementById('data').textContent);const {nodes,axes,k,clusters}=D;const ghosts=D.ghosts||[],cite=D.cite||[];let frontierOn=false,citeOn=false,ghover=null;const AX=Object.fromEntries(axes.map(a=>[a.key,a]));
 const cv=document.getElementById('c'),ctx=cv.getContext('2d'),tip=document.getElementById('tip'),detailEl=document.getElementById('detail');
 let W,H,DPR=Math.min(2,devicePixelRatio||1),view={s:1,x:0,y:0},hover=null,focus=null,hlCluster=null,layout='mde',xKey=axes[0].key,yKey=axes[1].key,color='cluster',sizeBy='hub',showLabels=true,rotY=0.5,rotX=-0.3;
 const css=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();const base=()=>Math.min(W,H)*0.44;const maxHub=Math.max(1,...nodes.map(n=>n.hub));
@@ -64,7 +66,7 @@ const jit=(id,s)=>{let h=(2166136261^Math.imul(s,374761393))>>>0;for(let i=0;i<i
 function proj3(n){const[a,b,cc]=n.xyz,cy=Math.cos(rotY),sy=Math.sin(rotY);let x=a*cy+cc*sy,z=-a*sy+cc*cy;const cx=Math.cos(rotX),sx=Math.sin(rotX);let y=b*cx-z*sx;z=b*sx+z*cx;return[x,y,z]}
 function tgt(n){if(layout==='axes')return[(n.sc[xKey]-50)/50+jit(n.id,1),(n.sc[yKey]-50)/50+jit(n.id,7)];if(layout==='orbit'){const p=proj3(n);n.depth=Math.max(-1,Math.min(1,p[2]));return[p[0],p[1]]}return[n.xy[0],n.xy[1]]}
 nodes.forEach(n=>{n.cur=tgt(n).slice(0,2);n.tg=n.cur.slice()});function retarget(){nodes.forEach(n=>{const t=tgt(n);n.tg=[t[0],t[1]]})}
-const S=n=>{const b=base();return{x:W/2+n.cur[0]*b*view.s+view.x,y:H/2-n.cur[1]*b*view.s+view.y}};
+const S=n=>{const b=base();return{x:W/2+n.cur[0]*b*view.s+view.x,y:H/2-n.cur[1]*b*view.s+view.y}};const Sxy=(x,y)=>{const b=base();return{x:W/2+x*b*view.s+view.x,y:H/2-y*b*view.s+view.y}};const gmax=Math.max(1,...ghosts.map(g=>g.n));
 const HUES=[210,28,150,300,45,265,175,110,330,15,85,240,190,60,320,95];
 function colOf(n){if(color==='cluster')return'hsl('+HUES[n.cl%HUES.length]+' 62% 60%)';const t=Math.max(0,Math.min(1,(n.sc[color]||0)/100));return'hsl('+(250-t*250)+' 74% '+(40+t*22)+'%)'}
 function rad(n){let r=2.2;if(sizeBy==='hub')r=1.5+3.4*Math.sqrt(n.hub/maxHub);else if(sizeBy!=='uniform')r=1.5+3*Math.abs((n.sc[sizeBy]||50)-50)/50;if(layout==='orbit')r*=(0.6+0.5*((n.depth||0)+1)/2);return Math.max(0.2,r)}
@@ -72,7 +74,9 @@ function hull(pts){if(pts.length<3)return pts;pts=pts.slice().sort((a,b)=>a[0]-b
 function draw(){ctx.setTransform(DPR,0,0,DPR,0,0);ctx.clearRect(0,0,W,H);const q=(document.getElementById('q').value||'').toLowerCase();const fs=focus?new Set([focus.i,...focus.nbr]):null;
   if(hlCluster!=null){const h=hull(nodes.filter(n=>n.cl===hlCluster).map(n=>{const p=S(n);return[p.x,p.y]}));if(h.length>2){ctx.beginPath();ctx.moveTo(h[0][0],h[0][1]);for(const p of h)ctx.lineTo(p[0],p[1]);ctx.closePath();ctx.fillStyle='hsl('+HUES[hlCluster%HUES.length]+' 62% 60% / .1)';ctx.fill();ctx.strokeStyle='hsl('+HUES[hlCluster%HUES.length]+' 62% 60% / .5)';ctx.lineWidth=1.5;ctx.stroke()}}
   if(focus){const fp=S(focus);ctx.strokeStyle=css('--ink');ctx.globalAlpha=.32;ctx.lineWidth=1;for(const j of focus.nbr){const p=S(nodes[j]);ctx.beginPath();ctx.moveTo(fp.x,fp.y);ctx.lineTo(p.x,p.y);ctx.stroke()}ctx.globalAlpha=1}
+  if(citeOn&&layout==='mde'){ctx.strokeStyle=css('--soft');ctx.globalAlpha=.13;ctx.lineWidth=.6;for(let i=0;i<cite.length;i++){const a=S(nodes[i]);for(const j of cite[i]){const b=S(nodes[j]);ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke()}}ctx.globalAlpha=1}
   for(const n of nodes){const p=S(n);if(p.x<-8||p.x>W+8||p.y<-8||p.y>H+8)continue;let al=layout==='orbit'?0.4+0.55*((n.depth||0)+1)/2:0.9;if(q&&!(n.t.toLowerCase().includes(q)||n.core.toLowerCase().includes(q)))al=.05;if(fs&&!fs.has(n.i))al*=.12;if(hlCluster!=null&&n.cl!==hlCluster)al*=.14;ctx.globalAlpha=al;ctx.fillStyle=colOf(n);ctx.beginPath();ctx.arc(p.x,p.y,rad(n),0,7);ctx.fill()}ctx.globalAlpha=1;
+  if(frontierOn&&layout==='mde'){for(const g of ghosts){const p=Sxy(g.xy[0],g.xy[1]);if(p.x<-8||p.x>W+8||p.y<-8||p.y>H+8)continue;const r=2+3*Math.sqrt(g.n/gmax);ctx.strokeStyle=g===ghover?css('--ink'):css('--soft');ctx.globalAlpha=g===ghover?1:.72;ctx.lineWidth=g===ghover?1.8:1.2;ctx.beginPath();ctx.arc(p.x,p.y,r,0,7);ctx.stroke()}ctx.globalAlpha=1}
   for(const h of[hover,focus]){if(h){const p=S(h);ctx.strokeStyle=css('--ink');ctx.lineWidth=1.8;ctx.beginPath();ctx.arc(p.x,p.y,rad(h)+3,0,7);ctx.stroke()}}
   if(showLabels&&color==='cluster'&&hlCluster==null){const cen={};for(const n of nodes){(cen[n.cl]=cen[n.cl]||[0,0,0]);cen[n.cl][0]+=n.cur[0];cen[n.cl][1]+=n.cur[1];cen[n.cl][2]++}ctx.textAlign='center';ctx.font='700 12px var(--sans)';for(const c of clusters){const g=cen[c.c];if(!g)continue;const px=W/2+(g[0]/g[2])*base()*view.s+view.x,py=H/2-(g[1]/g[2])*base()*view.s+view.y;ctx.fillStyle=css('--bg');ctx.globalAlpha=.72;const tw=ctx.measureText(c.label).width;ctx.fillRect(px-tw/2-5,py-9,tw+10,17);ctx.globalAlpha=1;ctx.fillStyle='hsl('+HUES[c.c%HUES.length]+' 62% 62%)';ctx.fillText(c.label,px,py+3)}}
   document.getElementById('count').textContent=nodes.length+' cards · '+layout+(sizeBy!=='uniform'?' · size='+sizeBy:'');
@@ -80,12 +84,13 @@ function draw(){ctx.setTransform(DPR,0,0,DPR,0,0);ctx.clearRect(0,0,W,H);const q
 let raf=null;function tick(){let m=false;for(const n of nodes)for(let d=0;d<2;d++){const df=n.tg[d]-n.cur[d];if(Math.abs(df)>1e-4){n.cur[d]+=df*.16;m=true}else n.cur[d]=n.tg[d]}draw();if(m)raf=requestAnimationFrame(tick);else raf=null}
 function relayout(){retarget();if(!raf)raf=requestAnimationFrame(tick)}
 function pick(mx,my){let b=null,bd=1e9;for(const n of nodes){const p=S(n);const d=(p.x-mx)**2+(p.y-my)**2;const rr=(rad(n)+4)**2;if(d<rr&&d<bd){bd=d;b=n}}return b}
+function pickG(mx,my){if(!frontierOn||layout!=='mde')return null;let b=null,bd=1e9;for(const g of ghosts){const p=Sxy(g.xy[0],g.xy[1]);const r=2+3*Math.sqrt(g.n/gmax)+5;const d=(p.x-mx)**2+(p.y-my)**2;if(d<r*r&&d<bd){bd=d;b=g}}return b}
 function tipHTML(n){const top=axes.map(a=>({a,s:n.sc[a.key],note:n.notes[a.key]})).filter(x=>x.note).sort((x,y)=>Math.abs(y.s-50)-Math.abs(x.s-50)).slice(0,4);return'<div class="t">'+esc(n.t)+'</div><div class="co">'+esc(n.core)+'</div><div class="f">hub '+n.hub+' · '+top.map(x=>esc(x.a.name)+' '+x.s).join(' · ')+'</div>'}
 function showDetail(n){focus=n;detailEl.classList.add('on');detailEl.innerHTML='<div class="x" onclick="clearFocus()">✕</div><div class="t">'+esc(n.t)+'</div><div class="co">'+esc(n.core)+'</div><h4>nearest '+n.nbr.length+'</h4>'+n.nbr.map(j=>'<div class="nb" onclick="focusIdx('+j+')">→ '+esc(nodes[j].t)+'</div>').join('');draw()}
 window.clearFocus=()=>{focus=null;detailEl.classList.remove('on');draw()};window.focusIdx=j=>showDetail(nodes[j]);
 let drag=null;cv.addEventListener('mousedown',e=>{drag={x:e.clientX,y:e.clientY,vx:view.x,vy:view.y,ry:rotY,rx:rotX,m:0};cv.classList.add('drag')});
-addEventListener('mouseup',e=>{if(drag&&drag.m<4){const n=pick(e.clientX,e.clientY);if(n)showDetail(n);else clearFocus()}drag=null;cv.classList.remove('drag')});
-addEventListener('mousemove',e=>{if(drag){drag.m+=Math.abs(e.movementX)+Math.abs(e.movementY);if(layout==='orbit'){rotY=drag.ry+(e.clientX-drag.x)*.008;rotX=drag.rx+(e.clientY-drag.y)*.008;relayout()}else{view.x=drag.vx+e.clientX-drag.x;view.y=drag.vy+e.clientY-drag.y;draw()}return}const n=pick(e.clientX,e.clientY);if(n!==hover){hover=n;draw();if(n)tip.innerHTML=tipHTML(n)}if(n){tip.style.opacity=1;tip.style.left=Math.min(e.clientX+14,W-tip.offsetWidth-8)+'px';tip.style.top=Math.min(e.clientY+14,H-tip.offsetHeight-8)+'px'}else tip.style.opacity=0});
+addEventListener('mouseup',e=>{if(drag&&drag.m<4){const g=pickG(e.clientX,e.clientY);if(g){window.open(g.url,'_blank')}else{const n=pick(e.clientX,e.clientY);if(n)showDetail(n);else clearFocus()}}drag=null;cv.classList.remove('drag')});
+addEventListener('mousemove',e=>{if(drag){drag.m+=Math.abs(e.movementX)+Math.abs(e.movementY);if(layout==='orbit'){rotY=drag.ry+(e.clientX-drag.x)*.008;rotX=drag.rx+(e.clientY-drag.y)*.008;relayout()}else{view.x=drag.vx+e.clientX-drag.x;view.y=drag.vy+e.clientY-drag.y;draw()}return}const g=pickG(e.clientX,e.clientY);const n=g?null:pick(e.clientX,e.clientY);if(g!==ghover){ghover=g;draw()}if(n!==hover){hover=n;draw();if(n)tip.innerHTML=tipHTML(n)}if(g)tip.innerHTML='<div class="t">'+esc(g.title)+'</div><div class="co">'+esc(g.core)+'</div><div class="f">cited by '+g.n+' of your papers · click → arxiv</div>';if(g||n){tip.style.opacity=1;tip.style.left=Math.min(e.clientX+14,W-tip.offsetWidth-8)+'px';tip.style.top=Math.min(e.clientY+14,H-tip.offsetHeight-8)+'px'}else tip.style.opacity=0});
 cv.addEventListener('wheel',e=>{e.preventDefault();const f=Math.exp(-e.deltaY*.0015),ns=Math.max(.4,Math.min(22,view.s*f));const wx=(e.clientX-W/2-view.x)/view.s,wy=(e.clientY-H/2-view.y)/view.s;view.s=ns;view.x=e.clientX-W/2-wx*ns;view.y=e.clientY-H/2-wy*ns;draw()},{passive:false});
 function esc(s){return(s||'').toString().replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
 const xax=document.getElementById('xax'),yax=document.getElementById('yax');axes.forEach(a=>{xax.add(new Option(a.name,a.key));yax.add(new Option(a.name,a.key))});xax.value=xKey;yax.value=yKey;
@@ -96,6 +101,7 @@ const ssel=document.getElementById('size');ssel.add(new Option('uniform','unifor
 function buildLegend(){const L=document.getElementById('legend');let h='';if(color==='cluster'){h='<div style="font-family:var(--mono);font-size:10px;color:var(--soft);margin-bottom:5px">'+k+' REGIONS · hover to isolate</div>';for(const c of clusters)h+='<div class="r" data-cl="'+c.c+'"><span class="sw" style="background:hsl('+HUES[c.c%HUES.length]+' 62% 60%)"></span><span>'+esc(c.label)+' <span style="color:var(--soft)">'+c.n+'</span></span></div>'}else{const a=AX[color];h='<div style="font-family:var(--mono);font-size:10px;color:var(--soft);margin-bottom:5px">'+esc(a.name.toUpperCase())+'</div><div class="r"><span class="sw" style="background:hsl(250 74% 40%)"></span>'+esc(a.low)+'</div><div class="r"><span class="sw" style="background:hsl(0 74% 60%)"></span>'+esc(a.high)+'</div>'}L.innerHTML=h;L.querySelectorAll('[data-cl]').forEach(el=>{el.onmouseenter=()=>{hlCluster=+el.dataset.cl;draw()};el.onmouseleave=()=>{hlCluster=null;draw()}})}
 document.getElementById('q').oninput=()=>draw();document.getElementById('labels').onclick=e=>{showLabels=!showLabels;e.target.classList.toggle('on',showLabels);draw()};
 document.getElementById('reset').onclick=()=>{view={s:1,x:0,y:0};rotY=.5;rotX=-.3;clearFocus();relayout()};document.getElementById('theme').onclick=()=>{const r=document.documentElement;r.setAttribute('data-theme',r.getAttribute('data-theme')==='light'?'dark':'light');draw()};
+const fb=document.getElementById('frontbtn');if(fb)fb.onclick=e=>{frontierOn=!frontierOn;e.target.classList.toggle('on',frontierOn);draw()};const cb=document.getElementById('citebtn');if(cb)cb.onclick=e=>{citeOn=!citeOn;e.target.classList.toggle('on',citeOn);draw()};
 addEventListener('resize',()=>{DPR=Math.min(2,devicePixelRatio||1);W=innerWidth;H=innerHeight;cv.width=W*DPR;cv.height=H*DPR;draw()});
 // deck-view: a READER, not a wall. title + core + region + the 3 strongest axis placements.
 // sort by influence or any axis (sorting by an axis makes it a readable spectrum). filterable.

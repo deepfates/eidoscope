@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 // eidoscope <folder> [--limit N]     run on any folder of .md/.txt files
 // eidoscope --fixture                run on the readwise fixture (precomputed embeddings)
+// eidoscope <folder> --frontier      also pull the Semantic Scholar citation frontier (arxiv corpora)
 import { loadFolder, loadFixture, type Doc } from "./corpus.ts";
 import { embedDocs } from "./map.ts";
 import { run } from "./pipeline.ts";
@@ -21,4 +22,4 @@ if (args.includes("--fixture")) {
   console.error(`loaded ${docs.length} docs from ${dir}; embedding full text (local MiniLM)…`);
   embeddings = await embedDocs(docs);
 }
-await run(docs, embeddings);
+await run(docs, embeddings, { frontier: args.includes("--frontier") });
