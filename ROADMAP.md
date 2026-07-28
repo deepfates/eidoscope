@@ -33,8 +33,10 @@ A **polished, maintained OSS package**, telescope included. Done when, *measured
 - ☐ `eid-ileo` — deep-axis fidelity (still ~0.36) + make the redundancy/fidelity check a real guard.
 
 **2 · Standalone & installable**
-- ☐ `eid-8hv4` — decouple from curare: use `@huggingface/transformers` + `ml-kmeans` directly,
-  real config, drop fixture/absolute paths. *Blocks the whole ship path.*
+- ✅ `eid-8hv4` — decoupled from curare: `@huggingface/transformers` + `ml-kmeans` used directly,
+  config drops the curare path + `.env` fallback. **Gold-matched to curare** (embeddings cosine
+  1.000000, clustering k+assignments identical) and a from-scratch folder run verified end-to-end.
+  `bce2059`. *(Remaining before publish: gate the dev-only fixture absolute paths — folded into ship.)*
 - ☐ `eid-l7z4` — prove + document the local path (any OpenAI-compatible server; LM Studio, llama.cpp…).
 - ☐ `eid-b2a9` — resumable card runs (cache by id) so a long run survives a crash.
 
