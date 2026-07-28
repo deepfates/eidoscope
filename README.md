@@ -43,14 +43,40 @@ Built on **curare** (local embeddings) and **[Ax](https://github.com/ax-llm/ax)*
 TypeScript — the gorm signatures, with validation, retries, traces, and any OpenAI-compatible
 provider incl. Ollama, so cloud or local is one line of config).
 
-## Status
-
-v0. Being ported from the working prototype in `../../../readwise/triangulation` (its
-`runs/main` deck is the golden fixture we build against). Plan + dependencies tracked in `tk`
-(epic `eid-vd9d`). Optimization — tuning the card signature so its geometry matches the measured
-structure — comes *after* it reproduces the fixture.
+## Use it
 
 ```sh
 bun install
-bun run check:card    # prove one card works as an Ax signature
+bun run src/cli.ts <folder>          # any folder of .md/.txt -> deck.jsonl + map-data.json + eidoscope.html (+ STATE.md if dated)
+bun run src/cli.ts <folder> --limit 200
+bun run src/cli.ts --fixture         # the readwise fixture (precomputed embeddings)
+open eidoscope.html
 ```
+
+Provider is any OpenAI-compatible endpoint (env-overridable): `EIDOSCOPE_API_URL`
+(default OpenRouter; e.g. `http://localhost:11434/v1` for local Ollama), `EIDOSCOPE_MODEL`,
+`OPENROUTER_API_KEY`. curare's built `dist/` is expected next door (`EIDOSCOPE_CURARE` to override).
+
+## In the viewer
+
+- **layout**: neighbor map (MDE) · **axis scatter** (position by any two discovered axes) · **3D orbit**
+- **color** by region or any axis · **size** by influence (hub-degree) · click a card → its neighbors
+- **deck**: the cards as a reader — title, core, region, and the 3 axes each most commits to;
+  sort by an axis to read the corpus as a spectrum
+- **trajectory** (`STATE.md`): where the corpus's attention moved over time (needs dated docs)
+
+## Develop / verify
+
+```sh
+bun test          # deterministic contract tests (loadFolder, trajectory, deck, cardText)
+bunx tsc --noEmit # typecheck
+bun run storybook.ts   # drive the viewer in headless Chromium -> story/*.png + a shareable gallery.html
+```
+
+## Status
+
+v0 — core + generic loader + deck-view + trajectory, ported from the prototype in
+`../../../readwise/triangulation` (its `runs/main` deck is the golden fixture, reproduced). Plan and
+open work tracked in `tk` (epic `eid-vd9d`): remaining are the frontier plugin (citation telescope),
+publish-decoupling (curare as a real dep, drop fixture paths), resumable card runs, and the
+optimization pass (tuning the card signature so its geometry matches the measured structure).

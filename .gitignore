@@ -9,3 +9,6 @@ eidoscope.html
 eidoscope-fixture.html
 .loader-ticket
 .DS_Store
+shot-*.png
+story/
+gallery.html
