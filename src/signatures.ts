@@ -24,6 +24,17 @@ export const labelAxis = ax(`
   highPoleLabel:string "what the high group is, <= 8 words"
 `);
 
+// Name ALL the axes in ONE call, so the model sees the whole set and can make them DISTINCT
+// instead of independently rediscovering the dominant contrast on every axis. Same discipline —
+// it may only name poles it's shown, never invent axes — but with global context.
+export const labelAxes = ax(`
+  axesPoles:string "numbered list of orthogonal statistical axes; each shows the document titles at its HIGH pole and its LOW pole" ->
+  axisNames:string[] "one short name per axis, in order — each a DISTINCT contrast; the axes are orthogonal so no two should mean the same thing; name at most one axis around 'technical vs theoretical', and for every other axis give the secondary contrast that separates it FROM the others",
+  lowPoleLabels:string[] "what each axis's low group is, <= 6 words, in order",
+  highPoleLabels:string[] "what each axis's high group is, <= 6 words, in order",
+  coherenceScores:number[] "1-5 per axis, in order: 5=a crisp single interpretable contrast, 1=incoherent/noise"
+`);
+
 // Name a cluster / region from a sample of its most typical members.
 export const nameCluster = ax(`
   memberSamples:string "titles and summaries of documents in one region" ->

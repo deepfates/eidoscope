@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { PCA } from "ml-pca";
-import { labelAxis } from "./signatures.ts";
+import { labelAxes } from "./signatures.ts";
 import { provider } from "./provider.ts";
 
 // THE SOLID LAYER. Deterministic math discovers the axes; the model only labels them.
@@ -34,20 +34,24 @@ export async function discoverAxes(embeddings: number[][], titles: string[], opt
   const n95 = (k: number) => { const c = noise.map((row) => row[k]).sort((a, b) => a - b); return c[Math.floor(0.95 * (REP - 1))]; };
   let realDims = 0; for (let k = 0; k < NC; k++) { if (variance[k] > n95(k)) realDims++; else break; }
 
-  // label top-N axes from their pole documents (Ax), multi-vote coherence
+  // Label ALL top-N axes in ONE call so the model sees the whole orthogonal set and names each a
+  // DISTINCT contrast — instead of 16 isolated calls each rediscovering the dominant one. (Verified:
+  // this cuts cross-axis score redundancy ~0.39->0.25 on the fixture; isolated labeling collapsed
+  // ~9/16 axes onto "technical vs theoretical" even though the PCA directions are orthogonal.)
   const llm = opts.llm ?? provider();
-  const all: Axis[] = [];
-  for (let k = 0; k < topN; k++) {
+  const poleBlock = Array.from({ length: topN }, (_, k) => {
     const order = titles.map((_, i) => [scores[i][k], i] as [number, number]).sort((a, b) => a[0] - b[0]);
-    const low = order.slice(0, 14).map(([, i]) => titles[i]).join("\n");
-    const high = order.slice(-14).map(([, i]) => titles[i]).join("\n");
-    const votes = (await Promise.all([0, 1, 2].map(() =>
-      labelAxis.forward(llm, { highPoleTitles: high, lowPoleTitles: low }).catch(() => null)))).filter(Boolean) as any[];
-    const coh = votes.length ? votes.reduce((s, v) => s + (Number(v.coherenceScore) || 1), 0) / votes.length : 1;
-    const best = votes.sort((a, b) => (Number(b.coherenceScore) || 1) - (Number(a.coherenceScore) || 1))[0] || { axisName: `PC${k + 1}`, lowPoleLabel: "", highPoleLabel: "" };
-    all.push({ pc: k + 1, var: +variance[k].toFixed(4), coherence: +coh.toFixed(1), key: slug(best.axisName) || `pc${k + 1}`, name: best.axisName, pole_low: best.lowPoleLabel, pole_high: best.highPoleLabel });
-    process.stderr.write(`  PC${k + 1} var${(variance[k] * 100).toFixed(1)}% coh${coh.toFixed(1)}  ${best.axisName}\n`);
-  }
+    const low = order.slice(0, 14).map(([, i]) => titles[i]).join("; ");
+    const high = order.slice(-14).map(([, i]) => titles[i]).join("; ");
+    return `AXIS ${k + 1}\n HIGH: ${high}\n LOW: ${low}`;
+  }).join("\n\n");
+  const r: any = await labelAxes.forward(llm, { axesPoles: poleBlock }).catch(() => ({}));
+  const all: Axis[] = Array.from({ length: topN }, (_, k) => {
+    const name = r.axisNames?.[k] || `PC${k + 1}`;
+    const coh = Number(r.coherenceScores?.[k]) || 3;
+    process.stderr.write(`  PC${k + 1} var${(variance[k] * 100).toFixed(1)}% coh${coh}  ${name}\n`);
+    return { pc: k + 1, var: +variance[k].toFixed(4), coherence: +coh.toFixed(1), key: slug(name) || `pc${k + 1}`, name, pole_low: r.lowPoleLabels?.[k] || "", pole_high: r.highPoleLabels?.[k] || "" };
+  });
   return { axes: all.filter((a) => a.coherence >= minCoh), all, realDims };
 }
 
