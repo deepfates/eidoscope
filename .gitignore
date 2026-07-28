@@ -13,3 +13,4 @@ shot-*.png
 story/
 gallery.html
 *.log
+deck-cache.jsonl

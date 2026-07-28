@@ -1,4 +1,4 @@
-import { writeFileSync } from "node:fs";
+import { writeFileSync, appendFileSync, readFileSync, existsSync } from "node:fs";
 import { deriveCard } from "./signatures.ts";
 import { provider } from "./provider.ts";
 import type { Axis } from "./axes.ts";
@@ -11,13 +11,31 @@ export type Card = { id: string; title: string; cat?: string; date?: number; cor
 export const axesPrompt = (axes: Axis[]) =>
   axes.map((a, i) => `${i + 1}. ${a.name}: low="${a.pole_low}" high="${a.pole_high}"`).join("\n");
 
-export async function cardCorpus(docs: Doc[], axes: Axis[], opts: { llm?: any; sig?: any; concurrency?: number; excerptChars?: number; onProgress?: (n: number) => void } = {}): Promise<Card[]> {
+export async function cardCorpus(docs: Doc[], axes: Axis[], opts: { llm?: any; sig?: any; concurrency?: number; excerptChars?: number; cache?: string; onProgress?: (n: number) => void } = {}): Promise<Card[]> {
   const llm = opts.llm ?? provider();
   const sig = opts.sig ?? deriveCard;
   const conc = opts.concurrency ?? 12, cut = opts.excerptChars ?? 7000;
   const corpusAxes = axesPrompt(axes);
-  const out: Card[] = [], q = [...docs];
-  let done = 0;
+
+  // RESUMABLE: cards persist to a JSONL cache as they're produced (crash-safe, one card per line).
+  // A rerun reloads finished cards and only re-cards the missing ids — a long gorm run survives a
+  // hiccup instead of losing the whole deck. The cache is keyed to the axis set (header line); if
+  // the axes change, the stale cache is discarded (those cards no longer describe these axes).
+  const cacheFile = opts.cache;
+  const axesKey = axes.map((a) => a.key).join("|");
+  const done = new Map<string, Card>();
+  if (cacheFile) {
+    let ok = false;
+    if (existsSync(cacheFile)) {
+      const lines = readFileSync(cacheFile, "utf8").split("\n").filter(Boolean);
+      try { if (JSON.parse(lines[0] || "{}").axesKey === axesKey) { ok = true; for (const l of lines.slice(1)) { try { const c = JSON.parse(l) as Card; done.set(c.id, c); } catch {} } } } catch {}
+    }
+    if (!ok) writeFileSync(cacheFile, JSON.stringify({ axesKey }) + "\n"); // fresh / axes changed
+  }
+
+  const q = docs.filter((d) => !done.has(d.id));
+  const fresh: Card[] = [];
+  let n = done.size;
   async function worker() {
     while (q.length) {
       const d = q.pop()!;
@@ -25,13 +43,18 @@ export async function cardCorpus(docs: Doc[], axes: Axis[], opts: { llm?: any; s
         const c: any = await sig.forward(llm, { documentTitle: d.title, documentBody: d.body.slice(0, cut), corpusAxes });
         const ax: Record<string, { score: number; note: string }> = {};
         axes.forEach((a, i) => { ax[a.key] = { score: Number(c.axisScores?.[i] ?? 50), note: String(c.axisNotes?.[i] ?? "") }; });
-        out.push({ id: d.id, title: d.title, cat: d.cat, date: d.date, core: String(c.coreSummary ?? ""), axes: ax });
+        const card: Card = { id: d.id, title: d.title, cat: d.cat, date: d.date, core: String(c.coreSummary ?? ""), axes: ax };
+        fresh.push(card);
+        if (cacheFile) appendFileSync(cacheFile, JSON.stringify(card) + "\n"); // durable the moment it's made
       } catch { /* skip a failed card */ }
-      opts.onProgress?.(++done);
+      opts.onProgress?.(++n);
     }
   }
   await Promise.all(Array.from({ length: conc }, worker));
-  return out;
+
+  // return in docs order (reused + fresh), skipping any that failed on both this run and prior
+  const all = new Map(done); for (const c of fresh) all.set(c.id, c);
+  return docs.map((d) => all.get(d.id)).filter(Boolean) as Card[];
 }
 
 export const deckToJSONL = (cards: Card[]) => cards.map((c) => JSON.stringify(c)).join("\n") + "\n";

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { loadFolder } from "../src/corpus.ts";
 import { trajectory } from "../src/trajectory.ts";
-import { deckToJSONL, type Card } from "../src/card.ts";
+import { deckToJSONL, cardCorpus, type Card } from "../src/card.ts";
 import { cardText } from "../src/map.ts";
 
 // Deterministic contract tests — the pure pipeline surfaces. Fast, no LLM/network.
@@ -59,4 +59,33 @@ test("cardText: embeds the core plus every axis note (the de-noised text)", () =
   expect(t).toContain("The core.");
   expect(t).toContain("noteAlpha");
   expect(t).toContain("noteBeta");
+});
+
+test("cardCorpus: resumable — reuses cached cards, only cards missing ids, invalidates on axis change", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "eido-cache-"));
+  const cache = join(dir, "deck-cache.jsonl");
+  const axesA = [{ pc: 1, var: 0, coherence: 5, key: "a", name: "A", pole_low: "", pole_high: "" }] as any;
+  const docs = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `d${i}`, title: `T${i}`, body: "word ".repeat(50) }));
+  let calls = 0;
+  const sig = { forward: async () => { calls++; return { coreSummary: "c", axisScores: [50], axisNotes: ["n"] }; } };
+  const opts = { sig, cache, concurrency: 1, llm: {} };
+
+  const r1 = await cardCorpus(docs(3), axesA, opts);
+  expect(r1.length).toBe(3);
+  expect(calls).toBe(3); // all fresh
+
+  const r2 = await cardCorpus(docs(3), axesA, opts); // same docs+axes → all cached
+  expect(r2.length).toBe(3);
+  expect(calls).toBe(3); // no new LLM calls — survived "restart"
+
+  const r3 = await cardCorpus(docs(4), axesA, opts); // one new doc → only it is carded
+  expect(r3.length).toBe(4);
+  expect(calls).toBe(4);
+
+  const axesB = [{ pc: 1, var: 0, coherence: 5, key: "b", name: "B", pole_low: "", pole_high: "" }] as any;
+  const r4 = await cardCorpus(docs(2), axesB, opts); // axes changed → stale cache discarded → recard
+  expect(r4.length).toBe(2);
+  expect(calls).toBe(6);
+
+  rmSync(dir, { recursive: true, force: true });
 });

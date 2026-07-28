@@ -18,7 +18,7 @@ export async function run(docs: Doc[], embeddings: number[][]) {
 
   console.error(`[2/5] carding ${docs.length} docs over ${axes.length} axes…`);
   let n = 0;
-  const deck = await cardCorpus(docs, axes, { llm, concurrency: 12, onProgress: (d) => { if (++n % 100 === 0) process.stderr.write(`  ${n}/${docs.length}\r`); } });
+  const deck = await cardCorpus(docs, axes, { llm, concurrency: 12, cache: "deck-cache.jsonl", onProgress: (d) => { if (++n % 100 === 0) process.stderr.write(`  ${n}/${docs.length}\r`); } });
   writeFileSync("deck.jsonl", deckToJSONL(deck));
   console.error(`  ${deck.length} cards -> deck.jsonl`);
 
