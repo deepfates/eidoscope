@@ -30,7 +30,7 @@ A **polished, maintained OSS package**, telescope included. Done when, *measured
 
 **1 · Trustworthy core** (the moat)
 - ✅ Axis distinctness — one-call `labelAxes` (redundancy 0.39→0.25). `f5e1c3f`
-- ◑ `eid-ileo` — ✅ redundancy **guard** shipped (`src/redundancy.ts`, pipeline warn + `check:redundancy`
+- ✅ `eid-ileo` — redundancy guard + fidelity now reported every run + opt-in fidelity gate (validated: gate 0.3 → redundancy 0.27, fidelity 0.50). Deep-axis fidelity is corpus-bounded; measured not forced.
   CLI + test); ☐ deep-axis fidelity (still ~0.36) remains the harder half.
 
 **2 · Standalone & installable**
