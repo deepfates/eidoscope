@@ -6,6 +6,7 @@ import { nameCluster } from "./signatures.ts";
 import { provider } from "./provider.ts";
 import { renderHTML, type MapData } from "./render.ts";
 import { trajectory } from "./trajectory.ts";
+import { scoreRedundancy } from "./redundancy.ts";
 import { loadFixture, type Doc } from "./corpus.ts";
 
 // The full instrument, end to end: docs (+embeddings) -> discover axes -> card -> embed cards ->
@@ -46,6 +47,9 @@ export async function run(docs: Doc[], embeddings: number[][]) {
   };
   writeFileSync("map-data.json", JSON.stringify(D));
   writeFileSync("eidoscope.html", renderHTML(D));
+  // honest-measurement guard: are the discovered axes actually distinct lenses?
+  const rg = scoreRedundancy(D.scores);
+  console.error(`  axis distinctness: mean|r| ${rg.meanAbsR.toFixed(2)} ${rg.pass ? "✓" : `⚠ (>=0.3 — ${rg.strong} redundant pairs; axes overlap)`}`);
   const state = trajectory({ dates: deck.map((c) => c.date), cluster: D.cluster, scores: D.scores, axes: D.axes, clusters });
   if (state) writeFileSync("STATE.md", state);
   console.error(`\n✅ eidoscope.html — ${deck.length} cards, ${axes.length} axes, ${k} regions. deck.jsonl + map-data.json${state ? " + STATE.md" : ""} written.`);

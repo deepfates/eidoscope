@@ -10,7 +10,8 @@
     "start": "bun run src/cli.ts",
     "fixture": "bun run src/cli.ts --fixture",
     "test": "bun test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:redundancy": "bun run src/redundancy.ts"
   },
   "dependencies": {
     "@ax-llm/ax": "^23.0.5",

@@ -6,6 +6,7 @@ import { loadFolder } from "../src/corpus.ts";
 import { trajectory } from "../src/trajectory.ts";
 import { deckToJSONL, cardCorpus, type Card } from "../src/card.ts";
 import { cardText } from "../src/map.ts";
+import { scoreRedundancy } from "../src/redundancy.ts";
 
 // Deterministic contract tests — the pure pipeline surfaces. Fast, no LLM/network.
 // (The LLM stages take an injectable `llm`; a live smoke test is gated behind EIDOSCOPE_LIVE.)
@@ -59,6 +60,20 @@ test("cardText: embeds the core plus every axis note (the de-noised text)", () =
   expect(t).toContain("The core.");
   expect(t).toContain("noteAlpha");
   expect(t).toContain("noteBeta");
+});
+
+test("scoreRedundancy: flags collapsed axes, passes distinct ones", () => {
+  const a = Array.from({ length: 60 }, (_, i) => i);
+  const b = a.map((x) => 2 * x + 5);                       // perfectly correlated with a -> |r|=1
+  const c = a.map((i) => (i % 2 === 0 ? i : 60 - i));      // zigzag, low correlation with a
+  const collapsed = scoreRedundancy({ a, b, c });
+  const ab = collapsed.pairs.find((p) => (p.a === "a" && p.b === "b") || (p.a === "b" && p.b === "a"))!;
+  expect(Math.abs(ab.r)).toBeGreaterThan(0.99);            // a~b detected as redundant
+  expect(collapsed.strong).toBeGreaterThanOrEqual(1);
+  expect(collapsed.pass).toBe(false);                      // a duplicate axis fails the guard
+
+  const distinct = scoreRedundancy({ x: a, y: c, z: a.map((i) => (i * 7) % 11) });
+  expect(distinct.meanAbsR).toBeLessThan(collapsed.meanAbsR);
 });
 
 test("cardCorpus: resumable — reuses cached cards, only cards missing ids, invalidates on axis change", async () => {
