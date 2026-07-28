@@ -6,7 +6,7 @@ import { loadFolder } from "../src/corpus.ts";
 import { trajectory } from "../src/trajectory.ts";
 import { deckToJSONL, cardCorpus, type Card } from "../src/card.ts";
 import { cardText } from "../src/map.ts";
-import { scoreRedundancy } from "../src/redundancy.ts";
+import { scoreRedundancy, scoreFidelity } from "../src/redundancy.ts";
 import { docArxiv, fetchFrontier } from "../src/frontier.ts";
 
 // Deterministic contract tests — the pure pipeline surfaces. Fast, no LLM/network.
@@ -61,6 +61,17 @@ test("cardText: embeds the core plus every axis note (the de-noised text)", () =
   expect(t).toContain("The core.");
   expect(t).toContain("noteAlpha");
   expect(t).toContain("noteBeta");
+});
+
+test("scoreFidelity: high when a card-score tracks its PCA axis, low when it doesn't", () => {
+  const proj = Array.from({ length: 30 }, (_, i) => [i, (i * 7) % 13]);       // 2 PCA directions
+  const scores = { a: proj.map((p) => p[0] * 2 + 1), b: proj.map((_, i) => (i * 3) % 5) };
+  const f = scoreFidelity(scores, proj, { a: 0, b: 0 });                       // both vs PC0
+  const ra = Math.abs(f.perAxis.find((x) => x.key === "a")!.r);
+  const rb = Math.abs(f.perAxis.find((x) => x.key === "b")!.r);
+  expect(ra).toBeGreaterThan(0.99);   // a is a linear function of PC0 → tracks it
+  expect(rb).toBeLessThan(0.6);       // b is unrelated to PC0
+  expect(f.weak).toBeGreaterThanOrEqual(0);
 });
 
 test("frontier: docArxiv extracts ids; fetchFrontier no-ops cleanly without arxiv (no network)", async () => {

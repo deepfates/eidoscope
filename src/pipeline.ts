@@ -6,7 +6,7 @@ import { nameCluster } from "./signatures.ts";
 import { provider } from "./provider.ts";
 import { renderHTML, type MapData } from "./render.ts";
 import { trajectory } from "./trajectory.ts";
-import { scoreRedundancy } from "./redundancy.ts";
+import { scoreRedundancy, scoreFidelity } from "./redundancy.ts";
 import { fetchFrontier, buildGhosts } from "./frontier.ts";
 import { loadFixture, type Doc } from "./corpus.ts";
 
@@ -15,7 +15,7 @@ import { loadFixture, type Doc } from "./corpus.ts";
 export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?: boolean } = {}) {
   const llm = provider();
   console.error(`\n[1/5] discovering axes from ${docs.length} docs…`);
-  const { axes, realDims } = await discoverAxes(embeddings, docs.map((d) => d.title.slice(0, 64)), { llm });
+  const { axes, realDims, projections } = await discoverAxes(embeddings, docs.map((d) => d.title.slice(0, 64)), { llm });
   console.error(`  ${axes.length} crisp axes (${realDims} real dims)`);
 
   console.error(`[2/5] carding ${docs.length} docs over ${axes.length} axes…`);
@@ -46,6 +46,22 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
     scores: Object.fromEntries(axes.map((a) => [a.key, deck.map((c) => c.axes[a.key]?.score ?? 50)])),
     xy, xyz, cluster, k, hub, nbr, clusters,
   };
+  // honest-measurement: report redundancy + fidelity every run. Optional fidelity GATE drops axes
+  // the cards don't actually track (opt-in via EIDOSCOPE_FIDELITY_GATE — never silently nuke dims;
+  // validated: gating at ~0.3 cuts redundancy below target and lifts fidelity, at the cost of fewer axes).
+  const fg = scoreFidelity(D.scores, projections, Object.fromEntries(axes.map((a) => [a.key, a.pc - 1])));
+  const gate = Number(process.env.EIDOSCOPE_FIDELITY_GATE || 0);
+  if (gate > 0) {
+    const keep = new Set(fg.perAxis.filter((a) => Math.abs(a.r) >= gate).map((a) => a.key));
+    if (keep.size >= 2) {
+      D.axes = D.axes.filter((a) => keep.has(a.key));
+      for (const key of Object.keys(D.scores)) if (!keep.has(key)) delete D.scores[key];
+      D.notes = D.notes.map((o) => Object.fromEntries(Object.entries(o).filter(([key]) => keep.has(key))));
+      console.error(`  fidelity gate ${gate}: kept ${keep.size}/${fg.perAxis.length} axes the cards actually track`);
+    }
+  }
+  const rg = scoreRedundancy(D.scores);
+  console.error(`  axis distinctness: mean|r| ${rg.meanAbsR.toFixed(2)} ${rg.pass ? "✓" : `⚠ (>=0.3 — ${rg.strong} redundant pairs)`}  ·  fidelity to PCA ${fg.meanAbs.toFixed(2)}${fg.weak ? ` (${fg.weak} weak)` : ""}`);
   if (opts.frontier) {
     console.error(`[frontier] telescope — Semantic Scholar citations…`);
     const fr = await fetchFrontier(docs, { cacheFile: "s2-cache.json" });
@@ -58,9 +74,6 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
   }
   writeFileSync("map-data.json", JSON.stringify(D));
   writeFileSync("eidoscope.html", renderHTML(D));
-  // honest-measurement guard: are the discovered axes actually distinct lenses?
-  const rg = scoreRedundancy(D.scores);
-  console.error(`  axis distinctness: mean|r| ${rg.meanAbsR.toFixed(2)} ${rg.pass ? "✓" : `⚠ (>=0.3 — ${rg.strong} redundant pairs; axes overlap)`}`);
   const state = trajectory({ dates: deck.map((c) => c.date), cluster: D.cluster, scores: D.scores, axes: D.axes, clusters });
   if (state) writeFileSync("STATE.md", state);
   console.error(`\n✅ eidoscope.html — ${deck.length} cards, ${axes.length} axes, ${k} regions. deck.jsonl + map-data.json${state ? " + STATE.md" : ""} written.`);

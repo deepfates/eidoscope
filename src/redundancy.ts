@@ -21,6 +21,18 @@ export function scoreRedundancy(scores: Record<string, number[]>, threshold = 0.
   return { meanAbsR, strong: abs.filter((r) => r >= 0.5).length, pairs: pairs.slice().sort((x, y) => Math.abs(y.r) - Math.abs(x.r)).slice(0, 6), pass: meanAbsR < threshold };
 }
 
+// FIDELITY: does each axis's LLM card-score actually track its own PCA direction? The deep, fuzzy
+// PCs are hard for the model to read, so their scores drift from the direction they're named for.
+// Low fidelity = an axis the cards don't really measure — the complement of the redundancy check.
+export function scoreFidelity(scores: Record<string, number[]>, projections: number[][], pcByKey: Record<string, number>): { meanAbs: number; perAxis: { key: string; r: number }[]; weak: number } {
+  const perAxis = Object.keys(scores).map((key) => {
+    const pc = pcByKey[key];
+    const ok = pc >= 0 && projections.length && pc < projections[0].length;
+    return { key, r: ok ? corr(scores[key], projections.map((row) => row[pc])) : 0 };
+  });
+  return { meanAbs: mean(perAxis.map((a) => Math.abs(a.r))), perAxis, weak: perAxis.filter((a) => Math.abs(a.r) < 0.2).length };
+}
+
 // CLI: check a run's map-data.json (or the fixture). Nonzero exit if it fails the guard.
 if (import.meta.main) {
   const path = process.argv[2] || "map-data.json";

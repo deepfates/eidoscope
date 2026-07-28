@@ -52,7 +52,7 @@ export async function discoverAxes(embeddings: number[][], titles: string[], opt
     process.stderr.write(`  PC${k + 1} var${(variance[k] * 100).toFixed(1)}% coh${coh}  ${name}\n`);
     return { pc: k + 1, var: +variance[k].toFixed(4), coherence: +coh.toFixed(1), key: slug(name) || `pc${k + 1}`, name, pole_low: r.lowPoleLabels?.[k] || "", pole_high: r.highPoleLabels?.[k] || "" };
   });
-  return { axes: all.filter((a) => a.coherence >= minCoh), all, realDims };
+  return { axes: all.filter((a) => a.coherence >= minCoh), all, realDims, projections: scores };
 }
 
 // verify against the fixture
