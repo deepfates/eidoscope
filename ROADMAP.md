@@ -43,7 +43,7 @@ A **polished, maintained OSS package**, telescope included. Done when, *measured
 - ✅ `eid-b2a9` — resumable card runs (cache by id) so a long run survives a crash.
 
 **3 · Ship v1**
-- ☐ `eid-kgui` — stranger-README + example corpus + `npm publish`.
+- ◑ `eid-kgui` — ✅ LICENSE + package.json + example corpus (24-doc, runs OOTB) + small-corpus robustness + README; ☐ `npm publish` (awaits explicit go — irreversible outward action).
 - ✅ `eid-qesa` — CI: tests + typecheck on push.
 
 **4 · Delight / included differentiator**
