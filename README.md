@@ -73,10 +73,23 @@ bunx tsc --noEmit # typecheck
 bun run storybook.ts   # drive the viewer in headless Chromium -> story/*.png + a shareable gallery.html
 ```
 
-## Status
+## Status & how to resume
 
-v0 — core + generic loader + deck-view + trajectory, ported from the prototype in
-`../../../readwise/triangulation` (its `runs/main` deck is the golden fixture, reproduced). Plan and
-open work tracked in `tk` (epic `eid-vd9d`): remaining are the frontier plugin (citation telescope),
-publish-decoupling (curare as a real dep, drop fixture paths), resumable card runs, and the
-optimization pass (tuning the card signature so its geometry matches the measured structure).
+v0. Ported from the prototype in `../../../readwise/triangulation` (its `runs/main` deck is the
+golden fixture, reproduced). `bun test` + `tsc --noEmit` are green.
+
+**Done:** core pipeline (axes · card · embed · project · viewer), generic folder loader + CLI,
+deck-view reader, trajectory (`STATE.md`), faithfulness metric + baseline.
+
+**Validated (risk resolved):** the optimization bet. A `faithfulness` metric (does a card preserve
+its document's true full-text neighborhood) baselines at **27.8% / 38× random**; an A/B probe
+(`src/opt-probe.ts`) showed prompt changes move it ~3pts *and* a hand-tuned variant regressed — so
+an automated optimizer (Ax GEPA against the metric) is warranted. That's the next build.
+
+**Open work** — all tracked in `tk` (run `tk show eid-vd9d`, `tk ready`):
+- `eid-fd0e` — build the GEPA optimizer loop (de-risked; plan is on the ticket).
+- `eid-ugn6` — frontier plugin (Semantic Scholar citation telescope).
+- `eid-b2a9` — resumable card runs (cache by id).
+- `eid-8hv4` — publish-decoupling: use `@huggingface/transformers` + `ml-kmeans` directly instead
+  of the local curare checkout (curare is deliberately pre-release), and drop the fixture paths.
+- `eid-65ub` perf · `eid-dr7o` orbit-hint bug · `eid-qesa` CI.
