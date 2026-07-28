@@ -22,10 +22,11 @@ function shuffleColumns(X: number[][]): number[][] {
 const slug = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 40);
 
 export async function discoverAxes(embeddings: number[][], titles: string[], opts: { topN?: number; minCoherence?: number; llm?: any } = {}) {
-  const topN = opts.topN ?? 16, minCoh = opts.minCoherence ?? 4, NC = 60;
+  const minCoh = opts.minCoherence ?? 4, NC = 60;
   const X = embeddings.map(unit);
   const pca = new PCA(X, { center: true });
   const variance = pca.getExplainedVariance();
+  const topN = Math.min(opts.topN ?? 16, variance.length); // small corpora yield fewer PCs than 16
   const scores = pca.predict(X).to2DArray(); // n x components
 
   // parallel analysis -> honest #dims above the 95th-pct noise floor
@@ -52,7 +53,9 @@ export async function discoverAxes(embeddings: number[][], titles: string[], opt
     process.stderr.write(`  PC${k + 1} var${(variance[k] * 100).toFixed(1)}% coh${coh}  ${name}\n`);
     return { pc: k + 1, var: +variance[k].toFixed(4), coherence: +coh.toFixed(1), key: slug(name) || `pc${k + 1}`, name, pole_low: r.lowPoleLabels?.[k] || "", pole_high: r.highPoleLabels?.[k] || "" };
   });
-  return { axes: all.filter((a) => a.coherence >= minCoh), all, realDims, projections: scores };
+  const crisp = all.filter((a) => a.coherence >= minCoh);
+  // never return zero axes (small/ambiguous corpora fail the coherence bar) — fall back to the best few
+  return { axes: crisp.length ? crisp : all.slice(0, Math.min(6, all.length)), all, realDims, projections: scores };
 }
 
 // verify against the fixture

@@ -47,11 +47,16 @@ provider incl. local servers like LM Studio, so cloud or local is one line of co
 
 ```sh
 bun install
+bun run src/cli.ts example           # try it: a bundled 24-doc demo corpus across domains
 bun run src/cli.ts <folder>          # any folder of .md/.txt -> deck.jsonl + map-data.json + eidoscope.html (+ STATE.md if dated)
 bun run src/cli.ts <folder> --limit 200
-bun run src/cli.ts --fixture         # the readwise fixture (precomputed embeddings)
+bun run src/cli.ts <folder> --frontier   # also pull the citation frontier (arxiv corpora)
 open eidoscope.html
 ```
+
+Bigger is better: PCA and the axis-labeling need conceptual spread, so ~50+ documents give
+sharper axes. Small corpora still run (the tool degrades gracefully) but the axis guard will
+honestly flag when the axes overlap.
 
 Embeddings are local (`@huggingface/transformers`, MiniLM) — no key, no service. The LLM is any
 OpenAI-compatible endpoint (env-overridable): `EIDOSCOPE_API_URL` (default OpenRouter),

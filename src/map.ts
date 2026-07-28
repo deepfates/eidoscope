@@ -49,8 +49,13 @@ function normPct(arr: number[][], dims: number): number[][] {
 
 export async function projectAndCluster(embs: number[][]) {
   const X = embs.map(unit);
-  const xy = normPct(new UMAP({ nComponents: 2, nNeighbors: 15, minDist: 0.15 }).fit(X), 2);
-  const xyz = normPct(new UMAP({ nComponents: 3, nNeighbors: 15, minDist: 0.15 }).fit(X), 3);
+  if (X.length < 5) { // too few points for UMAP/clustering — lay them on a ring so the tool still runs
+    const xy = X.map((_, i) => [Math.cos((2 * Math.PI * i) / X.length) * 0.6, Math.sin((2 * Math.PI * i) / X.length) * 0.6] as number[]);
+    return { xy, xyz: xy.map((p) => [p[0], p[1], 0]), cluster: X.map(() => 0), k: 1, hub: X.map(() => 0), nbr: X.map(() => [] as number[]) };
+  }
+  const nn = Math.max(2, Math.min(15, X.length - 1)); // small corpora have fewer points than neighbors
+  const xy = normPct(new UMAP({ nComponents: 2, nNeighbors: nn, minDist: 0.15 }).fit(X), 2);
+  const xyz = normPct(new UMAP({ nComponents: 3, nNeighbors: nn, minDist: 0.15 }).fit(X), 3);
   const kMax = Math.max(2, Math.min(60, Math.floor(X.length / 4)));  // k must stay < #points
   const k = X.length < 6 ? 1 : findOptimalK(X, kMax);
   const clusters = k <= 1 ? X.map(() => 0) : clusterEmbeddings(X, k).clusters;
