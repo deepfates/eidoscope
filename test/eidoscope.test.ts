@@ -7,6 +7,7 @@ import { trajectory } from "../src/trajectory.ts";
 import { deckToJSONL, cardCorpus, type Card } from "../src/card.ts";
 import { cardText } from "../src/map.ts";
 import { scoreRedundancy } from "../src/redundancy.ts";
+import { docArxiv, fetchFrontier } from "../src/frontier.ts";
 
 // Deterministic contract tests — the pure pipeline surfaces. Fast, no LLM/network.
 // (The LLM stages take an injectable `llm`; a live smoke test is gated behind EIDOSCOPE_LIVE.)
@@ -60,6 +61,16 @@ test("cardText: embeds the core plus every axis note (the de-noised text)", () =
   expect(t).toContain("The core.");
   expect(t).toContain("noteAlpha");
   expect(t).toContain("noteBeta");
+});
+
+test("frontier: docArxiv extracts ids; fetchFrontier no-ops cleanly without arxiv (no network)", async () => {
+  expect(docArxiv({ body: "see arxiv.org/abs/1706.03762 for details" })).toBe("1706.03762");
+  expect(docArxiv({ body: "arXiv:2005.14165 (GPT-3)" })).toBe("2005.14165");
+  expect(docArxiv({ body: "no papers here, just prose about cooking" })).toBeNull();
+  const f = await fetchFrontier([{ id: "a", title: "T", body: "prose only, no ids" }]);
+  expect(f.corpusArxiv).toBe(0);      // nothing to fetch → no network call
+  expect(f.ranked.length).toBe(0);
+  expect(f.cite).toEqual([[]]);
 });
 
 test("scoreRedundancy: flags collapsed axes, passes distinct ones", () => {
