@@ -75,6 +75,9 @@ bun run storybook.ts   # drive the viewer in headless Chromium -> story/*.png + 
 
 ## Status & how to resume
 
+The plan and the definition of "done" live in **[ROADMAP.md](ROADMAP.md)** (mirrors `tk` epic
+`eid-vd9d` / v1 milestone `eid-qy2v`; `tk ready` for the live frontier).
+
 v0. Ported from the prototype in `../../../readwise/triangulation` (its `runs/main` deck is the
 golden fixture, reproduced). `bun test` + `tsc --noEmit` are green.
 
