@@ -30,14 +30,16 @@ A **polished, maintained OSS package**, telescope included. Done when, *measured
 
 **1 · Trustworthy core** (the moat)
 - ✅ Axis distinctness — one-call `labelAxes` (redundancy 0.39→0.25). `f5e1c3f`
-- ☐ `eid-ileo` — deep-axis fidelity (still ~0.36) + make the redundancy/fidelity check a real guard.
+- ◑ `eid-ileo` — ✅ redundancy **guard** shipped (`src/redundancy.ts`, pipeline warn + `check:redundancy`
+  CLI + test); ☐ deep-axis fidelity (still ~0.36) remains the harder half.
 
 **2 · Standalone & installable**
 - ✅ `eid-8hv4` — decoupled from curare: `@huggingface/transformers` + `ml-kmeans` used directly,
   config drops the curare path + `.env` fallback. **Gold-matched to curare** (embeddings cosine
   1.000000, clustering k+assignments identical) and a from-scratch folder run verified end-to-end.
   `bce2059`. *(Remaining before publish: gate the dev-only fixture absolute paths — folded into ship.)*
-- ☐ `eid-l7z4` — prove + document the local path (any OpenAI-compatible server; LM Studio, llama.cpp…).
+- ✅ `eid-l7z4` — verified **fully local** via LM Studio (gemma-4-12b @ 32k context): whole pipeline
+  runs, no OpenRouter/curare. Documented (needs a capable model + ample context). Provider-agnostic.
 - ✅ `eid-b2a9` — resumable card runs (cache by id) so a long run survives a crash.
 
 **3 · Ship v1**

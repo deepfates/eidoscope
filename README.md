@@ -53,9 +53,23 @@ bun run src/cli.ts --fixture         # the readwise fixture (precomputed embeddi
 open eidoscope.html
 ```
 
-Provider is any OpenAI-compatible endpoint (env-overridable): `EIDOSCOPE_API_URL`
-(default OpenRouter; e.g. `http://localhost:1234/v1` for a local LM Studio server), `EIDOSCOPE_MODEL`,
-`OPENROUTER_API_KEY`. curare's built `dist/` is expected next door (`EIDOSCOPE_CURARE` to override).
+Embeddings are local (`@huggingface/transformers`, MiniLM) — no key, no service. The LLM is any
+OpenAI-compatible endpoint (env-overridable): `EIDOSCOPE_API_URL` (default OpenRouter),
+`EIDOSCOPE_MODEL`, `OPENROUTER_API_KEY`.
+
+**Fully local** (no key, nothing leaves the machine) — point it at any local OpenAI-compatible
+server. E.g. LM Studio:
+
+```sh
+lms load google/gemma-4-12b --context-length 32768   # a capable instruct model, ample context
+EIDOSCOPE_API_URL=http://localhost:1234/v1 EIDOSCOPE_MODEL=google/gemma-4-12b OPENROUTER_API_KEY=local \
+  bun run src/cli.ts <folder>
+```
+
+Two notes from testing: use a **capable** model (≈12B+ — tiny models drop card fields), and give it
+**enough context** (labeling all axes in one call needs ~8k+; 32k is safe). llama.cpp / vLLM work
+the same way. Verify a run's axes are actually distinct: `bun run src/redundancy.ts map-data.json`
+(target mean |r| < 0.3 — small corpora and weak models will fail it, honestly).
 
 ## In the viewer
 
