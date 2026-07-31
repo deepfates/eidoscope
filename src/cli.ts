@@ -22,4 +22,5 @@ if (args.includes("--fixture")) {
   console.error(`loaded ${docs.length} docs from ${dir}; embedding full text (local MiniLM)…`);
   embeddings = await embedDocs(docs);
 }
-await run(docs, embeddings, { frontier: args.includes("--frontier") });
+const name = args.includes("--fixture") ? "Readwise library" : (dir?.split("/").filter(Boolean).pop() || "Corpus");
+await run(docs, embeddings, { frontier: args.includes("--frontier"), name });

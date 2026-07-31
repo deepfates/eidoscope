@@ -7,12 +7,13 @@ import { provider } from "./provider.ts";
 import { renderHTML, type MapData } from "./render.ts";
 import { trajectory } from "./trajectory.ts";
 import { scoreRedundancy, scoreFidelity } from "./redundancy.ts";
+import { buildReport } from "./report.ts";
 import { fetchFrontier, buildGhosts } from "./frontier.ts";
 import { loadFixture, type Doc } from "./corpus.ts";
 
 // The full instrument, end to end: docs (+embeddings) -> discover axes -> card -> embed cards ->
 // project + cluster -> name regions -> deck.jsonl + map-data.json + eidoscope.html.
-export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?: boolean } = {}) {
+export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?: boolean; name?: string } = {}) {
   const llm = provider();
   console.error(`\n[1/5] discovering axes from ${docs.length} docs…`);
   const { axes, realDims, projections } = await discoverAxes(embeddings, docs.map((d) => d.title.slice(0, 64)), { llm });
@@ -79,7 +80,11 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
   writeFileSync("eidoscope.html", renderHTML(D));
   const state = trajectory({ dates: deck.map((c) => c.date), cluster: D.cluster, scores: D.scores, axes: D.axes, clusters });
   if (state) writeFileSync("STATE.md", state);
-  console.error(`\n✅ eidoscope.html — ${deck.length} cards, ${axes.length} axes, ${k} regions. deck.jsonl + map-data.json${state ? " + STATE.md" : ""} written.`);
+  writeFileSync("REPORT.md", buildReport(D, opts.name || "Corpus"));
+  console.error(`\n✅ ${deck.length} cards · ${axes.length} axes · ${k} regions`);
+  console.error(`   → open  eidoscope.html   (the interactive map)`);
+  console.error(`   → read  REPORT.md        (the shareable summary${state ? " + STATE.md trajectory" : ""})`);
+  console.error(`   → data  deck.jsonl · map-data.json`);
   return D;
 }
 
