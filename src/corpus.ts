@@ -1,9 +1,9 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join, basename } from "node:path";
+import { join, basename, resolve } from "node:path";
 
 // The INPUT seam. Anything that yields { id, title, body } can drive the pipeline: a folder of
 // files (loadFolder), the readwise fixture (loadFixture), or a splice/Reader adapter later.
-export type Doc = { id: string; title: string; body: string; cat?: string; date?: number };
+export type Doc = { id: string; title: string; body: string; cat?: string; date?: number; url?: string; author?: string; tags?: string[]; path?: string };
 const parseDate = (front: string) => { const m = front.match(/^(?:created_at|date|published_date):\s*"?([^"\n]+)/m); const t = m ? Date.parse(m[1].trim()) : NaN; return isNaN(t) ? undefined : t; };
 
 const hash = (s: string) => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0; return h.toString(36); };
@@ -27,7 +27,12 @@ export function loadFolder(dir: string, opts: { limit?: number; minChars?: numbe
       const title = (front.match(/^title:\s*"?([^"\n]+)/m) || [])[1]?.trim()
         || (rest.match(/^#\s+(.+)$/m) || [])[1]?.trim()
         || basename(f).replace(/\.(md|markdown|txt)$/i, "");
-      docs.push({ id, title, body, date: parseDate(front) });
+      // capture whatever metadata the frontmatter carries; the file path is always a valid source
+      const url = (front.match(/^(?:url|source_url|source):\s*"?([^"\n]+)/m) || [])[1]?.trim();
+      const author = (front.match(/^author:\s*"?([^"\n]+)/m) || [])[1]?.trim();
+      const tagsRaw = (front.match(/^tags:\s*(.+)$/m) || [])[1]?.trim();
+      const tags = tagsRaw ? tagsRaw.replace(/[[\]"']/g, "").split(/,\s*/).map((t) => t.trim()).filter(Boolean) : undefined;
+      docs.push({ id, title, body, date: parseDate(front), url: url || undefined, author: author || undefined, tags: tags?.length ? tags : undefined, path: resolve(p) });
     }
   };
   walk(dir);
@@ -54,7 +59,8 @@ export function loadFixture(): { docs: Doc[]; embeddings: number[][] } {
     const f = idToFile.get(m.id);
     const raw = f ? readFileSync(`${MD}/${f}`, "utf8") : "";
     const front = (raw.match(/^---\n([\s\S]*?)\n---/) || [])[1] || "";
-    docs.push({ id: m.id, title: m.title || "", body: raw ? strip(raw) : "", cat: m.category, date: parseDate(front) });
+    const src = (front.match(/^(?:source_url|url):\s*"?([^"\n]+)/m) || [])[1]?.trim();
+    docs.push({ id: m.id, title: m.title || "", body: raw ? strip(raw) : "", cat: m.category, date: parseDate(front), author: m.author, url: src || `https://read.readwise.io/read/${m.id}`, path: f ? `${MD}/${f}` : undefined });
     embeddings.push(C.embs[i]);
   });
   return { docs, embeddings };

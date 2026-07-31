@@ -46,6 +46,8 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
     axes: axes.map((a) => ({ key: a.key, name: a.name, low: a.pole_low, high: a.pole_high })),
     scores: Object.fromEntries(axes.map((a) => [a.key, deck.map((c) => c.axes[a.key]?.score ?? 50)])),
     xy, xyz, cluster, k, hub, nbr, clusters,
+    urls: deck.map((c) => c.url || (c.path ? "file://" + c.path : undefined)),
+    authors: deck.map((c) => c.author), tags: deck.map((c) => c.tags), dates: deck.map((c) => c.date),
   };
   // honest-measurement: report redundancy + fidelity every run. Optional fidelity GATE drops axes
   // the cards don't actually track (opt-in via EIDOSCOPE_FIDELITY_GATE — never silently nuke dims;

@@ -11,6 +11,7 @@ export type MapData = {
   scores: Record<string, number[]>;
   xy: number[][]; xyz: number[][]; cluster: number[]; k: number; hub: number[]; nbr: number[][];
   clusters: { c: number; n: number; label: string; cx: number; cy: number }[];
+  urls?: (string | undefined)[]; authors?: (string | undefined)[]; tags?: (string[] | undefined)[]; dates?: (number | undefined)[];
   cite?: number[][]; citec?: number[];  // intra-corpus citation edges + impact (frontier telescope)
   ghosts?: { title: string; arxiv: string; url: string; n: number; core: string; xy: [number, number]; sim: number }[];
 };
@@ -19,6 +20,7 @@ export function renderHTML(D: MapData): string {
   const nodes = D.ids.map((id, i) => ({
     id, i, t: (D.titles[i] || "").slice(0, 90), core: D.cores[i] || "", cl: D.cluster[i],
     xy: D.xy[i], xyz: D.xyz[i], notes: D.notes[i] || {}, hub: D.hub[i] || 0, nbr: D.nbr[i] || [],
+    url: D.urls?.[i], author: D.authors?.[i], tags: D.tags?.[i], date: D.dates?.[i],
     sc: Object.fromEntries(D.axes.map((a) => [a.key, D.scores[a.key]?.[i] ?? 50])),
   }));
   const payload = JSON.stringify({ nodes, axes: D.axes, k: D.k, clusters: D.clusters, ghosts: D.ghosts || [], cite: D.cite || [], citec: D.citec || [] }).replace(/<\//g, "<\\/");
@@ -36,7 +38,7 @@ select{flex:1;background:var(--bg);border:1px solid var(--hair);border-radius:7p
 .xy{display:none}.xy.on{display:flex}
 #legend{bottom:14px;right:14px;padding:9px 11px;font-size:11px;max-width:250px;max-height:52vh;overflow:auto}#legend .r{display:flex;gap:7px;align-items:center;margin:2px 0}.sw{width:10px;height:10px;border-radius:2px;flex:none}
 #tip{position:fixed;pointer-events:none;opacity:0;transition:opacity .07s;max-width:330px;padding:11px 13px;font-size:11.5px;line-height:1.5;z-index:9}#tip .t{font-weight:700;margin-bottom:4px;font-size:12.5px}#tip .co{margin-bottom:6px}#tip .f{font-family:var(--mono);font-size:10px;color:var(--soft)}
-#detail{top:14px;right:14px;width:290px;max-height:74vh;overflow:auto;padding:13px 15px;display:none;z-index:10}#detail.on{display:block}#detail .t{font-weight:800;font-size:13.5px;margin-bottom:5px}#detail .co{font-size:11.5px;line-height:1.5;color:var(--soft);margin-bottom:9px}#detail h4{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--soft);margin:10px 0 4px}#detail .nb{font-size:11.5px;padding:3px 5px;border-radius:5px;cursor:pointer}#detail .nb:hover{background:color-mix(in srgb,var(--ink) 12%,transparent)}#detail .x{position:absolute;top:9px;right:11px;cursor:pointer;color:var(--soft);font-family:var(--mono)}
+#detail{top:14px;right:14px;width:290px;max-height:74vh;overflow:auto;padding:13px 15px;display:none;z-index:10}#detail.on{display:block}#detail .t{font-weight:800;font-size:13.5px;margin-bottom:5px}#detail .co{font-size:11.5px;line-height:1.5;color:var(--soft);margin-bottom:9px}#detail h4{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--soft);margin:10px 0 4px}#detail .nb{font-size:11.5px;padding:3px 5px;border-radius:5px;cursor:pointer}#detail .nb:hover{background:color-mix(in srgb,var(--ink) 12%,transparent)}#detail .x{position:absolute;top:9px;right:11px;cursor:pointer;color:var(--soft);font-family:var(--mono)}#detail .meta{font-family:var(--mono);font-size:10px;color:var(--soft);margin-bottom:6px}#detail .open{display:inline-block;margin:0 0 9px;font-family:var(--mono);font-size:11px;font-weight:700;color:hsl(210 90% 62%);text-decoration:none}#detail .open:hover{text-decoration:underline}#detail .ax{display:flex;justify-content:space-between;gap:8px;font-size:11px;padding:3px 0;border-bottom:1px solid var(--hair)}#detail .axn{color:var(--soft)}#detail .axs{font-family:var(--mono);font-size:10px;white-space:nowrap}
 #deck{top:14px;left:50%;transform:translateX(-50%);width:min(940px,88vw);max-height:82vh;overflow:auto;padding:12px 14px;display:none;z-index:11}#deck.on{display:block}
 #deck .top{display:flex;gap:10px;align-items:center;margin-bottom:9px}#deck .top .x{margin-left:auto;cursor:pointer;color:var(--soft);font-family:var(--mono)}
 #deck .top select,#deck .top input{background:var(--bg);border:1px solid var(--hair);border-radius:7px;padding:4px 8px;font:11px var(--sans);color:var(--ink)}
@@ -86,7 +88,12 @@ function relayout(){retarget();if(!raf)raf=requestAnimationFrame(tick)}
 function pick(mx,my){let b=null,bd=1e9;for(const n of nodes){const p=S(n);const d=(p.x-mx)**2+(p.y-my)**2;const rr=(rad(n)+4)**2;if(d<rr&&d<bd){bd=d;b=n}}return b}
 function pickG(mx,my){if(!frontierOn||layout!=='mde')return null;let b=null,bd=1e9;for(const g of ghosts){const p=Sxy(g.xy[0],g.xy[1]);const r=2+3*Math.sqrt(g.n/gmax)+5;const d=(p.x-mx)**2+(p.y-my)**2;if(d<r*r&&d<bd){bd=d;b=g}}return b}
 function tipHTML(n){const top=axes.map(a=>({a,s:n.sc[a.key],note:n.notes[a.key]})).filter(x=>x.note).sort((x,y)=>Math.abs(y.s-50)-Math.abs(x.s-50)).slice(0,4);return'<div class="t">'+esc(n.t)+'</div><div class="co">'+esc(n.core)+'</div><div class="f">hub '+n.hub+' · '+top.map(x=>esc(x.a.name)+' '+x.s).join(' · ')+'</div>'}
-function showDetail(n){focus=n;detailEl.classList.add('on');detailEl.innerHTML='<div class="x" onclick="clearFocus()">✕</div><div class="t">'+esc(n.t)+'</div><div class="co">'+esc(n.core)+'</div><h4>nearest '+n.nbr.length+'</h4>'+n.nbr.map(j=>'<div class="nb" onclick="focusIdx('+j+')">→ '+esc(nodes[j].t)+'</div>').join('');draw()}
+function showDetail(n){focus=n;detailEl.classList.add('on');
+  const reg=(clusters.find(c=>c.c===n.cl)||{}).label||'';
+  const meta=[n.author,n.date?new Date(n.date).toISOString().slice(0,10):'',reg].filter(Boolean).map(esc).join(' · ');
+  const open=n.url?'<a class="open" href="'+esc(n.url)+'" target="_blank" rel="noopener">open source →</a>':'';
+  const prof=axes.map(a=>({a,s:n.sc[a.key],note:n.notes[a.key]})).filter(x=>x.note).sort((x,y)=>Math.abs(y.s-50)-Math.abs(x.s-50)).slice(0,6).map(x=>'<div class="ax" title="'+esc(x.s>=50?x.a.high:x.a.low)+' — '+esc(x.note)+'"><span class="axn">'+esc(x.a.name)+'</span><span class="axs">'+(x.s>=50?'▲':'▼')+' <b>'+x.s+'</b></span></div>').join('');
+  detailEl.innerHTML='<div class="x" onclick="clearFocus()">✕</div><div class="t">'+esc(n.t)+'</div>'+(meta?'<div class="meta">'+meta+'</div>':'')+open+'<div class="co">'+esc(n.core)+'</div><h4>where it sits</h4>'+(prof||'<div class="meta">—</div>')+'<h4>nearest '+n.nbr.length+'</h4>'+n.nbr.map(j=>'<div class="nb" onclick="focusIdx('+j+')">→ '+esc(nodes[j].t)+'</div>').join('');draw()}
 window.clearFocus=()=>{focus=null;detailEl.classList.remove('on');draw()};window.focusIdx=j=>showDetail(nodes[j]);
 let drag=null;cv.addEventListener('mousedown',e=>{drag={x:e.clientX,y:e.clientY,vx:view.x,vy:view.y,ry:rotY,rx:rotX,m:0};cv.classList.add('drag')});
 addEventListener('mouseup',e=>{if(drag&&drag.m<4){const g=pickG(e.clientX,e.clientY);if(g){window.open(g.url,'_blank')}else{const n=pick(e.clientX,e.clientY);if(n)showDetail(n);else clearFocus()}}drag=null;cv.classList.remove('drag')});
