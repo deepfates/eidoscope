@@ -12,9 +12,10 @@ import { cardText } from "./map.ts";
 // Academic feature: a clean no-op when the corpus has no arxiv ids.
 
 const ARXIV_RE = /(?:arxiv\.org\/(?:abs|pdf)\/|arxiv:\s*)(\d{4}\.\d{4,5})/i;
-export function docArxiv(d: { body?: string; arxiv?: string }): string | null {
+export function docArxiv(d: { body?: string; arxiv?: string; url?: string }): string | null {
   if ((d as any).arxiv) return (d as any).arxiv;
-  const m = (d.body || "").match(ARXIV_RE) || (d.body || "").match(/\b(\d{4}\.\d{4,5})\b/);
+  const src = (d.url || "") + " " + (d.body || ""); // url (often the arxiv link) first, then body
+  const m = src.match(ARXIV_RE) || src.match(/\b(\d{4}\.\d{4,5})\b/);
   return m ? m[1] : null;
 }
 

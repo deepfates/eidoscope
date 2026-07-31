@@ -27,8 +27,11 @@ export function loadFolder(dir: string, opts: { limit?: number; minChars?: numbe
       const title = (front.match(/^title:\s*"?([^"\n]+)/m) || [])[1]?.trim()
         || (rest.match(/^#\s+(.+)$/m) || [])[1]?.trim()
         || basename(f).replace(/\.(md|markdown|txt)$/i, "");
-      // capture whatever metadata the frontmatter carries; the file path is always a valid source
-      const url = (front.match(/^(?:url|source_url|source):\s*"?([^"\n]+)/m) || [])[1]?.trim();
+      // capture whatever metadata the frontmatter carries; the file path is always a valid source.
+      // URL: frontmatter first, else the raw text (stripMd deletes urls, so read them from `rest`).
+      const url = (front.match(/^(?:url|source_url|source):\s*"?([^"\n]+)/m) || [])[1]?.trim()
+        || (rest.match(/https?:\/\/(?:arxiv\.org|doi\.org|dx\.doi\.org)\/\S+/i) || [])[0]?.replace(/[).,"']+$/, "")
+        || (rest.slice(0, 600).match(/https?:\/\/[^\s)>"']+/) || [])[0]?.replace(/[).,"']+$/, "");
       const author = (front.match(/^author:\s*"?([^"\n]+)/m) || [])[1]?.trim();
       const tagsRaw = (front.match(/^tags:\s*(.+)$/m) || [])[1]?.trim();
       const tags = tagsRaw ? tagsRaw.replace(/[[\]"']/g, "").split(/,\s*/).map((t) => t.trim()).filter(Boolean) : undefined;

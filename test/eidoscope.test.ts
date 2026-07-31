@@ -17,13 +17,17 @@ test("loadFolder: parses frontmatter, derives titles, skips short docs", () => {
   writeFileSync(join(d, "a.md"), `---\nid: "x1"\ntitle: "Alpha"\ncreated_at: "2025-01-01"\n---\n${"word ".repeat(80)}`);
   writeFileSync(join(d, "b.md"), `# Beta Heading\n\n${"lorem ".repeat(80)}`);
   writeFileSync(join(d, "tiny.md"), "too short");
+  writeFileSync(join(d, "c.md"), `# Gamma\n\nSee https://arxiv.org/abs/2401.00001 for the method. ${"word ".repeat(80)}`);
   const docs = loadFolder(d);
   rmSync(d, { recursive: true, force: true });
-  expect(docs.length).toBe(2); // tiny.md dropped by minChars
+  expect(docs.length).toBe(3); // tiny.md dropped by minChars
   const a = docs.find((x) => x.id === "x1")!;
   expect(a.title).toBe("Alpha");
   expect(a.date).toBeGreaterThan(0);
+  expect(a.path).toMatch(/^\/.*a\.md$/); // absolute path always kept -> "open source" works with no metadata
   expect(docs.find((x) => x.title === "Beta Heading")).toBeTruthy(); // title from # heading
+  const c = docs.find((x) => x.title === "Gamma")!;
+  expect(c.url).toBe("https://arxiv.org/abs/2401.00001"); // url pulled from body when frontmatter lacks it
 });
 
 test("trajectory: flags the late-loaded region as rising and reports drift", () => {
