@@ -18,7 +18,7 @@ if (args.includes("--fixture")) {
   console.error(`fixture: ${docs.length} docs (precomputed full-text embeddings)`);
 } else {
   if (!dir) { console.error("usage: eidoscope <folder> [--limit N]   |   eidoscope --fixture"); process.exit(1); }
-  docs = loadFolder(dir, { limit });
+  docs = loadFolder(dir, { limit, minChars: val("--min-chars") ? Number(val("--min-chars")) : undefined });
   if (!docs.length) { console.error(`no .md/.txt documents found under ${dir}`); process.exit(1); }
   console.error(`loaded ${docs.length} docs from ${dir}; embedding full text (local MiniLM)…`);
   embeddings = await embedDocs(docs);

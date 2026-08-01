@@ -14,6 +14,7 @@ const stripMd = (raw: string) => raw.replace(/```[\s\S]*?```/g, " ").replace(/!\
 // present, else derives them. This is the generic path — no precomputed embeddings, no fixture.
 export function loadFolder(dir: string, opts: { limit?: number; minChars?: number } = {}): Doc[] {
   const min = opts.minChars ?? 200, docs: Doc[] = [];
+  let skipped = 0;
   const walk = (d: string) => {
     for (const f of readdirSync(d)) {
       const p = join(d, f); let s; try { s = statSync(p); } catch { continue; }
@@ -23,7 +24,7 @@ export function loadFolder(dir: string, opts: { limit?: number; minChars?: numbe
       const fm = raw.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
       const front = fm ? fm[1] : "", rest = fm ? fm[2] : raw;
       const body = stripMd(rest);
-      if (body.length < min) continue;
+      if (body.length < min) { skipped++; continue; }
       const id = (front.match(/^id:\s*"?([^"\n]+)/m) || [])[1]?.trim() || hash(p);
       const title = (front.match(/^title:\s*"?([^"\n]+)/m) || [])[1]?.trim()
         || (rest.match(/^#\s+(.+)$/m) || [])[1]?.trim()
@@ -40,6 +41,9 @@ export function loadFolder(dir: string, opts: { limit?: number; minChars?: numbe
     }
   };
   walk(dir);
+  // never drop docs silently: a corpus of short structured entries (reference cards, stat blocks) can
+  // lose a big fraction to the length floor, and a quiet drop reads as "loaded everything" when it didn't.
+  if (skipped) console.error(`  ⚠ skipped ${skipped} file(s) under ${min} chars of body (lower with --min-chars N to include short entries)`);
   return opts.limit ? docs.slice(0, opts.limit) : docs;
 }
 
