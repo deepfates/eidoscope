@@ -48,6 +48,7 @@ select{flex:1;background:var(--bg);border:1px solid var(--hair);border-radius:7p
 #deck .chips{display:flex;flex-wrap:wrap;gap:4px}#deck .chip{font-family:var(--mono);font-size:9px;padding:2px 7px;border-radius:20px;background:color-mix(in srgb,var(--ink) 9%,transparent);color:var(--soft);white-space:nowrap}#deck .chip.hi{color:var(--ink);background:color-mix(in srgb,var(--ink) 16%,transparent)}#deck .chip.reg{color:var(--ink)}
 .ctrl2{position:fixed;top:14px;left:316px;display:flex;gap:8px;z-index:9;font-family:var(--mono);font-size:11px}.ctrl2 button{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--hair);border-radius:7px;padding:6px 9px;cursor:pointer}.ctrl2 button.on{background:var(--ink);color:var(--bg)}
 #axhint{position:fixed;left:0;right:0;bottom:12px;text-align:center;font-family:var(--mono);font-size:11px;color:var(--soft);pointer-events:none}#count{position:fixed;bottom:14px;left:14px;font-family:var(--mono);font-size:11px;color:var(--soft)}
+#intro{position:fixed;inset:0;background:color-mix(in srgb,var(--bg) 70%,transparent);backdrop-filter:blur(3px);display:none;align-items:center;justify-content:center;z-index:50}#intro.on{display:flex}#intro .box{max-width:440px;margin:16px;padding:24px 26px;border:1px solid var(--hair);border-radius:14px;background:var(--panel);box-shadow:0 20px 60px rgba(0,0,0,.35)}#intro h2{font-size:17px;margin:0}#intro .sub{font-family:var(--mono);font-size:11px;color:var(--soft);margin:4px 0 10px}#intro ul{font-size:12.5px;line-height:1.7;color:var(--soft);margin:0;padding-left:18px}#intro b{color:var(--ink)}#intro button{margin-top:16px;font:600 12px var(--sans);background:var(--ink);color:var(--bg);border:none;border-radius:8px;padding:8px 16px;cursor:pointer}
 </style>
 <canvas id="c"></canvas>
 <div id="hud" class="pane"><div class="k">eidoscope 🔭</div><h1>the forms of the corpus</h1>
@@ -56,6 +57,7 @@ select{flex:1;background:var(--bg);border:1px solid var(--hair);border-radius:7p
 <div class="ctl"><label>color</label><select id="color"></select></div><div class="ctl"><label>size</label><select id="size"></select></div>
 <input id="q" type="search" placeholder="find a card…"></div>
 <div id="legend" class="pane"></div><div id="tip" class="pane"></div><div id="detail" class="pane"></div><div id="deck" class="pane"></div>
+<div id="intro"><div class="box"><h2>the forms of the corpus 🔭</h2><div class="sub" id="introsub"></div><ul><li><b>Proximity is similarity</b> — nearby cards are alike; color is an emergent region, size is influence.</li><li><b>Click any card</b> to open the source, read its summary, and see where it sits on the axes.</li><li><b>Open the deck</b> to read the corpus as a sortable list — or set <b>layout → axis scatter</b> to position by any two discovered axes.</li></ul><button id="introgo">explore →</button></div></div>
 <div class="ctrl2"><button id="deckbtn">deck</button><button id="labels" class="on">labels</button>${(D.ghosts && D.ghosts.length) ? '<button id="frontbtn">frontier</button>' : ""}${(D.cite && D.cite.some((e) => e.length)) ? '<button id="citebtn">cite edges</button>' : ""}<button id="reset">reset</button><button id="theme">theme</button></div>
 <div id="axhint"></div><div id="count"></div>
 <script id="data" type="application/json">${payload}</script>
@@ -137,6 +139,7 @@ function buildDeck(){const el=document.getElementById('deck');const opts=['hub',
 window.toggleDeck=()=>{const el=document.getElementById('deck'),on=!el.classList.contains('on');el.classList.toggle('on',on);document.getElementById('deckbtn').classList.toggle('on',on);if(on)buildDeck();};
 document.getElementById('deckbtn').onclick=()=>window.toggleDeck();
 W=innerWidth;H=innerHeight;cv.width=W*DPR;cv.height=H*DPR;buildLegend();syncXY();draw();
+(function(){const el=document.getElementById('intro'),weak=axes.filter(a=>a.weak).length;document.getElementById('introsub').textContent=nodes.length+' documents · '+axes.length+' discovered axes · '+k+' regions'+(nodes.length<50?' · small corpus, axes are noisy':weak?' · '+weak+' axis(es) the cards track weakly':'');const seen=()=>{el.classList.remove('on');try{localStorage.setItem('eido-seen','1')}catch(e){}};try{if(!localStorage.getItem('eido-seen'))el.classList.add('on')}catch(e){el.classList.add('on')}document.getElementById('introgo').onclick=seen;el.onclick=e=>{if(e.target===el)seen()};})();
 </script>`;
 }
 
