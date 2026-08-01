@@ -17,10 +17,13 @@ export type MapData = {
 };
 
 export function renderHTML(D: MapData): string {
+  // the immediate containing folder of a local file — the corpus's own organization, surfaced as a lens
+  const folderOf = (u?: string) => { if (!u || !u.startsWith("file://")) return undefined; const p = u.slice(7).split("/").filter(Boolean); return p.length >= 2 ? decodeURIComponent(p[p.length - 2]).replace(/_/g, " ") : undefined; };
   const nodes = D.ids.map((id, i) => ({
     id, i, t: (D.titles[i] || "").slice(0, 90), core: D.cores[i] || "", cl: D.cluster[i],
     xy: D.xy[i], xyz: D.xyz[i], notes: D.notes[i] || {}, hub: D.hub[i] || 0, nbr: D.nbr[i] || [],
     url: D.urls?.[i], author: D.authors?.[i], tags: D.tags?.[i], date: D.dates?.[i], read: D.read?.[i],
+    folder: folderOf(D.urls?.[i]),
     sc: Object.fromEntries(D.axes.map((a) => [a.key, D.scores[a.key]?.[i] ?? 50])),
   }));
   const payload = JSON.stringify({ nodes, axes: D.axes, k: D.k, clusters: D.clusters, ghosts: D.ghosts || [], cite: D.cite || [], citec: D.citec || [] }).replace(/<\//g, "<\\/");
@@ -76,7 +79,14 @@ const S=n=>{const b=base();return{x:W/2+n.cur[0]*b*view.s+view.x,y:H/2-n.cur[1]*
 // hover-to-isolate, and colours cycle past 8 rather than degrading into indistinguishable muddy hues.
 const PAL=['#3987e5','#d95926','#199e70','#c98500','#d55181','#008300','#9085e9','#e66767'];
 const col=(c)=>PAL[c%PAL.length];
-function colOf(n){if(color==='cluster')return col(n.cl);const t=Math.max(0,Math.min(1,(n.sc[color]||0)/100));return'hsl('+(250-t*250)+' 74% '+(40+t*22)+'%)'}
+// categorical metadata facets — surface the corpus's OWN organization (source folder, author) as a
+// colour lens alongside the discovered regions. Self-filtering: a facet only appears if it covers most
+// of the corpus and has a legible number of distinct values (colouring by 1000 unique authors is noise).
+const facetDefs=[{k:'folder',lab:'folder',get:n=>n.folder},{k:'author',lab:'source',get:n=>n.author}];
+const facets=facetDefs.map(f=>{const cnt={};for(const n of nodes){const v=f.get(n);if(v)cnt[v]=(cnt[v]||0)+1}return{...f,cnt,vals:Object.keys(cnt)}}).filter(f=>f.vals.length>=2&&f.vals.length<=40&&f.vals.reduce((a,v)=>a+f.cnt[v],0)>=nodes.length*0.4);
+for(const f of facets){f.ord=f.vals.slice().sort((a,b)=>f.cnt[b]-f.cnt[a]);f.idx={};f.ord.forEach((v,i)=>f.idx[v]=i)}
+const curFacet=()=>facets.find(f=>'meta:'+f.k===color);
+function colOf(n){if(color==='cluster')return col(n.cl);const f=curFacet();if(f){const v=f.get(n);return v==null?'#3a3a3a':col(f.idx[v])}const t=Math.max(0,Math.min(1,(n.sc[color]||0)/100));return'hsl('+(250-t*250)+' 74% '+(40+t*22)+'%)'}
 function rad(n){let r=2.2;if(sizeBy==='hub')r=1.5+3.4*Math.sqrt(n.hub/maxHub);else if(sizeBy!=='uniform')r=1.5+3*Math.abs((n.sc[sizeBy]||50)-50)/50;if(layout==='orbit')r*=(0.6+0.5*((n.depth||0)+1)/2);return Math.max(0.2,r)}
 function hull(pts){if(pts.length<3)return pts;pts=pts.slice().sort((a,b)=>a[0]-b[0]||a[1]-b[1]);const cr=(o,a,b)=>(a[0]-o[0])*(b[1]-o[1])-(a[1]-o[1])*(b[0]-o[0]);const L=[];for(const p of pts){while(L.length>=2&&cr(L[L.length-2],L[L.length-1],p)<=0)L.pop();L.push(p)}const U=[];for(let i=pts.length-1;i>=0;i--){const p=pts[i];while(U.length>=2&&cr(U[U.length-2],U[U.length-1],p)<=0)U.pop();U.push(p)}return L.slice(0,-1).concat(U.slice(0,-1))}
 function draw(){ctx.setTransform(DPR,0,0,DPR,0,0);ctx.clearRect(0,0,W,H);const q=(document.getElementById('q').value||'').toLowerCase();const fs=focus?new Set([focus.i,...focus.nbr]):null;
@@ -110,9 +120,9 @@ function esc(s){return(s||'').toString().replace(/[&<>]/g,c=>({'&':'&amp;','<':'
 const axl=a=>(a.weak?'~ ':'')+a.name;const xax=document.getElementById('xax'),yax=document.getElementById('yax');axes.forEach(a=>{xax.add(new Option(axl(a),a.key));yax.add(new Option(axl(a),a.key))});xax.value=xKey;yax.value=yKey;
 const lsel=document.getElementById('layout');function syncXY(){const on=layout==='axes';document.getElementById('xrow').classList.toggle('on',on);document.getElementById('yrow').classList.toggle('on',on)}
 lsel.onchange=e=>{layout=e.target.value;syncXY();relayout()};xax.onchange=e=>{xKey=e.target.value;relayout()};yax.onchange=e=>{yKey=e.target.value;relayout()};
-const csel=document.getElementById('color');csel.add(new Option('region','cluster'));axes.forEach(a=>csel.add(new Option('axis: '+axl(a),a.key)));csel.value='cluster';csel.onchange=e=>{color=e.target.value;buildLegend();draw()};
+const csel=document.getElementById('color');csel.add(new Option('region','cluster'));facets.forEach(f=>csel.add(new Option(f.lab,'meta:'+f.k)));axes.forEach(a=>csel.add(new Option('axis: '+axl(a),a.key)));csel.value='cluster';csel.onchange=e=>{color=e.target.value;buildLegend();draw()};
 const ssel=document.getElementById('size');ssel.add(new Option('uniform','uniform'));ssel.add(new Option('influence (hub)','hub'));axes.forEach(a=>ssel.add(new Option('commit: '+a.name,a.key)));ssel.value='hub';ssel.onchange=e=>{sizeBy=e.target.value;draw()};
-function buildLegend(){const L=document.getElementById('legend');let h='';if(color==='cluster'){h='<div style="font-family:var(--mono);font-size:10px;color:var(--soft);margin-bottom:5px">'+k+' REGIONS · hover to isolate</div>';for(const c of clusters)h+='<div class="r" data-cl="'+c.c+'"><span class="sw" style="background:'+col(c.c)+'"></span><span>'+esc(c.label)+' <span style="color:var(--soft)">'+c.n+'</span></span></div>'}else{const a=AX[color];h='<div style="font-family:var(--mono);font-size:10px;color:var(--soft);margin-bottom:5px">'+esc(a.name.toUpperCase())+'</div><div class="r"><span class="sw" style="background:hsl(250 74% 40%)"></span>'+esc(a.low)+'</div><div class="r"><span class="sw" style="background:hsl(0 74% 60%)"></span>'+esc(a.high)+'</div>'}L.innerHTML=h;L.querySelectorAll('[data-cl]').forEach(el=>{el.onmouseenter=()=>{hlCluster=+el.dataset.cl;draw()};el.onmouseleave=()=>{hlCluster=null;draw()}})}
+function buildLegend(){const L=document.getElementById('legend');let h='';const f=curFacet();if(color==='cluster'){h='<div style="font-family:var(--mono);font-size:10px;color:var(--soft);margin-bottom:5px">'+k+' REGIONS · hover to isolate</div>';for(const c of clusters)h+='<div class="r" data-cl="'+c.c+'"><span class="sw" style="background:'+col(c.c)+'"></span><span>'+esc(c.label)+' <span style="color:var(--soft)">'+c.n+'</span></span></div>'}else if(f){h='<div style="font-family:var(--mono);font-size:10px;color:var(--soft);margin-bottom:5px">'+esc(f.lab.toUpperCase())+' · '+f.ord.length+'</div>';for(const v of f.ord.slice(0,14))h+='<div class="r"><span class="sw" style="background:'+col(f.idx[v])+'"></span><span>'+esc(v)+' <span style="color:var(--soft)">'+f.cnt[v]+'</span></span></div>';if(f.ord.length>14)h+='<div class="r" style="color:var(--soft)">+'+(f.ord.length-14)+' more</div>'}else{const a=AX[color];h='<div style="font-family:var(--mono);font-size:10px;color:var(--soft);margin-bottom:5px">'+esc(a.name.toUpperCase())+'</div><div class="r"><span class="sw" style="background:hsl(250 74% 40%)"></span>'+esc(a.low)+'</div><div class="r"><span class="sw" style="background:hsl(0 74% 60%)"></span>'+esc(a.high)+'</div>'}L.innerHTML=h;L.querySelectorAll('[data-cl]').forEach(el=>{el.onmouseenter=()=>{hlCluster=+el.dataset.cl;draw()};el.onmouseleave=()=>{hlCluster=null;draw()}})}
 document.getElementById('q').oninput=()=>draw();document.getElementById('labels').onclick=e=>{showLabels=!showLabels;e.target.classList.toggle('on',showLabels);draw()};
 document.getElementById('reset').onclick=()=>{view={s:1,x:0,y:0};rotY=.5;rotX=-.3;clearFocus();relayout()};document.getElementById('theme').onclick=()=>{const r=document.documentElement;r.setAttribute('data-theme',r.getAttribute('data-theme')==='light'?'dark':'light');draw()};
 const fb=document.getElementById('frontbtn');if(fb)fb.onclick=e=>{frontierOn=!frontierOn;e.target.classList.toggle('on',frontierOn);draw()};const cb=document.getElementById('citebtn');if(cb)cb.onclick=e=>{citeOn=!citeOn;e.target.classList.toggle('on',citeOn);draw()};
