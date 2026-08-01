@@ -26,12 +26,12 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
   writeFileSync("deck.jsonl", deckToJSONL(deck));
   console.error(`  ${deck.length} cards -> deck.jsonl`);
 
-  // The map geometry comes from EITHER the cards (concept-bottleneck: title+core+notes, the default)
-  // OR the raw full-text embeddings already computed for axis discovery (--embed raw). Same axes, same
-  // cards for the reader/region-naming either way — only what the layout+clusters are built on changes,
-  // so it's a clean A/B on whether the card transformation improves the geometry for a given corpus.
+  // The map geometry comes from EITHER the cards (concept-bottleneck: restatement + placements as two
+  // pooled vectors, the default) OR the raw full-text embeddings already computed for axis discovery
+  // (--embed raw). Same axes, same cards for the reader/region-naming either way — only what the
+  // layout+clusters are built on changes, a clean A/B on whether the card transformation helps this corpus.
   const useRaw = opts.embed === "raw";
-  console.error(`[3/5] embedding ${useRaw ? "raw full text (no card bottleneck)" : "cards (title+core+notes)"} + projecting…`);
+  console.error(`[3/5] embedding ${useRaw ? "raw full text (no card bottleneck)" : "cards (restatement + placements)"} + projecting…`);
   const embs = useRaw ? embeddings : await embedCards(deck, axes);
   const { xy, xyz, cluster, k, hub, nbr } = await projectAndCluster(embs);
 

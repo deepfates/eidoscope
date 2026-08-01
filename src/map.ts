@@ -10,10 +10,10 @@ import { findOptimalK, clusterEmbeddings } from "./cluster.ts";
 // Embed the DECK (local MiniLM) and lay it out (umap-js) — the readers' coordinates.
 // Embeds the cleaned, structured card text, not the raw document: that's what de-noises the map.
 
-// title + summary + per-axis notes. The title carries named entities/methods the summary may drop;
-// the notes carry each doc's position on the corpus's conceptual axes. Both measurably improve how well
-// the embedded space tracks human topical judgment (title+core+notes beats raw full-text at p<0.01 on a
-// held-out LLM triplet test; notes help topical relatedness even though they'd dilute citation-linkage).
+// The human-readable full card: title + restatement + every axis placement, concatenated. Used for
+// DISPLAY and the frontier ghost embedding — NOT for the map geometry. The map (embedCards, below)
+// embeds the restatement and the placements as SEPARATE pooled vectors, because flattening them into one
+// string lets the 16 placements drown the specific content (measured: hurts topical relatedness).
 export const cardText = (c: Card, axes: Axis[]) => (c.title ? c.title + ". " : "") + (c.core || "") + " " + axes.map((a) => c.axes[a.key]?.note || "").filter(Boolean).join(". ");
 
 // Calibrated axis positions straight from the deterministic PCA projection (grug), rank-normalized to
