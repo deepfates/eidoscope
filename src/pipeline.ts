@@ -1,12 +1,12 @@
 import { writeFileSync } from "node:fs";
 import { discoverAxes, type Axis } from "./axes.ts";
 import { cardCorpus, deckToJSONL, type Card } from "./card.ts";
-import { embedCards, projectAndCluster } from "./map.ts";
+import { embedCards, projectAndCluster, projectionScores } from "./map.ts";
 import { nameCluster } from "./signatures.ts";
 import { provider } from "./provider.ts";
 import { renderHTML, type MapData } from "./render.ts";
 import { trajectory } from "./trajectory.ts";
-import { scoreRedundancy, scoreFidelity } from "./redundancy.ts";
+import { scoreRedundancy } from "./redundancy.ts";
 import { buildReport } from "./report.ts";
 import { fetchFrontier, buildGhosts } from "./frontier.ts";
 import { loadFixture, type Doc } from "./corpus.ts";
@@ -46,29 +46,19 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
     ids: deck.map((c) => c.id), titles: deck.map((c) => c.title), cores: deck.map((c) => c.core),
     notes: deck.map((c) => Object.fromEntries(axes.map((a) => [a.key, c.axes[a.key]?.note || ""]))),
     axes: axes.map((a) => ({ key: a.key, name: a.name, low: a.pole_low, high: a.pole_high })),
-    scores: Object.fromEntries(axes.map((a) => [a.key, deck.map((c) => c.axes[a.key]?.score ?? 50)])),
+    scores: projectionScores(projections, axes),
     xy, xyz, cluster, k, hub, nbr, clusters,
     urls: deck.map((c) => c.url || (c.path ? "file://" + c.path : undefined)),
     authors: deck.map((c) => c.author), tags: deck.map((c) => c.tags), dates: deck.map((c) => c.date),
     read: deck.map((c) => (c.readProgress != null ? c.readProgress > 0.05 : undefined)),
   };
-  // honest-measurement: report redundancy + fidelity every run. Optional fidelity GATE drops axes
-  // the cards don't actually track (opt-in via EIDOSCOPE_FIDELITY_GATE — never silently nuke dims;
-  // validated: gating at ~0.3 cuts redundancy below target and lifts fidelity, at the cost of fewer axes).
-  const fg = scoreFidelity(D.scores, projections, Object.fromEntries(axes.map((a) => [a.key, a.pc - 1])));
-  D.axes.forEach((a) => { const f = fg.perAxis.find((p) => p.key === a.key); a.weak = f ? Math.abs(f.r) < 0.2 : false; }); // flag axes the cards don't track, for the UI
-  const gate = Number(process.env.EIDOSCOPE_FIDELITY_GATE || 0);
-  if (gate > 0) {
-    const keep = new Set(fg.perAxis.filter((a) => Math.abs(a.r) >= gate).map((a) => a.key));
-    if (keep.size >= 2) {
-      D.axes = D.axes.filter((a) => keep.has(a.key));
-      for (const key of Object.keys(D.scores)) if (!keep.has(key)) delete D.scores[key];
-      D.notes = D.notes.map((o) => Object.fromEntries(Object.entries(o).filter(([key]) => keep.has(key))));
-      console.error(`  fidelity gate ${gate}: kept ${keep.size}/${fg.perAxis.length} axes the cards actually track`);
-    }
-  }
+  // Positions ARE the deterministic PCA projection (see `scores` above) — the LLM no longer scores
+  // anything. Honesty is now structural, not a proxy: an axis is trustworthy iff parallel analysis
+  // kept it (pc <= realDims). No fidelity guard, no gate — there is no LLM score left to police.
+  D.axes.forEach((a, i) => { a.weak = axes[i].pc > realDims; });
+  const weak = D.axes.filter((a) => a.weak).length;
   const rg = scoreRedundancy(D.scores);
-  console.error(`  axis distinctness: mean|r| ${rg.meanAbsR.toFixed(2)} ${rg.pass ? "✓" : `⚠ (>=0.3 — ${rg.strong} redundant pairs)`}  ·  fidelity to PCA ${fg.meanAbs.toFixed(2)}${fg.weak ? ` (${fg.weak} weak)` : ""}`);
+  console.error(`  ${D.axes.length - weak}/${D.axes.length} axes above the noise floor (parallel analysis)${weak ? ` · ${weak} weak` : ""}  ·  distinctness mean|r| ${rg.meanAbsR.toFixed(2)} ${rg.pass ? "✓" : `⚠ ${rg.strong} redundant pairs`}`);
   if (opts.frontier) {
     console.error(`[frontier] telescope — Semantic Scholar citations…`);
     const fr = await fetchFrontier(docs, { cacheFile: "s2-cache.json" });

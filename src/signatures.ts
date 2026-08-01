@@ -10,7 +10,6 @@ export const deriveCard = ax(`
   documentBody:string "the document body or abstract",
   corpusAxes:string "numbered list of the corpus axes, each with its low and high pole" ->
   coreSummary:string "2-3 dense sentences: what this document is, argues, and contributes",
-  axisScores:number[] "one 0-100 score per axis, in the given order; 0 = low pole, 100 = high pole",
   axisNotes:string[] "one short document-specific note per axis, in the given order"
 `);
 

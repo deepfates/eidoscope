@@ -6,7 +6,7 @@ import type { Doc } from "./corpus.ts";
 
 // The gorm layer applied at scale: one deriveCard per document -> the DECK.
 // The deck is the asset. One card per JSONL line: inspectable, diffable, appendable.
-export type Card = { id: string; title: string; cat?: string; date?: number; url?: string; author?: string; tags?: string[]; path?: string; readProgress?: number; core: string; axes: Record<string, { score: number; note: string }> };
+export type Card = { id: string; title: string; cat?: string; date?: number; url?: string; author?: string; tags?: string[]; path?: string; readProgress?: number; core: string; axes: Record<string, { note: string }> };
 
 export const axesPrompt = (axes: Axis[]) =>
   axes.map((a, i) => `${i + 1}. ${a.name}: low="${a.pole_low}" high="${a.pole_high}"`).join("\n");
@@ -41,8 +41,8 @@ export async function cardCorpus(docs: Doc[], axes: Axis[], opts: { llm?: any; s
       const d = q.pop()!;
       try {
         const c: any = await sig.forward(llm, { documentTitle: d.title, documentBody: d.body.slice(0, cut), corpusAxes });
-        const ax: Record<string, { score: number; note: string }> = {};
-        axes.forEach((a, i) => { ax[a.key] = { score: Number(c.axisScores?.[i] ?? 50), note: String(c.axisNotes?.[i] ?? "") }; });
+        const ax: Record<string, { note: string }> = {};
+        axes.forEach((a, i) => { ax[a.key] = { note: String(c.axisNotes?.[i] ?? "") }; });
         const card: Card = { id: d.id, title: d.title, cat: d.cat, date: d.date, url: d.url, author: d.author, tags: d.tags, path: d.path, readProgress: d.readProgress, core: String(c.coreSummary ?? ""), axes: ax };
         fresh.push(card);
         if (cacheFile) appendFileSync(cacheFile, JSON.stringify(card) + "\n"); // durable the moment it's made
@@ -69,7 +69,7 @@ if (import.meta.main) {
   const deck = await cardCorpus(sample, axes, { concurrency: 8, onProgress: (n) => process.stderr.write(`  ${n}/${sample.length}\r`) });
   writeFileSync("deck-sample.jsonl", deckToJSONL(deck));
   const keys = axes.map((a: Axis) => a.key);
-  const wellFormed = deck.filter((c) => c.core && keys.every((k: string) => typeof c.axes[k]?.score === "number" && c.axes[k]?.note !== undefined));
+  const wellFormed = deck.filter((c) => c.core && keys.every((k: string) => c.axes[k]?.note !== undefined));
   console.log(`\n\ncarded ${deck.length}/${sample.length}; well-formed (core + all ${keys.length} axes): ${wellFormed.length}`);
   console.log("sample line:", JSON.stringify(deck[0]).slice(0, 160) + "…");
   console.log(wellFormed.length === deck.length && deck.length >= 12 ? "\n✅ card→deck stage works — JSONL deck, every card scored on every axis" : "\n⚠ malformed cards — inspect");

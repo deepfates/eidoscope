@@ -1,5 +1,6 @@
 // Verified slice: run deriveCard on ONE real fixture doc + the real discovered axes.
-// Proves the gorm-via-Ax card works in-grain (typed output, scores aligned to axes).
+// Proves the gorm-via-Ax card works in-grain (typed output, notes aligned to axes).
+// (Positions come from the PCA projection now, not the LLM — the card carries summary + per-axis notes.)
 import { readFileSync, readdirSync } from "node:fs";
 import { deriveCard } from "./signatures.ts";
 import { provider } from "./provider.ts";
@@ -21,6 +22,6 @@ const card = await deriveCard.forward(llm, { documentTitle: title, documentBody:
 
 console.log("TITLE:", title, "\n");
 console.log("CORE:", card.coreSummary, "\n");
-axes.forEach((a: any, i: number) => console.log(`  ${String(card.axisScores?.[i]).padStart(3)}  ${a.name}  — ${card.axisNotes?.[i]}`));
-const ok = Array.isArray(card.axisScores) && card.axisScores.length === axes.length && typeof card.coreSummary === "string";
-console.log(ok ? `\n✅ card slice works — typed card, ${card.axisScores.length} scores aligned to ${axes.length} axes` : "\n⚠ shape mismatch");
+axes.forEach((a: any, i: number) => console.log(`  ${a.name}  — ${card.axisNotes?.[i]}`));
+const ok = Array.isArray(card.axisNotes) && card.axisNotes.length === axes.length && typeof card.coreSummary === "string";
+console.log(ok ? `\n✅ card slice works — typed card, ${card.axisNotes.length} notes aligned to ${axes.length} axes` : "\n⚠ shape mismatch");

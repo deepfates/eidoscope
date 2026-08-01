@@ -12,6 +12,20 @@ import { findOptimalK, clusterEmbeddings } from "./cluster.ts";
 
 export const cardText = (c: Card, axes: Axis[]) => (c.core || "") + " " + axes.map((a) => c.axes[a.key]?.note || "").filter(Boolean).join(". ");
 
+// Calibrated axis positions straight from the deterministic PCA projection (grug), rank-normalized to
+// 0-100. REPLACES the LLM's absolute scores for positioning: the projection is continuous and
+// comparative by construction, where the model saturates and buckets. The LLM's notes still feed the map.
+export function projectionScores(projections: number[][], axes: { key: string; pc: number }[]): Record<string, number[]> {
+  const n = projections.length;
+  const rank = (col: number[]) => {
+    const order = col.map((_, i) => i).sort((i, j) => col[i] - col[j]);
+    const out = new Array<number>(n);
+    order.forEach((oi, r) => { out[oi] = n > 1 ? Math.round((100 * r) / (n - 1)) : 50; });
+    return out;
+  };
+  return Object.fromEntries(axes.map((a) => [a.key, rank(projections.map((row) => row[a.pc - 1]))]));
+}
+
 export async function embedCards(cards: Card[], axes: Axis[]): Promise<number[][]> {
   const cache = new EmbeddingCache("cache-eidoscope-cards", CFG.embedModel); await cache.load();
   const embs = await getTextEmbeddings(cards.map((c) => ({ id: c.id, text: cardText(c, axes).slice(0, 1200) })), { cache });

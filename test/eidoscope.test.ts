@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import { loadFolder } from "../src/corpus.ts";
 import { trajectory } from "../src/trajectory.ts";
 import { deckToJSONL, cardCorpus, type Card } from "../src/card.ts";
-import { cardText } from "../src/map.ts";
-import { scoreRedundancy, scoreFidelity } from "../src/redundancy.ts";
+import { cardText, projectionScores } from "../src/map.ts";
+import { scoreRedundancy } from "../src/redundancy.ts";
 import { docArxiv, fetchFrontier } from "../src/frontier.ts";
 
 // Deterministic contract tests — the pure pipeline surfaces. Fast, no LLM/network.
@@ -48,18 +48,18 @@ test("trajectory: skips a corpus without enough dates", () => {
 
 test("deck: round-trips through JSONL, one card per line", () => {
   const cards: Card[] = [
-    { id: "1", title: "T1", core: "core one", axes: { a: { score: 70, note: "n1" } } },
-    { id: "2", title: "T2", core: "core two", axes: { a: { score: 30, note: "n2" } } },
+    { id: "1", title: "T1", core: "core one", axes: { a: { note: "n1" } } },
+    { id: "2", title: "T2", core: "core two", axes: { a: { note: "n2" } } },
   ];
   const lines = deckToJSONL(cards).trim().split("\n");
   expect(lines.length).toBe(2);
   const back = JSON.parse(lines[0]);
   expect(back.id).toBe("1");
-  expect(back.axes.a.score).toBe(70);
+  expect(back.axes.a.note).toBe("n1");
 });
 
 test("cardText: embeds the core plus every axis note (the de-noised text)", () => {
-  const c: Card = { id: "1", title: "T", core: "The core.", axes: { a: { score: 70, note: "noteAlpha" }, b: { score: 30, note: "noteBeta" } } };
+  const c: Card = { id: "1", title: "T", core: "The core.", axes: { a: { note: "noteAlpha" }, b: { note: "noteBeta" } } };
   const axes = [{ pc: 1, var: 0, coherence: 5, key: "a", name: "A", pole_low: "", pole_high: "" }, { pc: 2, var: 0, coherence: 5, key: "b", name: "B", pole_low: "", pole_high: "" }];
   const t = cardText(c, axes as any);
   expect(t).toContain("The core.");
@@ -67,15 +67,17 @@ test("cardText: embeds the core plus every axis note (the de-noised text)", () =
   expect(t).toContain("noteBeta");
 });
 
-test("scoreFidelity: high when a card-score tracks its PCA axis, low when it doesn't", () => {
-  const proj = Array.from({ length: 30 }, (_, i) => [i, (i * 7) % 13]);       // 2 PCA directions
-  const scores = { a: proj.map((p) => p[0] * 2 + 1), b: proj.map((_, i) => (i * 3) % 5) };
-  const f = scoreFidelity(scores, proj, { a: 0, b: 0 });                       // both vs PC0
-  const ra = Math.abs(f.perAxis.find((x) => x.key === "a")!.r);
-  const rb = Math.abs(f.perAxis.find((x) => x.key === "b")!.r);
-  expect(ra).toBeGreaterThan(0.99);   // a is a linear function of PC0 → tracks it
-  expect(rb).toBeLessThan(0.6);       // b is unrelated to PC0
-  expect(f.weak).toBeGreaterThanOrEqual(0);
+test("projectionScores: rank-normalizes a PCA column to 0-100, no saturation, orientation preserved", () => {
+  // three docs low on PC0, three high; projectionScores should spread them across the full range
+  const projections = [[-5, 0.2], [-3, -1], [-1, 0.5], [1, -0.3], [3, 0.1], [9, -0.7]];
+  const s = projectionScores(projections, [{ key: "x", pc: 1 }]);            // pc=1 → column 0
+  expect(s.x.length).toBe(6);
+  expect(Math.min(...s.x)).toBe(0);                                          // lowest projection → 0
+  expect(Math.max(...s.x)).toBe(100);                                        // highest → 100
+  expect(new Set(s.x).size).toBe(6);                                         // all distinct — no bucketing
+  // monotonic in the projection: argmin projection maps to 0, argmax to 100
+  expect(s.x[0]).toBe(0);
+  expect(s.x[5]).toBe(100);
 });
 
 test("frontier: docArxiv extracts ids; fetchFrontier no-ops cleanly without arxiv (no network)", async () => {
