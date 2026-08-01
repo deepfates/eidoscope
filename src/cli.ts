@@ -2,6 +2,7 @@
 // eidoscope <folder> [--limit N]     run on any folder of .md/.txt files
 // eidoscope --fixture                run on the readwise fixture (precomputed embeddings)
 // eidoscope <folder> --frontier      also pull the Semantic Scholar citation frontier (arxiv corpora)
+// eidoscope <folder> --embed raw     build the map from raw full-text instead of cards (A/B the bottleneck)
 import { loadFolder, loadFixture, type Doc } from "./corpus.ts";
 import { embedDocs } from "./map.ts";
 import { run } from "./pipeline.ts";
@@ -23,4 +24,5 @@ if (args.includes("--fixture")) {
   embeddings = await embedDocs(docs);
 }
 const name = args.includes("--fixture") ? "Readwise library" : (dir?.split("/").filter(Boolean).pop() || "Corpus");
-await run(docs, embeddings, { frontier: args.includes("--frontier"), name });
+const embed = val("--embed") === "raw" ? "raw" : "card";
+await run(docs, embeddings, { frontier: args.includes("--frontier"), name, embed });

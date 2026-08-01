@@ -12,7 +12,7 @@ import { loadFixture, type Doc } from "./corpus.ts";
 
 // The full instrument, end to end: docs (+embeddings) -> discover axes -> card -> embed cards ->
 // project + cluster -> name regions -> deck.jsonl + map-data.json + eidoscope.html.
-export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?: boolean; name?: string } = {}) {
+export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?: boolean; name?: string; embed?: "card" | "raw" } = {}) {
   const llm = provider();
   console.error(`\n[1/5] discovering axes from ${docs.length} docs…`);
   const { axes, realDims, projections } = await discoverAxes(embeddings, docs.map((d) => d.title.slice(0, 64)), { llm });
@@ -26,8 +26,13 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
   writeFileSync("deck.jsonl", deckToJSONL(deck));
   console.error(`  ${deck.length} cards -> deck.jsonl`);
 
-  console.error(`[3/5] embedding cards + projecting…`);
-  const embs = await embedCards(deck, axes);
+  // The map geometry comes from EITHER the cards (concept-bottleneck: title+core+notes, the default)
+  // OR the raw full-text embeddings already computed for axis discovery (--embed raw). Same axes, same
+  // cards for the reader/region-naming either way — only what the layout+clusters are built on changes,
+  // so it's a clean A/B on whether the card transformation improves the geometry for a given corpus.
+  const useRaw = opts.embed === "raw";
+  console.error(`[3/5] embedding ${useRaw ? "raw full text (no card bottleneck)" : "cards (title+core+notes)"} + projecting…`);
+  const embs = useRaw ? embeddings : await embedCards(deck, axes);
   const { xy, xyz, cluster, k, hub, nbr } = await projectAndCluster(embs);
 
   console.error(`[4/5] naming ${k} regions…`);
