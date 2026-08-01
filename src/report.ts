@@ -1,5 +1,4 @@
 import type { MapData } from "./render.ts";
-import { scoreRedundancy } from "./redundancy.ts";
 
 // The shareable artifact: a clean, pastable Markdown summary of a corpus — what it's about, the axes
 // it varies along, what to read next, and the frontier just outside it. Not the 3.5MB explorer; the
@@ -38,10 +37,6 @@ export function buildReport(D: MapData, name = "Corpus"): string {
     ? `The dimensions your reading actually varies along, biggest first — each shows how much of the variation it explains:\n`
     : `⚠ Every discovered axis explains under 2% of the variation — read the map's axes with caution.\n`);
   for (const a of solid) out.push(`- **${a.name}** — ${a.low} ↔ ${a.high}${pct(a)}`);
-  if (solid.length >= 2) {
-    const rg = scoreRedundancy(Object.fromEntries(solid.map((a) => [a.key, D.scores[a.key]])));
-    out.push(`\n_Axis distinctness (main axes): mean |r| ${rg.meanAbsR.toFixed(2)} ${rg.pass ? "— genuinely distinct lenses." : `— ⚠ ${rg.strong} pairs overlap; treat some as one._`}`);
-  }
   if (noisy.length) {
     out.push(`\n**${noisy.length} minor axes** each explain under 2% of the variation — real but thin, don't over-read them:\n`);
     for (const a of noisy) out.push(`- ~~${a.name}~~ — ${a.low} ↔ ${a.high}${pct(a)}`);

@@ -22,7 +22,7 @@ function shuffleColumns(X: number[][]): number[][] {
 const slug = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 40);
 
 export async function discoverAxes(embeddings: number[][], titles: string[], opts: { topN?: number; minCoherence?: number; llm?: any } = {}) {
-  const minCoh = opts.minCoherence ?? 4, NC = 60;
+  const NC = 60;
   const X = embeddings.map(unit);
   const pca = new PCA(X, { center: true });
   const variance = pca.getExplainedVariance();
@@ -58,12 +58,11 @@ export async function discoverAxes(embeddings: number[][], titles: string[], opt
     process.stderr.write(`  PC${k + 1} var${(variance[k] * 100).toFixed(1)}% coh${coh}  ${name}\n`);
     return { pc: k + 1, var: +variance[k].toFixed(4), coherence: +coh.toFixed(1), key: slug(name) || `pc${k + 1}`, name, pole_low: r.lowPoleLabels?.[k] || "", pole_high: r.highPoleLabels?.[k] || "" };
   });
-  const crisp = all.filter((a) => a.coherence >= minCoh);
-  // never return zero axes (small/ambiguous corpora fail the coherence bar) — fall back to the best few
-  // Always surface >= 2 axes: the scatter needs an x AND a y. If the coherence filter leaves fewer,
-  // fall back to the top axes by variance (capped at the real dimensionality).
-  const axes = crisp.length >= 2 ? crisp : all.slice(0, Math.min(Math.max(2, realDims), all.length));
-  return { axes, all, realDims, projections: scores };
+  // The axis COUNT is grug's call, not gorm's: it's min(topN, realDims), fixed deterministically
+  // above, so the same corpus yields the same axes every run. gorm only NAMES them; `coherence` is
+  // kept as a per-axis signal, never a gate — a noisy LLM rating must not change how many axes exist.
+  // (This is what made the count swing 16 -> 2 across identical runs before.)
+  return { axes: all, all, realDims, projections: scores };
 }
 
 // verify against the fixture

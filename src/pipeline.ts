@@ -6,7 +6,6 @@ import { nameCluster } from "./signatures.ts";
 import { provider } from "./provider.ts";
 import { renderHTML, type MapData } from "./render.ts";
 import { trajectory } from "./trajectory.ts";
-import { scoreRedundancy } from "./redundancy.ts";
 import { buildReport } from "./report.ts";
 import { fetchFrontier, buildGhosts } from "./frontier.ts";
 import { loadFixture, type Doc } from "./corpus.ts";
@@ -58,8 +57,7 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
   // (Parallel analysis keeps far more PCs than we surface, so gate on variance, not the dim count.)
   D.axes.forEach((a, i) => { a.weak = axes[i].var < 0.02; });
   const weak = D.axes.filter((a) => a.weak).length;
-  const rg = scoreRedundancy(D.scores);
-  console.error(`  ${D.axes.length - weak}/${D.axes.length} main axes (>=2% variance)${weak ? ` · ${weak} minor` : ""}  ·  distinctness mean|r| ${rg.meanAbsR.toFixed(2)} ${rg.pass ? "✓" : `⚠ ${rg.strong} redundant pairs`}`);
+  console.error(`  ${D.axes.length - weak}/${D.axes.length} main axes (>=2% variance)${weak ? ` · ${weak} minor` : ""}`);
   if (opts.frontier) {
     console.error(`[frontier] telescope — Semantic Scholar citations…`);
     const fr = await fetchFrontier(docs, { cacheFile: "s2-cache.json" });
