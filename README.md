@@ -20,7 +20,9 @@ The discipline is the whole thing, and it's the grug/gorm split made precise:
   PCA on the embeddings (plus a parallel-analysis check so it only keeps axes that beat noise), and
   a document's position on an axis is simply its PCA projection: calibrated, reproducible, exact.
 - **fluid** (an LLM, via [Ax](https://github.com/ax-llm/ax) signatures) only ever **labels** each
-  axis's poles and writes a short **note** per document. It names; it never scores or positions.
+  axis's poles, **re-states** each document in one uniform voice (so a tweet and a paper compare by
+  content, not style — preserving the specifics, matched to the source's density), and writes a
+  short **placement** per axis. It names and normalizes; it never scores or positions.
 
 That constraint — *fluid intelligence may name, never place or invent the ontology* — is why the
 map isn't a hallucinated cartoon of three data points. It's the moat. (An earlier version also had
@@ -54,7 +56,9 @@ bun install
 bun run src/cli.ts example           # try it: a bundled 24-doc demo corpus across domains
 bun run src/cli.ts <folder>          # any folder of .md/.txt -> deck.jsonl + map-data.json + eidoscope.html (+ STATE.md if dated)
 bun run src/cli.ts <folder> --limit 200
+bun run src/cli.ts <folder> --min-chars 100  # include short entries (default: skip bodies < 200 chars, and it says how many)
 bun run src/cli.ts <folder> --frontier   # also pull the citation frontier (arxiv corpora)
+bun run src/cli.ts <folder> --embed raw   # A/B: build the map from raw full-text instead of the cards (to see what the bottleneck buys)
 open eidoscope.html
 ```
 
@@ -84,7 +88,7 @@ fast: LM Studio serializes on a single model, so raising `EIDOSCOPE_CONCURRENCY`
 ## In the viewer
 
 - **layout**: neighbor map (MDE) · **axis scatter** (position by any two discovered axes) · **3D orbit**
-- **color** by region or any axis · **size** by influence (hub-degree) · click a card → its neighbors
+- **color** by region, **source folder / author** (your corpus's own organization as a lens), or any axis · **size** by influence (hub-degree) · click a card → its neighbors
 - **deck**: the cards as a reader — title, core, region, and the 3 axes each most commits to;
   sort by an axis to read the corpus as a spectrum
 - **trajectory** (`STATE.md`): where the corpus's attention moved over time (needs dated docs)
