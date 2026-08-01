@@ -54,6 +54,7 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
   // the cards don't actually track (opt-in via EIDOSCOPE_FIDELITY_GATE — never silently nuke dims;
   // validated: gating at ~0.3 cuts redundancy below target and lifts fidelity, at the cost of fewer axes).
   const fg = scoreFidelity(D.scores, projections, Object.fromEntries(axes.map((a) => [a.key, a.pc - 1])));
+  D.axes.forEach((a) => { const f = fg.perAxis.find((p) => p.key === a.key); a.weak = f ? Math.abs(f.r) < 0.2 : false; }); // flag axes the cards don't track, for the UI
   const gate = Number(process.env.EIDOSCOPE_FIDELITY_GATE || 0);
   if (gate > 0) {
     const keep = new Set(fg.perAxis.filter((a) => Math.abs(a.r) >= gate).map((a) => a.key));
