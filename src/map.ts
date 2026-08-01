@@ -30,44 +30,46 @@ export function projectionScores(projections: number[][], axes: { key: string; p
   return Object.fromEntries(axes.map((a) => [a.key, rank(projections.map((row) => row[a.pc - 1]))]));
 }
 
-// cache key = id + short content hash, so any change to what cardText emits self-invalidates
-// (the cache is keyed by id alone otherwise, which would silently return stale vectors on a re-run).
 const textHash = (s: string) => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0; return h.toString(36); };
 
-export async function embedCards(cards: Card[], axes: Axis[]): Promise<number[][]> {
-  const cache = new EmbeddingCache("cache-eidoscope-cards", CFG.embedModel); await cache.load();
-  const texts = cards.map((c) => cardText(c, axes).slice(0, 1200));
-  const embs = await getTextEmbeddings(cards.map((c, i) => ({ id: c.id + ":" + textHash(texts[i]), text: texts[i] })), { cache });
-  await cache.save();
-  return embs;
-}
-
-// Full-text embedding for the generic path: chunk each document body, embed, mean-pool.
-// (When a loader already provides embeddings — e.g. the readwise fixture — skip this.)
-export async function embedDocs(docs: Doc[]): Promise<number[][]> {
-  const cache = new EmbeddingCache("cache-eidoscope-fulltext", CFG.embedModel); await cache.load();
+// Embed a batch of texts by CHUNK-POOLING: split each into word chunks (so nothing beyond the
+// embedder's context window is silently dropped), embed every chunk in one batched pass, mean-pool
+// back per text. The card path and the full-text path MUST use this identically — otherwise the
+// card gets a single truncated pass while full text gets the whole document, an unfair asymmetry
+// that also discards most of a rich card. Chunks are cached content-addressed (hash+len), so identical
+// chunks dedupe and any change to the source text self-invalidates.
+async function poolEmbed(texts: string[], cacheDir: string): Promise<number[][]> {
+  const cache = new EmbeddingCache(cacheDir, CFG.embedModel); await cache.load();
   const { chunkWords, maxChunks } = CFG.params;
-  // collect EVERY doc's chunks into one list and embed the whole corpus in a single batched pass —
-  // identical vectors (each chunk is embedded independently) but far fewer calls at scale.
   const items: { id: string; text: string }[] = [];
-  const spans: number[][] = docs.map(() => []);
-  docs.forEach((d, di) => {
-    const words = d.body.split(/\s+/).filter(Boolean);
+  const spans: number[][] = texts.map(() => []);
+  texts.forEach((t, di) => {
+    const words = (t || " ").split(/\s+/).filter(Boolean);
     let chunks: string[] = [];
     for (let i = 0; i < words.length; i += chunkWords) chunks.push(words.slice(i, i + chunkWords).join(" "));
     if (chunks.length > maxChunks) { const step = chunks.length / maxChunks, s: string[] = []; for (let i = 0; i < maxChunks; i++) s.push(chunks[Math.floor(i * step)]); chunks = s; }
-    if (!chunks.length) chunks = [d.title];
-    chunks[0] = (d.title ? d.title + ". " : "") + chunks[0];
-    chunks.forEach((text, ci) => { spans[di].push(items.length); items.push({ id: `${d.id}#${ci}`, text }); });
+    if (!chunks.length) chunks = [" "];
+    chunks.forEach((text) => { spans[di].push(items.length); items.push({ id: textHash(text) + "#" + text.length, text }); });
   });
   const embs = await getTextEmbeddings(items, { cache });
   await cache.save();
   const dim = embs[0]?.length ?? 384;
-  return docs.map((_, di) => {
+  return texts.map((_, di) => {
     const idx = spans[di], acc = new Array(dim).fill(0);
     for (const i of idx) for (let j = 0; j < dim; j++) acc[j] += embs[i][j];
     return acc.map((x) => x / (idx.length || 1));
   });
+}
+
+// The card as the map's coordinates — chunk-pooled so the WHOLE card reaches the vector (was a
+// single pass over a 1200-char slice, which threw away most of a rich card).
+export async function embedCards(cards: Card[], axes: Axis[]): Promise<number[][]> {
+  return poolEmbed(cards.map((c) => cardText(c, axes)), "cache-eidoscope-cards");
+}
+
+// Full-text embedding for the generic path (when a loader has no precomputed embeddings).
+export async function embedDocs(docs: Doc[]): Promise<number[][]> {
+  return poolEmbed(docs.map((d) => (d.title ? d.title + ". " : "") + d.body), "cache-eidoscope-fulltext");
 }
 
 const unit = (v: number[]) => { let n = 0; for (const x of v) n += x * x; n = Math.sqrt(n) || 1; return v.map((x) => x / n); };
