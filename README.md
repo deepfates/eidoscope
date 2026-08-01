@@ -76,9 +76,10 @@ EIDOSCOPE_API_URL=http://localhost:1234/v1 EIDOSCOPE_MODEL=google/gemma-4-12b OP
 ```
 
 Two notes from testing: use a **capable** model (≈12B+ — tiny models drop card fields), and give it
-**enough context** (labeling all axes in one call needs ~8k+; 32k is safe). llama.cpp / vLLM work
-the same way. Verify a run's axes are actually distinct: `bun run src/redundancy.ts map-data.json`
-(target mean |r| < 0.3 — small corpora with little conceptual spread will fail it, honestly).
+**enough context** (labeling all axes in one call needs ~8k+; 32k is safe). And mind the speed — one
+card is one LLM call, and on local hardware that's tens of seconds each, so a large corpus (1000+
+docs) is an overnight run. Reach for a cloud endpoint, or a batching server (vLLM), when you want it
+fast: LM Studio serializes on a single model, so raising `EIDOSCOPE_CONCURRENCY` barely helps there.
 
 ## In the viewer
 
