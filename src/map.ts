@@ -102,7 +102,7 @@ if (import.meta.main) {
   console.log(`(1) embedded ${cardEmbs.length} cards -> ${cardEmbs[0].length}-dim`);
 
   // project the fixture's already-embedded 1350 cards (enough points for a real layout)
-  const CE = JSON.parse(readFileSync("/Users/deepfates/Hacking/readwise/triangulation/runs/main/card-embs.json", "utf8"));
+  const CE = JSON.parse(readFileSync((process.env.EIDOSCOPE_FIXTURE ?? ".") + "/card-embs.json", "utf8"));
   console.error(`projecting ${CE.embs.length} fixture card embeddings...`);
   const { xy, xyz, cluster, k, hub } = await projectAndCluster(CE.embs);
   const xs = xy.map((p) => p[0]);

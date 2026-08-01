@@ -43,8 +43,11 @@ export function loadFolder(dir: string, opts: { limit?: number; minChars?: numbe
   return opts.limit ? docs.slice(0, opts.limit) : docs;
 }
 
-const FIX = process.env.EIDOSCOPE_FIXTURE ?? "/Users/deepfates/Hacking/readwise/triangulation/runs/main";
-const MD = process.env.EIDOSCOPE_FIXTURE_MD ?? "/Users/deepfates/Hacking/readwise/markdown-export";
+// The fixture (`--fixture`) is a personal corpus with precomputed embeddings; point these at your own
+// via EIDOSCOPE_FIXTURE / EIDOSCOPE_FIXTURE_MD (e.g. in a gitignored .env — bun auto-loads it). Most
+// users don't need it: `bun run src/cli.ts <folder>` works on any folder of .md/.txt with no setup.
+const FIX = process.env.EIDOSCOPE_FIXTURE ?? "";
+const MD = process.env.EIDOSCOPE_FIXTURE_MD ?? "";
 
 const strip = (raw: string) =>
   raw.split(/\n---\n/).slice(1).join("\n")
@@ -53,6 +56,7 @@ const strip = (raw: string) =>
     .replace(/\s+/g, " ").trim();
 
 export function loadFixture(): { docs: Doc[]; embeddings: number[][] } {
+  if (!FIX || !MD) throw new Error("--fixture needs EIDOSCOPE_FIXTURE + EIDOSCOPE_FIXTURE_MD set (a dir with corpus-fulltext.json + clean-ids.json, and a markdown dir). Most users want `bun run src/cli.ts <folder>` instead.");
   const C = JSON.parse(readFileSync(`${FIX}/corpus-fulltext.json`, "utf8"));
   const keep = new Set(JSON.parse(readFileSync(`${FIX}/clean-ids.json`, "utf8")).keep);
   const idToFile = new Map<string, string>();

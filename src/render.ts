@@ -144,7 +144,7 @@ W=innerWidth;H=innerHeight;cv.width=W*DPR;cv.height=H*DPR;buildLegend();syncXY()
 }
 
 if (import.meta.main) {
-  const D = JSON.parse(readFileSync("/Users/deepfates/Hacking/readwise/triangulation/runs/main/mde-data.json", "utf8"));
+  const D = JSON.parse(readFileSync((process.env.EIDOSCOPE_FIXTURE ?? ".") + "/mde-data.json", "utf8"));
   const html = renderHTML(D);
   writeFileSync("eidoscope-fixture.html", html);
   const script = html.match(/<script>([\s\S]*)<\/script>/)![1];

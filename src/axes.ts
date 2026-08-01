@@ -67,7 +67,7 @@ export async function discoverAxes(embeddings: number[][], titles: string[], opt
 
 // verify against the fixture
 if (import.meta.main) {
-  const FIX = "/Users/deepfates/Hacking/readwise/triangulation/runs/main";
+  const FIX = process.env.EIDOSCOPE_FIXTURE ?? "";
   const C = JSON.parse(readFileSync(`${FIX}/corpus-fulltext.json`, "utf8"));
   const keep = new Set(JSON.parse(readFileSync(`${FIX}/clean-ids.json`, "utf8")).keep);
   const rows = C.meta.map((m: any, i: number) => ({ m, i })).filter((r: any) => keep.has(r.m.id));

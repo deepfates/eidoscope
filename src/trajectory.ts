@@ -33,7 +33,7 @@ export function trajectory(D: TD): string | null {
 }
 
 if (import.meta.main) {
-  const D = JSON.parse(readFileSync("/Users/deepfates/Hacking/readwise/triangulation/runs/main/mde-data.json", "utf8"));
+  const D = JSON.parse(readFileSync((process.env.EIDOSCOPE_FIXTURE ?? ".") + "/mde-data.json", "utf8"));
   const md = trajectory({ saved: D.saved, cluster: D.cluster, scores: D.scores, axes: D.axes, clusters: D.clusters });
   if (md) { writeFileSync("STATE.md", md); console.log(md.split("\n").slice(0, 15).join("\n"), "\n\n✅ trajectory works — STATE.md written"); }
   else console.log("⚠ not enough dated docs");

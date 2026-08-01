@@ -5,8 +5,8 @@ import { readFileSync, readdirSync } from "node:fs";
 import { deriveCard } from "./signatures.ts";
 import { provider } from "./provider.ts";
 
-const FIX = "/Users/deepfates/Hacking/readwise/triangulation/runs/main";
-const MD = "/Users/deepfates/Hacking/readwise/markdown-export";
+const FIX = process.env.EIDOSCOPE_FIXTURE ?? "";
+const MD = process.env.EIDOSCOPE_FIXTURE_MD ?? "";
 
 const axes = JSON.parse(readFileSync(`${FIX}/axes-schema.json`, "utf8")).axes;
 const axesText = axes.map((a: any, i: number) => `${i + 1}. ${a.name}: low="${a.pole_low}" high="${a.pole_high}"`).join("\n");
