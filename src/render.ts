@@ -7,7 +7,7 @@ import { writeFileSync, readFileSync } from "node:fs";
 export type MapData = {
   ids: string[]; titles: string[]; cores: string[];
   notes: Record<string, string>[];
-  axes: { key: string; name: string; low: string; high: string; weak?: boolean }[];
+  axes: { key: string; name: string; low: string; high: string; weak?: boolean; variance?: number }[];
   scores: Record<string, number[]>;
   xy: number[][]; xyz: number[][]; cluster: number[]; k: number; hub: number[]; nbr: number[][];
   clusters: { c: number; n: number; label: string; cx: number; cy: number }[];
@@ -85,7 +85,7 @@ function draw(){ctx.setTransform(DPR,0,0,DPR,0,0);ctx.clearRect(0,0,W,H);const q
   if(showLabels&&color==='cluster'&&hlCluster==null){const cen={};for(const n of nodes){(cen[n.cl]=cen[n.cl]||[0,0,0]);cen[n.cl][0]+=n.cur[0];cen[n.cl][1]+=n.cur[1];cen[n.cl][2]++}ctx.textAlign='center';ctx.font='700 12px var(--sans)';for(const c of clusters){const g=cen[c.c];if(!g)continue;const px=W/2+(g[0]/g[2])*base()*view.s+view.x,py=H/2-(g[1]/g[2])*base()*view.s+view.y;ctx.fillStyle=css('--bg');ctx.globalAlpha=.72;const tw=ctx.measureText(c.label).width;ctx.fillRect(px-tw/2-5,py-9,tw+10,17);ctx.globalAlpha=1;ctx.fillStyle='hsl('+HUES[c.c%HUES.length]+' 62% 62%)';ctx.fillText(c.label,px,py+3)}}
   if(layout==='axes'){const tr=s=>{s=s||'';return s.length>46?s.slice(0,44)+'…':s};ctx.save();ctx.font='600 11.5px var(--sans)';ctx.fillStyle=css('--ink');ctx.globalAlpha=.85;ctx.textBaseline='middle';ctx.textAlign='left';ctx.fillText('← '+tr(AX[xKey].low),14,H/2);ctx.textAlign='right';ctx.fillText(tr(AX[xKey].high)+' →',W-14,H/2);ctx.textAlign='center';ctx.textBaseline='top';ctx.fillText('↑ '+tr(AX[yKey].high),W/2,16);ctx.textBaseline='bottom';ctx.fillText('↓ '+tr(AX[yKey].low),W/2,H-34);ctx.restore()}
   document.getElementById('count').textContent=nodes.length+' cards · '+layout+(sizeBy!=='uniform'?' · size='+sizeBy:'');
-  document.getElementById('axhint').innerHTML=layout==='axes'?'each card positioned by its score on the two axes'+((AX[xKey].weak||AX[yKey].weak)?' · <b>~</b> = the cards track this axis weakly':''):(layout==='orbit'?'drag to rotate':(focus?'showing '+focus.nbr.length+' nearest — click empty space to clear':'proximity = similarity · click a card for its neighbors'))}
+  document.getElementById('axhint').innerHTML=layout==='axes'?'each card positioned by where it projects on the two axes'+((AX[xKey].weak||AX[yKey].weak)?' · <b>~</b> = minor axis (explains little variance)':''):(layout==='orbit'?'drag to rotate':(focus?'showing '+focus.nbr.length+' nearest — click empty space to clear':'proximity = similarity · click a card for its neighbors'))}
 let raf=null;function tick(){let m=false;for(const n of nodes)for(let d=0;d<2;d++){const df=n.tg[d]-n.cur[d];if(Math.abs(df)>1e-4){n.cur[d]+=df*.16;m=true}else n.cur[d]=n.tg[d]}draw();if(m)raf=requestAnimationFrame(tick);else raf=null}
 function relayout(){retarget();if(!raf)raf=requestAnimationFrame(tick)}
 function pick(mx,my){let b=null,bd=1e9;for(const n of nodes){const p=S(n);const d=(p.x-mx)**2+(p.y-my)**2;const rr=(rad(n)+4)**2;if(d<rr&&d<bd){bd=d;b=n}}return b}
@@ -139,7 +139,7 @@ function buildDeck(){const el=document.getElementById('deck');const opts=['hub',
 window.toggleDeck=()=>{const el=document.getElementById('deck'),on=!el.classList.contains('on');el.classList.toggle('on',on);document.getElementById('deckbtn').classList.toggle('on',on);if(on)buildDeck();};
 document.getElementById('deckbtn').onclick=()=>window.toggleDeck();
 W=innerWidth;H=innerHeight;cv.width=W*DPR;cv.height=H*DPR;buildLegend();syncXY();draw();
-(function(){const el=document.getElementById('intro'),weak=axes.filter(a=>a.weak).length;document.getElementById('introsub').textContent=nodes.length+' documents · '+axes.length+' discovered axes · '+k+' regions'+(nodes.length<50?' · small corpus, axes are noisy':weak?' · '+weak+' axis(es) the cards track weakly':'');const seen=()=>{el.classList.remove('on');try{localStorage.setItem('eido-seen','1')}catch(e){}};try{if(!localStorage.getItem('eido-seen'))el.classList.add('on')}catch(e){el.classList.add('on')}document.getElementById('introgo').onclick=seen;el.onclick=e=>{if(e.target===el)seen()};})();
+(function(){const el=document.getElementById('intro'),weak=axes.filter(a=>a.weak).length;document.getElementById('introsub').textContent=nodes.length+' documents · '+axes.length+' discovered axes · '+k+' regions'+(nodes.length<50?' · small corpus, axes are noisy':weak?' · '+weak+' minor axis(es), low variance':'');const seen=()=>{el.classList.remove('on');try{localStorage.setItem('eido-seen','1')}catch(e){}};try{if(!localStorage.getItem('eido-seen'))el.classList.add('on')}catch(e){el.classList.add('on')}document.getElementById('introgo').onclick=seen;el.onclick=e=>{if(e.target===el)seen()};})();
 </script>`;
 }
 

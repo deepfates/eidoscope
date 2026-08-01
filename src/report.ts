@@ -19,7 +19,7 @@ export function buildReport(D: MapData, name = "Corpus"): string {
   const noisy = D.axes.filter((a) => a.weak);
 
   out.push(`# ${name} — eidoscope report\n`);
-  out.push(`**${n} documents**${span ? ` · ${span}` : ""} · ${D.k} regions · ${solid.length} solid axes${noisy.length ? ` (+${noisy.length} too noisy to trust)` : ""}\n`);
+  out.push(`**${n} documents**${span ? ` · ${span}` : ""} · ${D.k} regions · ${solid.length} main axes${noisy.length ? ` (+${noisy.length} minor)` : ""}\n`);
 
   // What it's about — regions by size, each with its most-central (highest-hub) member
   out.push(`## What it's about\n`);
@@ -30,20 +30,21 @@ export function buildReport(D: MapData, name = "Corpus"): string {
     out.push(`- **${c.label}** (${c.n})${top != null ? ` — e.g. *${D.titles[top]}*` : ""}`);
   }
 
-  // How it varies — LEAD with the axes that held up under the fidelity check; the ones the cards
-  // don't track get quarantined below, not listed as equals. The tool knows which are noise — say so.
+  // How it varies — LEAD with the main axes and show the % of variation each explains; the minor
+  // (<2%) ones get quarantined below with their % too, not listed as equals. Show the number, not a verdict.
+  const pct = (a: typeof D.axes[number]) => (a.variance != null ? ` — _${(a.variance * 100).toFixed(1)}% of the variation_` : "");
   out.push(`\n## How it varies\n`);
   out.push(solid.length
-    ? `The dimensions the corpus actually spreads along — these **${solid.length}** held up under the fidelity check (the cards track them):\n`
-    : `⚠ **None** of the discovered axes held up under the fidelity check — treat the map's axes as noise.\n`);
-  for (const a of solid) out.push(`- **${a.name}** — ${a.low} ↔ ${a.high}`);
+    ? `The dimensions your reading actually varies along, biggest first — each shows how much of the variation it explains:\n`
+    : `⚠ Every discovered axis explains under 2% of the variation — read the map's axes with caution.\n`);
+  for (const a of solid) out.push(`- **${a.name}** — ${a.low} ↔ ${a.high}${pct(a)}`);
   if (solid.length >= 2) {
     const rg = scoreRedundancy(Object.fromEntries(solid.map((a) => [a.key, D.scores[a.key]])));
-    out.push(`\n_Axis distinctness (solid axes): mean |r| ${rg.meanAbsR.toFixed(2)} ${rg.pass ? "— genuinely distinct lenses." : `— ⚠ ${rg.strong} pairs overlap; treat some as one._`}`);
+    out.push(`\n_Axis distinctness (main axes): mean |r| ${rg.meanAbsR.toFixed(2)} ${rg.pass ? "— genuinely distinct lenses." : `— ⚠ ${rg.strong} pairs overlap; treat some as one._`}`);
   }
   if (noisy.length) {
-    out.push(`\n**${noisy.length} discovered axes did _not_ hold up** — the cards don't track them, so don't read meaning into these:\n`);
-    for (const a of noisy) out.push(`- ~~${a.name}~~ — ${a.low} ↔ ${a.high}  _(noisy)_`);
+    out.push(`\n**${noisy.length} minor axes** each explain under 2% of the variation — real but thin, don't over-read them:\n`);
+    for (const a of noisy) out.push(`- ~~${a.name}~~ — ${a.low} ↔ ${a.high}${pct(a)}`);
   }
 
   // Read next — highest-influence documents, filtered to unread when read-state is known

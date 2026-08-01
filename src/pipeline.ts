@@ -45,7 +45,7 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
   const D: MapData = {
     ids: deck.map((c) => c.id), titles: deck.map((c) => c.title), cores: deck.map((c) => c.core),
     notes: deck.map((c) => Object.fromEntries(axes.map((a) => [a.key, c.axes[a.key]?.note || ""]))),
-    axes: axes.map((a) => ({ key: a.key, name: a.name, low: a.pole_low, high: a.pole_high })),
+    axes: axes.map((a) => ({ key: a.key, name: a.name, low: a.pole_low, high: a.pole_high, variance: a.var })),
     scores: projectionScores(projections, axes),
     xy, xyz, cluster, k, hub, nbr, clusters,
     urls: deck.map((c) => c.url || (c.path ? "file://" + c.path : undefined)),
@@ -53,12 +53,13 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
     read: deck.map((c) => (c.readProgress != null ? c.readProgress > 0.05 : undefined)),
   };
   // Positions ARE the deterministic PCA projection (see `scores` above) — the LLM no longer scores
-  // anything. Honesty is now structural, not a proxy: an axis is trustworthy iff parallel analysis
-  // kept it (pc <= realDims). No fidelity guard, no gate — there is no LLM score left to police.
-  D.axes.forEach((a, i) => { a.weak = axes[i].pc > realDims; });
+  // anything, so there's no fidelity proxy to police. Honesty is now the variance each axis explains:
+  // a "minor" axis (<2%) is a real but thin direction — surfaced, flagged, and its % shown in the report.
+  // (Parallel analysis keeps far more PCs than we surface, so gate on variance, not the dim count.)
+  D.axes.forEach((a, i) => { a.weak = axes[i].var < 0.02; });
   const weak = D.axes.filter((a) => a.weak).length;
   const rg = scoreRedundancy(D.scores);
-  console.error(`  ${D.axes.length - weak}/${D.axes.length} axes above the noise floor (parallel analysis)${weak ? ` · ${weak} weak` : ""}  ·  distinctness mean|r| ${rg.meanAbsR.toFixed(2)} ${rg.pass ? "✓" : `⚠ ${rg.strong} redundant pairs`}`);
+  console.error(`  ${D.axes.length - weak}/${D.axes.length} main axes (>=2% variance)${weak ? ` · ${weak} minor` : ""}  ·  distinctness mean|r| ${rg.meanAbsR.toFixed(2)} ${rg.pass ? "✓" : `⚠ ${rg.strong} redundant pairs`}`);
   if (opts.frontier) {
     console.error(`[frontier] telescope — Semantic Scholar citations…`);
     const fr = await fetchFrontier(docs, { cacheFile: "s2-cache.json" });
