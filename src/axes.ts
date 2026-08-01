@@ -26,7 +26,6 @@ export async function discoverAxes(embeddings: number[][], titles: string[], opt
   const X = embeddings.map(unit);
   const pca = new PCA(X, { center: true });
   const variance = pca.getExplainedVariance();
-  const topN = Math.min(opts.topN ?? 16, variance.length); // small corpora yield fewer PCs than 16
   const scores = pca.predict(X).to2DArray(); // n x components
 
   // parallel analysis -> honest #dims above the 95th-pct noise floor
@@ -34,6 +33,12 @@ export async function discoverAxes(embeddings: number[][], titles: string[], opt
   for (let r = 0; r < REP; r++) noise.push(evr(shuffleColumns(X), NC));
   const n95 = (k: number) => { const c = noise.map((row) => row[k]).sort((a, b) => a - b); return c[Math.floor(0.95 * (REP - 1))]; };
   let realDims = 0; for (let k = 0; k < NC; k++) { if (variance[k] > n95(k)) realDims++; else break; }
+
+  // Surface only as many axes as the DATA supports. realDims (the parallel-analysis count of PCs
+  // that beat noise) is the honest ceiling — cap the fixed request by it so we never show more
+  // interpretable axes than are actually real. (This is the fix for a 24-doc corpus with 8 real
+  // dims still showing a hardcoded top-16: half the axes were noise by our own measurement.)
+  const topN = Math.min(opts.topN ?? 16, Math.max(realDims, 2), variance.length);
 
   // Label ALL top-N axes in ONE call so the model sees the whole orthogonal set and names each a
   // DISTINCT contrast — instead of 16 isolated calls each rediscovering the dominant one. (Verified:
@@ -55,7 +60,10 @@ export async function discoverAxes(embeddings: number[][], titles: string[], opt
   });
   const crisp = all.filter((a) => a.coherence >= minCoh);
   // never return zero axes (small/ambiguous corpora fail the coherence bar) — fall back to the best few
-  return { axes: crisp.length ? crisp : all.slice(0, Math.min(6, all.length)), all, realDims, projections: scores };
+  // Always surface >= 2 axes: the scatter needs an x AND a y. If the coherence filter leaves fewer,
+  // fall back to the top axes by variance (capped at the real dimensionality).
+  const axes = crisp.length >= 2 ? crisp : all.slice(0, Math.min(Math.max(2, realDims), all.length));
+  return { axes, all, realDims, projections: scores };
 }
 
 // verify against the fixture
