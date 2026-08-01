@@ -49,6 +49,7 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
     xy, xyz, cluster, k, hub, nbr, clusters,
     urls: deck.map((c) => c.url || (c.path ? "file://" + c.path : undefined)),
     authors: deck.map((c) => c.author), tags: deck.map((c) => c.tags), dates: deck.map((c) => c.date),
+    read: deck.map((c) => (c.readProgress != null ? c.readProgress > 0.05 : undefined)),
   };
   // honest-measurement: report redundancy + fidelity every run. Optional fidelity GATE drops axes
   // the cards don't actually track (opt-in via EIDOSCOPE_FIDELITY_GATE — never silently nuke dims;

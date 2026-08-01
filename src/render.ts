@@ -11,7 +11,7 @@ export type MapData = {
   scores: Record<string, number[]>;
   xy: number[][]; xyz: number[][]; cluster: number[]; k: number; hub: number[]; nbr: number[][];
   clusters: { c: number; n: number; label: string; cx: number; cy: number }[];
-  urls?: (string | undefined)[]; authors?: (string | undefined)[]; tags?: (string[] | undefined)[]; dates?: (number | undefined)[];
+  urls?: (string | undefined)[]; authors?: (string | undefined)[]; tags?: (string[] | undefined)[]; dates?: (number | undefined)[]; read?: (boolean | undefined)[];
   cite?: number[][]; citec?: number[];  // intra-corpus citation edges + impact (frontier telescope)
   ghosts?: { title: string; arxiv: string; url: string; n: number; core: string; xy: [number, number]; sim: number }[];
 };
@@ -20,7 +20,7 @@ export function renderHTML(D: MapData): string {
   const nodes = D.ids.map((id, i) => ({
     id, i, t: (D.titles[i] || "").slice(0, 90), core: D.cores[i] || "", cl: D.cluster[i],
     xy: D.xy[i], xyz: D.xyz[i], notes: D.notes[i] || {}, hub: D.hub[i] || 0, nbr: D.nbr[i] || [],
-    url: D.urls?.[i], author: D.authors?.[i], tags: D.tags?.[i], date: D.dates?.[i],
+    url: D.urls?.[i], author: D.authors?.[i], tags: D.tags?.[i], date: D.dates?.[i], read: D.read?.[i],
     sc: Object.fromEntries(D.axes.map((a) => [a.key, D.scores[a.key]?.[i] ?? 50])),
   }));
   const payload = JSON.stringify({ nodes, axes: D.axes, k: D.k, clusters: D.clusters, ghosts: D.ghosts || [], cite: D.cite || [], citec: D.citec || [] }).replace(/<\//g, "<\\/");
@@ -41,9 +41,9 @@ select{flex:1;background:var(--bg);border:1px solid var(--hair);border-radius:7p
 #detail{top:14px;right:14px;width:290px;max-height:74vh;overflow:auto;padding:13px 15px;display:none;z-index:10}#detail.on{display:block}#detail .t{font-weight:800;font-size:13.5px;margin-bottom:5px}#detail .co{font-size:11.5px;line-height:1.5;color:var(--soft);margin-bottom:9px}#detail h4{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--soft);margin:10px 0 4px}#detail .nb{font-size:11.5px;padding:3px 5px;border-radius:5px;cursor:pointer}#detail .nb:hover{background:color-mix(in srgb,var(--ink) 12%,transparent)}#detail .x{position:absolute;top:9px;right:11px;cursor:pointer;color:var(--soft);font-family:var(--mono)}#detail .meta{font-family:var(--mono);font-size:10px;color:var(--soft);margin-bottom:6px}#detail .open{display:inline-block;margin:0 0 9px;font-family:var(--mono);font-size:11px;font-weight:700;color:hsl(210 90% 62%);text-decoration:none}#detail .open:hover{text-decoration:underline}#detail .ax{display:flex;justify-content:space-between;gap:8px;font-size:11px;padding:3px 0;border-bottom:1px solid var(--hair)}#detail .axn{color:var(--soft)}#detail .axs{font-family:var(--mono);font-size:10px;white-space:nowrap}
 #deck{top:14px;left:50%;transform:translateX(-50%);width:min(940px,88vw);max-height:82vh;overflow:auto;padding:12px 14px;display:none;z-index:11}#deck.on{display:block}
 #deck .top{display:flex;gap:10px;align-items:center;margin-bottom:9px}#deck .top .x{margin-left:auto;cursor:pointer;color:var(--soft);font-family:var(--mono)}
-#deck .top select,#deck .top input{background:var(--bg);border:1px solid var(--hair);border-radius:7px;padding:4px 8px;font:11px var(--sans);color:var(--ink)}
+#deck .top select,#deck .top input{background:var(--bg);border:1px solid var(--hair);border-radius:7px;padding:4px 8px;font:11px var(--sans);color:var(--ink)}#deck .top button{background:var(--panel);border:1px solid var(--hair);border-radius:7px;padding:4px 9px;font:11px var(--sans);color:var(--ink);cursor:pointer;flex:0 0 auto}#deck .top button.on{background:var(--ink);color:var(--bg)}
 #deck .list{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:8px}
-#deck .card{position:relative;border:1px solid var(--hair);border-radius:10px;padding:10px 12px;cursor:pointer;background:var(--bg)}#deck .card:hover{border-color:var(--soft)}#deck .card .ct{padding-right:44px}#deck .dopen{position:absolute;top:9px;right:10px;font-family:var(--mono);font-size:10px;font-weight:700;color:hsl(210 90% 62%);text-decoration:none;z-index:1}#deck .dopen:hover{text-decoration:underline}
+#deck .card{position:relative;border:1px solid var(--hair);border-radius:10px;padding:10px 12px;cursor:pointer;background:var(--bg)}#deck .card:hover{border-color:var(--soft)}#deck .card.read{opacity:.5}#deck .card .ct{padding-right:44px}#deck .dopen{position:absolute;top:9px;right:10px;font-family:var(--mono);font-size:10px;font-weight:700;color:hsl(210 90% 62%);text-decoration:none;z-index:1}#deck .dopen:hover{text-decoration:underline}
 #deck .card .ct{font-weight:700;font-size:12.5px;margin-bottom:4px;line-height:1.25}#deck .card .cc{font-size:11px;color:var(--soft);line-height:1.42;margin-bottom:8px}
 #deck .chips{display:flex;flex-wrap:wrap;gap:4px}#deck .chip{font-family:var(--mono);font-size:9px;padding:2px 7px;border-radius:20px;background:color-mix(in srgb,var(--ink) 9%,transparent);color:var(--soft);white-space:nowrap}#deck .chip.hi{color:var(--ink);background:color-mix(in srgb,var(--ink) 16%,transparent)}#deck .chip.reg{color:var(--ink)}
 .ctrl2{position:fixed;top:14px;left:316px;display:flex;gap:8px;z-index:9;font-family:var(--mono);font-size:11px}.ctrl2 button{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--hair);border-radius:7px;padding:6px 9px;cursor:pointer}.ctrl2 button.on{background:var(--ink);color:var(--bg)}
@@ -113,23 +113,26 @@ const fb=document.getElementById('frontbtn');if(fb)fb.onclick=e=>{frontierOn=!fr
 addEventListener('resize',()=>{DPR=Math.min(2,devicePixelRatio||1);W=innerWidth;H=innerHeight;cv.width=W*DPR;cv.height=H*DPR;draw()});
 // deck-view: a READER, not a wall. title + core + region + the 3 strongest axis placements.
 // sort by influence or any axis (sorting by an axis makes it a readable spectrum). filterable.
-let deckSort='hub',deckQ='';
+let deckSort='hub',deckQ='',deckUnread=false;const hasRead=nodes.some(n=>n.read!==undefined);
 const regOf=n=>clusters.find(c=>c.c===n.cl)?.label||'region';
 function chip(n,a,forceHi){const s=Math.round(n.sc[a.key]||50);const hi=forceHi||Math.abs(s-50)>22;const dir=s>=50?'▲':'▼';return '<span class="chip'+(hi?' hi':'')+'">'+esc(a.name.split(/ vs\.? | and /i)[0].slice(0,16))+' '+s+dir+'</span>';}
 function buildDeck(){const el=document.getElementById('deck');const opts=['hub',...axes.map(a=>a.key)];
   let list=nodes.slice();
   if(deckQ)list=list.filter(n=>n.t.toLowerCase().includes(deckQ)||n.core.toLowerCase().includes(deckQ));
+  if(deckUnread)list=list.filter(n=>n.read!==true);
   list.sort((a,b)=>deckSort==='hub'?b.hub-a.hub:(b.sc[deckSort]||0)-(a.sc[deckSort]||0));
   el.innerHTML='<div class="top"><b style="font-size:13px">Deck</b><span style="font-family:var(--mono);font-size:10px;color:var(--soft)">'+list.length+' cards · sort</span>'+
     '<select id="dsort" style="flex:0 0 auto;width:190px">'+opts.map(o=>'<option value="'+o+'"'+(o===deckSort?' selected':'')+'>'+(o==='hub'?'influence':esc(AX[o].name))+'</option>').join('')+'</select>'+
+    (hasRead?'<button id="dunread" class="'+(deckUnread?'on':'')+'">unread only</button>':'')+
     '<input id="dq" placeholder="filter…" value="'+esc(deckQ)+'" style="flex:1;min-width:70px"><span class="x" onclick="toggleDeck()">✕</span></div>'+
     '<div class="list">'+list.slice(0,300).map(n=>{
       const top=axes.map(a=>({a,d:Math.abs((n.sc[a.key]||50)-50)})).sort((x,y)=>y.d-x.d).slice(0,3);
       const chips=(deckSort!=='hub'?chip(n,AX[deckSort],true):'')+top.filter(t=>deckSort==='hub'||t.a.key!==deckSort).slice(0,3).map(t=>chip(n,t.a)).join('');
       const dopen=n.url?'<a class="dopen" href="'+esc(n.url)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()">open →</a>':'';
-      return '<div class="card" onclick="focusIdx('+n.i+');toggleDeck()">'+dopen+'<div class="ct">'+esc(n.t)+'</div><div class="cc">'+esc(n.core.slice(0,180))+'</div><div class="chips"><span class="chip reg">◆ '+esc(regOf(n))+'</span>'+chips+'</div></div>';
+      return '<div class="card'+(n.read===true?' read':'')+'" onclick="focusIdx('+n.i+');toggleDeck()">'+dopen+'<div class="ct">'+esc(n.t)+'</div><div class="cc">'+esc(n.core.slice(0,180))+'</div><div class="chips"><span class="chip reg">◆ '+esc(regOf(n))+'</span>'+(n.read===true?'<span class="chip">✓ read</span>':'')+chips+'</div></div>';
     }).join('')+'</div>';
   document.getElementById('dsort').onchange=e=>{deckSort=e.target.value;buildDeck();};
+  const du=document.getElementById('dunread');if(du)du.onclick=()=>{deckUnread=!deckUnread;buildDeck();};
   const dq=document.getElementById('dq');dq.oninput=()=>{deckQ=dq.value.toLowerCase();buildDeck();};dq.focus();dq.setSelectionRange(dq.value.length,dq.value.length);}
 window.toggleDeck=()=>{const el=document.getElementById('deck'),on=!el.classList.contains('on');el.classList.toggle('on',on);document.getElementById('deckbtn').classList.toggle('on',on);if(on)buildDeck();};
 document.getElementById('deckbtn').onclick=()=>window.toggleDeck();

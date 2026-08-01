@@ -34,10 +34,15 @@ export function buildReport(D: MapData, name = "Corpus"): string {
   const rg = scoreRedundancy(D.scores);
   out.push(`\n_Axis distinctness: mean |r| ${rg.meanAbsR.toFixed(2)} ${rg.pass ? "— axes are genuinely distinct lenses." : `— ⚠ ${rg.strong} pairs overlap; treat some axes as one._`}`);
 
-  // Read next — highest-influence documents
-  out.push(`\n## Read next\nThe most connected documents (structural influence):\n`);
-  const ranked = D.ids.map((_, i) => i).sort((a, b) => (hub[b] || 0) - (hub[a] || 0)).slice(0, 10);
-  ranked.forEach((i, r) => out.push(`${r + 1}. ${link(i)} — *${regionOf(i)}*`));
+  // Read next — highest-influence documents, filtered to unread when read-state is known
+  const known = (D.read || []).some((r) => r !== undefined);
+  const readN = (D.read || []).filter((r) => r === true).length;
+  out.push(`\n## Read next\n`);
+  out.push(known
+    ? `You've opened **${readN} of ${n}** (${Math.round((100 * readN) / n)}%). The most influential of the **${n - readN}** you haven't:\n`
+    : `The most connected documents (structural influence):\n`);
+  const pool = D.ids.map((_, i) => i).filter((i) => !known || D.read?.[i] !== true);
+  pool.sort((a, b) => (hub[b] || 0) - (hub[a] || 0)).slice(0, 10).forEach((i, r) => out.push(`${r + 1}. ${link(i)} — *${regionOf(i)}*`));
 
   // Frontier — the canon you cite but don't own
   if (D.ghosts && D.ghosts.length) {
