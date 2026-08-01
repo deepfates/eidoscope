@@ -4,13 +4,15 @@ import { ax } from "@ax-llm/ax";
 // The model may LABEL axes and SCORE documents — it never invents the axes themselves.
 // (Ax requires descriptive field names, so no bare `text`/`title`/`name`.)
 
-// Place a document on the corpus's discovered axes. The result IS the card (its eidos).
+// Restate a document in one uniform voice and place it on the corpus's discovered axes. The result IS
+// the card (its eidos) — the normalized form we embed and compare to build the map. Intent lives in the
+// field descriptions (declarative); wording/format is the optimizer's job later, so no length cuffs here.
 export const deriveCard = ax(`
   documentTitle:string,
-  documentBody:string "the document body or abstract",
-  corpusAxes:string "numbered list of the corpus axes, each with its low and high pole" ->
-  coreSummary:string "2-3 dense sentences: what this document is, argues, and contributes",
-  axisNotes:string[] "one short document-specific note per axis, in the given order"
+  documentText:string "the full document",
+  corpusAxes:string "the corpus's discovered axes, each with its low pole and high pole, in order" ->
+  restatement:string "restate this document in one neutral, uniform voice — the same voice for every author, source, and format — so documents can be compared by content instead of style. Keep every distinguishing detail: named entities, quantities, specific claims, mechanisms. Remove only genuine redundancy; match the source's information density — a short, dense document stays short, never padded, and a rich one is never flattened into a vague gist. This is a normalization, not a summary.",
+  axisPlacements:string[] "one entry per axis, in the given order: in neutral language, what in this document places it where it sits on that axis relative to the rest of the corpus. Every document has a position on every axis."
 `);
 
 // Name a discovered statistical axis from the documents sitting at its two poles.

@@ -11,10 +11,10 @@ export type Card = { id: string; title: string; cat?: string; date?: number; url
 export const axesPrompt = (axes: Axis[]) =>
   axes.map((a, i) => `${i + 1}. ${a.name}: low="${a.pole_low}" high="${a.pole_high}"`).join("\n");
 
-export async function cardCorpus(docs: Doc[], axes: Axis[], opts: { llm?: any; sig?: any; concurrency?: number; excerptChars?: number; cache?: string; onProgress?: (n: number) => void } = {}): Promise<Card[]> {
+export async function cardCorpus(docs: Doc[], axes: Axis[], opts: { llm?: any; sig?: any; concurrency?: number; cache?: string; onProgress?: (n: number) => void } = {}): Promise<Card[]> {
   const llm = opts.llm ?? provider();
   const sig = opts.sig ?? deriveCard;
-  const conc = opts.concurrency ?? 12, cut = opts.excerptChars ?? 7000;
+  const conc = opts.concurrency ?? 12;
   const corpusAxes = axesPrompt(axes);
 
   // RESUMABLE: cards persist to a JSONL cache as they're produced (crash-safe, one card per line).
@@ -40,10 +40,11 @@ export async function cardCorpus(docs: Doc[], axes: Axis[], opts: { llm?: any; s
     while (q.length) {
       const d = q.pop()!;
       try {
-        const c: any = await sig.forward(llm, { documentTitle: d.title, documentBody: d.body.slice(0, cut), corpusAxes });
+        // the whole document — compression is the point; truncating at an arbitrary offset is not compression.
+        const c: any = await sig.forward(llm, { documentTitle: d.title, documentText: d.body, corpusAxes });
         const ax: Record<string, { note: string }> = {};
-        axes.forEach((a, i) => { ax[a.key] = { note: String(c.axisNotes?.[i] ?? "") }; });
-        const card: Card = { id: d.id, title: d.title, cat: d.cat, date: d.date, url: d.url, author: d.author, tags: d.tags, path: d.path, readProgress: d.readProgress, core: String(c.coreSummary ?? ""), axes: ax };
+        axes.forEach((a, i) => { ax[a.key] = { note: String(c.axisPlacements?.[i] ?? "") }; });
+        const card: Card = { id: d.id, title: d.title, cat: d.cat, date: d.date, url: d.url, author: d.author, tags: d.tags, path: d.path, readProgress: d.readProgress, core: String(c.restatement ?? ""), axes: ax };
         fresh.push(card);
         if (cacheFile) appendFileSync(cacheFile, JSON.stringify(card) + "\n"); // durable the moment it's made
       } catch { /* skip a failed card */ }
