@@ -58,13 +58,15 @@ test("deck: round-trips through JSONL, one card per line", () => {
   expect(back.axes.a.note).toBe("n1");
 });
 
-test("cardText: embeds the core plus every axis note (the de-noised text)", () => {
-  const c: Card = { id: "1", title: "T", core: "The core.", axes: { a: { note: "noteAlpha" }, b: { note: "noteBeta" } } };
+test("cardText: embeds the title, core, and every axis note (the de-noised text)", () => {
+  const c: Card = { id: "1", title: "The Title", core: "The core.", axes: { a: { note: "noteAlpha" }, b: { note: "noteBeta" } } };
   const axes = [{ pc: 1, var: 0, coherence: 5, key: "a", name: "A", pole_low: "", pole_high: "" }, { pc: 2, var: 0, coherence: 5, key: "b", name: "B", pole_low: "", pole_high: "" }];
   const t = cardText(c, axes as any);
+  expect(t).toContain("The Title");        // title carries named entities the summary may drop
   expect(t).toContain("The core.");
   expect(t).toContain("noteAlpha");
   expect(t).toContain("noteBeta");
+  expect(t.indexOf("The Title")).toBeLessThan(t.indexOf("The core.")); // title leads
 });
 
 test("projectionScores: rank-normalizes a PCA column to 0-100, no saturation, orientation preserved", () => {
