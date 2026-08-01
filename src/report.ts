@@ -15,9 +15,11 @@ export function buildReport(D: MapData, name = "Corpus"): string {
   const link = (i: number) => (D.urls?.[i] ? `[${D.titles[i]}](${D.urls[i]})` : D.titles[i]);
   const regionOf = (i: number) => D.clusters.find((c) => c.c === D.cluster[i])?.label || "";
   const out: string[] = [];
+  const solid = D.axes.filter((a) => !a.weak);
+  const noisy = D.axes.filter((a) => a.weak);
 
   out.push(`# ${name} — eidoscope report\n`);
-  out.push(`**${n} documents**${span ? ` · ${span}` : ""} · ${D.k} regions · ${D.axes.length} discovered axes\n`);
+  out.push(`**${n} documents**${span ? ` · ${span}` : ""} · ${D.k} regions · ${solid.length} solid axes${noisy.length ? ` (+${noisy.length} too noisy to trust)` : ""}\n`);
 
   // What it's about — regions by size, each with its most-central (highest-hub) member
   out.push(`## What it's about\n`);
@@ -28,11 +30,21 @@ export function buildReport(D: MapData, name = "Corpus"): string {
     out.push(`- **${c.label}** (${c.n})${top != null ? ` — e.g. *${D.titles[top]}*` : ""}`);
   }
 
-  // How it varies — the discovered axes, plus the honesty guard
-  out.push(`\n## How it varies\nThe dimensions the corpus actually spreads along:\n`);
-  for (const a of D.axes) out.push(`- **${a.name}** — ${a.low} ↔ ${a.high}`);
-  const rg = scoreRedundancy(D.scores);
-  out.push(`\n_Axis distinctness: mean |r| ${rg.meanAbsR.toFixed(2)} ${rg.pass ? "— axes are genuinely distinct lenses." : `— ⚠ ${rg.strong} pairs overlap; treat some axes as one._`}`);
+  // How it varies — LEAD with the axes that held up under the fidelity check; the ones the cards
+  // don't track get quarantined below, not listed as equals. The tool knows which are noise — say so.
+  out.push(`\n## How it varies\n`);
+  out.push(solid.length
+    ? `The dimensions the corpus actually spreads along — these **${solid.length}** held up under the fidelity check (the cards track them):\n`
+    : `⚠ **None** of the discovered axes held up under the fidelity check — treat the map's axes as noise.\n`);
+  for (const a of solid) out.push(`- **${a.name}** — ${a.low} ↔ ${a.high}`);
+  if (solid.length >= 2) {
+    const rg = scoreRedundancy(Object.fromEntries(solid.map((a) => [a.key, D.scores[a.key]])));
+    out.push(`\n_Axis distinctness (solid axes): mean |r| ${rg.meanAbsR.toFixed(2)} ${rg.pass ? "— genuinely distinct lenses." : `— ⚠ ${rg.strong} pairs overlap; treat some as one._`}`);
+  }
+  if (noisy.length) {
+    out.push(`\n**${noisy.length} discovered axes did _not_ hold up** — the cards don't track them, so don't read meaning into these:\n`);
+    for (const a of noisy) out.push(`- ~~${a.name}~~ — ${a.low} ↔ ${a.high}  _(noisy)_`);
+  }
 
   // Read next — highest-influence documents, filtered to unread when read-state is known
   const known = (D.read || []).some((r) => r !== undefined);
