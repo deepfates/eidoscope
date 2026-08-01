@@ -43,7 +43,7 @@ select{flex:1;background:var(--bg);border:1px solid var(--hair);border-radius:7p
 #deck .top{display:flex;gap:10px;align-items:center;margin-bottom:9px}#deck .top .x{margin-left:auto;cursor:pointer;color:var(--soft);font-family:var(--mono)}
 #deck .top select,#deck .top input{background:var(--bg);border:1px solid var(--hair);border-radius:7px;padding:4px 8px;font:11px var(--sans);color:var(--ink)}
 #deck .list{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:8px}
-#deck .card{border:1px solid var(--hair);border-radius:10px;padding:10px 12px;cursor:pointer;background:var(--bg)}#deck .card:hover{border-color:var(--soft)}
+#deck .card{position:relative;border:1px solid var(--hair);border-radius:10px;padding:10px 12px;cursor:pointer;background:var(--bg)}#deck .card:hover{border-color:var(--soft)}#deck .card .ct{padding-right:44px}#deck .dopen{position:absolute;top:9px;right:10px;font-family:var(--mono);font-size:10px;font-weight:700;color:hsl(210 90% 62%);text-decoration:none;z-index:1}#deck .dopen:hover{text-decoration:underline}
 #deck .card .ct{font-weight:700;font-size:12.5px;margin-bottom:4px;line-height:1.25}#deck .card .cc{font-size:11px;color:var(--soft);line-height:1.42;margin-bottom:8px}
 #deck .chips{display:flex;flex-wrap:wrap;gap:4px}#deck .chip{font-family:var(--mono);font-size:9px;padding:2px 7px;border-radius:20px;background:color-mix(in srgb,var(--ink) 9%,transparent);color:var(--soft);white-space:nowrap}#deck .chip.hi{color:var(--ink);background:color-mix(in srgb,var(--ink) 16%,transparent)}#deck .chip.reg{color:var(--ink)}
 .ctrl2{position:fixed;top:14px;left:316px;display:flex;gap:8px;z-index:9;font-family:var(--mono);font-size:11px}.ctrl2 button{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--hair);border-radius:7px;padding:6px 9px;cursor:pointer}.ctrl2 button.on{background:var(--ink);color:var(--bg)}
@@ -126,7 +126,8 @@ function buildDeck(){const el=document.getElementById('deck');const opts=['hub',
     '<div class="list">'+list.slice(0,300).map(n=>{
       const top=axes.map(a=>({a,d:Math.abs((n.sc[a.key]||50)-50)})).sort((x,y)=>y.d-x.d).slice(0,3);
       const chips=(deckSort!=='hub'?chip(n,AX[deckSort],true):'')+top.filter(t=>deckSort==='hub'||t.a.key!==deckSort).slice(0,3).map(t=>chip(n,t.a)).join('');
-      return '<div class="card" onclick="focusIdx('+n.i+');toggleDeck()"><div class="ct">'+esc(n.t)+'</div><div class="cc">'+esc(n.core.slice(0,180))+'</div><div class="chips"><span class="chip reg">◆ '+esc(regOf(n))+'</span>'+chips+'</div></div>';
+      const dopen=n.url?'<a class="dopen" href="'+esc(n.url)+'" target="_blank" rel="noopener" onclick="event.stopPropagation()">open →</a>':'';
+      return '<div class="card" onclick="focusIdx('+n.i+');toggleDeck()">'+dopen+'<div class="ct">'+esc(n.t)+'</div><div class="cc">'+esc(n.core.slice(0,180))+'</div><div class="chips"><span class="chip reg">◆ '+esc(regOf(n))+'</span>'+chips+'</div></div>';
     }).join('')+'</div>';
   document.getElementById('dsort').onchange=e=>{deckSort=e.target.value;buildDeck();};
   const dq=document.getElementById('dq');dq.oninput=()=>{deckQ=dq.value.toLowerCase();buildDeck();};dq.focus();dq.setSelectionRange(dq.value.length,dq.value.length);}
