@@ -176,6 +176,8 @@ function buildDeck(){const el=document.getElementById('deck');const opts=['hub',
 window.toggleDeck=()=>{const el=document.getElementById('deck'),on=!el.classList.contains('on');el.classList.toggle('on',on);document.getElementById('deckbtn').classList.toggle('on',on);if(on)buildDeck();};
 document.getElementById('deckbtn').onclick=()=>window.toggleDeck();
 W=innerWidth;H=innerHeight;cv.width=W*DPR;cv.height=H*DPR;buildLegend();syncXY();draw();
+// tiny introspection seam for the headless E2E (viewer.e2e.ts) — read-only view of interaction state
+window.__eido=()=>({grain,k,pin,hl:hlCluster,zoom:+view.s.toFixed(3),focus:focus?focus.i:null,layout,color,detail:document.getElementById('detail').classList.contains('on')});
 (function(){const el=document.getElementById('intro'),weak=axes.filter(a=>a.weak).length;document.getElementById('introsub').textContent=nodes.length+' documents · '+axes.length+' discovered axes · '+k+' regions'+(nodes.length<50?' · small corpus, axes are noisy':weak?' · '+weak+' minor axis(es), low variance':'');const seen=()=>{el.classList.remove('on');try{localStorage.setItem('eido-seen','1')}catch(e){}};try{if(!localStorage.getItem('eido-seen'))el.classList.add('on')}catch(e){el.classList.add('on')}document.getElementById('introgo').onclick=seen;el.onclick=e=>{if(e.target===el)seen()};})();
 </script>`;
 }

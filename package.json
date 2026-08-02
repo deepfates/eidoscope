@@ -11,6 +11,8 @@
     "fixture": "bun run src/cli.ts --fixture",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
+    "e2e": "bun run e2e/viewer.e2e.ts",
+    "qa": "tsc --noEmit && bun test && bun run e2e/viewer.e2e.ts",
     "check:redundancy": "bun run src/redundancy.ts"
   },
   "dependencies": {
