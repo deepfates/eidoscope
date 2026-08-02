@@ -62,19 +62,13 @@ async function poolEmbed(texts: string[], cacheDir: string): Promise<number[][]>
   });
 }
 
-// The card as the map's coordinates. The card has two DIFFERENT kinds of signal — the restatement
-// (the doc's specific, style-normalized content) and the axis placements (shared positioning vocabulary
-// across the whole corpus). Embedding them as one flat string lets the 16 placements drown the
-// restatement (measured: hurts topical relatedness). So embed each as its own chunk-pooled vector and
-// combine restatement-dominant (CFG.params.restatementWeight). Stays entirely inside the concept
-// bottleneck — both halves come from the LLM card, no full-text and no PCA leak into the geometry.
+// The card as the map's coordinates: one chunk-pooled embedding of the whole card (title + restatement
+// + axis placements). We briefly split it into two weighted vectors to keep the restatement from being
+// "drowned" by the placements — but building the maps three ways and LOOKING settled it: the combined
+// card stays cleanly structured (placements-only is the only one that mushes), so the split and its
+// weight were unnecessary machinery. Both parts are the LLM card — no full-text, no PCA in the geometry.
 export async function embedCards(cards: Card[], axes: Axis[]): Promise<number[][]> {
-  const w = CFG.params.restatementWeight;
-  const restatement = cards.map((c) => (c.title ? c.title + ". " : "") + (c.core || ""));
-  const placements = cards.map((c) => axes.map((a) => c.axes[a.key]?.note || "").filter(Boolean).join(". "));
-  const R = await poolEmbed(restatement, "cache-eidoscope-cards");
-  const P = await poolEmbed(placements, "cache-eidoscope-cards");
-  return R.map((r, i) => { const ru = unit(r), pu = unit(P[i]); return ru.map((x, j) => w * x + (1 - w) * pu[j]); });
+  return poolEmbed(cards.map((c) => cardText(c, axes)), "cache-eidoscope-cards");
 }
 
 // Full-text embedding for the generic path (when a loader has no precomputed embeddings).
