@@ -21,7 +21,7 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
 
   console.error(`[2/5] carding ${docs.length} docs over ${axes.length} axes…`);
   let n = 0;
-  const conc = Number(process.env.EIDOSCOPE_CONCURRENCY || 24); // the card reads dominate wall-clock; raise for faster cloud runs
+  const conc = Number(process.env.EIDOSCOPE_CONCURRENCY || 48); // measured sweet spot (~8.7 cards/s; throughput collapses past ~64)
   const deck = await cardCorpus(docs, axes, { llm, concurrency: conc, cache: ".", onProgress: (d) => { if (++n % 100 === 0) process.stderr.write(`  ${n}/${docs.length}\r`); } });
   writeFileSync("deck.jsonl", deckToJSONL(deck));
   console.error(`  ${deck.length} cards -> deck.jsonl`);
