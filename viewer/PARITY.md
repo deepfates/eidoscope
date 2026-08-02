@@ -6,10 +6,10 @@ UI/UX, with **better performance**. This is the checklist the integration suite 
 nothing here may be silently dropped. `[ ]` = not yet ported, `[x]` = ported + verified in-browser.
 
 ## The user stories (the WHY — keep these felt, not just the controls present)
-- [ ] "Open a folder of documents and see it as a little universe of its own" — the map reads as a place, not a chart.
-- [ ] "Smoosh it around in different dimensions" — layout + encoding changes feel fluid and playful (animated transitions).
-- [ ] The delight loop: **zoom into forgotten saved stuff → find a cool paper → tap the dot → it opens in my reader.** This exact path must feel good on a phone.
-- [ ] Honest all the way down — nothing faked: variance shown, weak axes flagged, no invented structure. Position is a control, not a truth.
+- [x] "Open a folder of documents and see it as a little universe of its own" — the map reads as a place, not a chart.
+- [x] "Smoosh it around in different dimensions" — layout + encoding changes feel fluid and playful (animated transitions).
+- [~] The delight loop: **zoom → find → tap → opens in reader** — the mechanics all work; the *phone feel* needs a real-device check.
+- [x] Honest all the way down — nothing faked: variance shown, weak axes flagged, no invented structure. Position is a control, not a truth.
 - [ ] Feels like a toy you can't put down, not a competent chart (craft ticket `eid-ywry`).
 
 ## Layout (position is a control)
@@ -74,9 +74,9 @@ nothing here may be silently dropped. `[ ]` = not yet ported, `[x]` = ported + v
 - [x] **Weak/minor axis flagging** (~ prefix, `< 2%` variance) everywhere axes are listed; the report/intro states minor-axis count.
 
 ## Touch / mobile (must feel good — the reason for the rewrite)
-- [ ] One-finger **pan** (rotate in orbit), two-finger **pinch-zoom** with inertia (deck controller).
-- [ ] **Tap** opens a card; finger-sized targets.
-- [ ] **Responsive layout** — panels to corners / detail as a bottom sheet; controls usable one-handed.
+- [~] One-finger **pan** (rotate in orbit), two-finger **pinch-zoom** with inertia (deck controller). _(deck.gl controller provides it; pan measured, pinch needs a real touch device.)_
+- [x] **Tap** opens a card; finger-sized targets.
+- [ ] **Responsive layout** — a dedicated mobile pass for the new viewer is still TODO (folded into the design pass eid-imbx).
 
 ## Accessibility
 - [x] Keyboard operable end-to-end; ARIA on all controls (accessible dropdowns/slider/dialog).
@@ -84,6 +84,6 @@ nothing here may be silently dropped. `[ ]` = not yet ported, `[x]` = ported + v
 - [x] The list view is the map's accessible parallel (canvas can't be screen-read).
 
 ## Performance (the goal, not just parity)
-- [ ] GPU rendering smooth at 15k (Pathfinder) and up to ~100k points.
-- [ ] Binary data load (`.eido`, ~5× smaller than JSON) — fast parse, low memory.
+- [ ] GPU rendering smooth at 15k+ — deck.gl handles it (1440 verified smooth); 15k perf is the benchmark ticket eid-huoe.
+- [x] Binary data load (`.eido`, ~5× smaller than JSON) — fast parse, low memory.
 - [ ] Measured same-or-better than the JSON build (`eid-huoe`).
