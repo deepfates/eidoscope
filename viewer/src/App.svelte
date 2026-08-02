@@ -9,6 +9,7 @@
   let status = $state("loading your map…");
   let data = $state<MapContract | null>(null);
   let selected = $state<number | null>(null);
+  let hovered = $state<{ i: number; x: number; y: number } | null>(null);
   let color = $state("cluster");
   let size = $state("hub");
   let layout = $state<Layout>("mde");
@@ -20,6 +21,16 @@
   const axl = (a: any) => (a.weak ? "~ " : "") + a.name;
   const rgb = (c: [number, number, number]) => `rgb(${c[0]},${c[1]},${c[2]})`;
   const trunc = (s: string, m = 44) => (s && s.length > m ? s.slice(0, m - 1) + "…" : s);
+  const regionOf = (i: number) => data?.clusters[data.cluster[i]]?.label ?? "";
+  const dateOf = (i: number) => { const d = data?.dates?.[i]; return d ? new Date(d).toISOString().slice(0, 10) : ""; };
+  const placements = (i: number) =>
+    data ? data.axes.map((a) => ({ a, s: Math.round(data!.scores[a.key]?.[i] ?? 50), note: data!.notes[i]?.[a.key] || "" }))
+      .filter((x) => x.note).sort((x, y) => Math.abs(y.s - 50) - Math.abs(x.s - 50)).slice(0, 6) : [];
+  const topAxes = (i: number) =>
+    data ? data.axes.map((a) => ({ n: a.name, s: Math.round(data!.scores[a.key]?.[i] ?? 50) }))
+      .sort((x, y) => Math.abs(y.s - 50) - Math.abs(x.s - 50)).slice(0, 3) : [];
+
+  function focusCard(i: number | null) { selected = i; handle?.setFocus(i); }
 
   onMount(() => {
     (async () => {
@@ -30,7 +41,11 @@
         yKey = D.axes[1]?.key ?? D.axes[0]?.key ?? "";
         data = D;
         status = "";
-        handle = createMap(canvas, D, { getColor: colorFor(D, color, fac), getRadius: sizeFor(D, size), layout, xKey, yKey, onClick: (i) => (selected = i) });
+        handle = createMap(canvas, D, {
+          getColor: colorFor(D, color, fac), getRadius: sizeFor(D, size), layout, xKey, yKey,
+          onClick: (i) => focusCard(i < 0 ? null : i),
+          onHover: (i, x, y) => (hovered = i == null ? null : { i, x, y }),
+        });
       } catch (e: any) {
         status = "couldn't load map: " + (e?.message ?? e);
       }
@@ -39,8 +54,6 @@
   });
 
   $effect(() => {
-    // read every reactive dep FIRST so they're tracked even before handle/data exist — otherwise the
-    // guard short-circuits on the first (pre-load) run and the effect never re-subscribes.
     const l = layout, c = color, s = size, xk = xKey, yk = yKey, h = handle, d = data, f = fac;
     if (h && d) h.update({ getColor: colorFor(d, c, f), getRadius: sizeFor(d, s), layout: l, xKey: xk, yKey: yk });
   });
@@ -57,7 +70,6 @@
   {#if status}<div class="absolute inset-0 grid place-items-center font-mono text-sm text-neutral-400">{status}</div>{/if}
 
   {#if data}
-    <!-- axis-scatter pole labels -->
     {#if layout === "axes" && xAxis && yAxis}
       <div class="pointer-events-none absolute inset-0 font-mono text-xs text-neutral-300/90">
         <div class="absolute left-3 top-1/2 -translate-y-1/2">← {trunc(xAxis.low)}</div>
@@ -67,85 +79,78 @@
       </div>
     {/if}
 
-    <!-- control panel -->
     <div class="absolute left-3 top-3 w-56 rounded-xl border border-neutral-800 bg-neutral-900/80 p-3 backdrop-blur">
       <div class="mb-2 font-mono text-[10px] uppercase tracking-widest text-neutral-500">eidoscope 🔭</div>
       <div class="mb-2 text-xs text-neutral-400">{data.ids.length} cards · {data.k} regions</div>
-      <label class="mb-1.5 flex items-center gap-2 text-xs">
-        <span class="w-9 flex-none font-mono text-[10px] text-neutral-500">layout</span>
+      <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-neutral-500">layout</span>
         <select bind:value={layout} class="min-w-0 flex-1 rounded-md border border-neutral-700 bg-neutral-950 px-1.5 py-1 text-xs">
-          <option value="mde">neighbor map</option>
-          <option value="axes">axis scatter</option>
-          <option value="orbit">3D orbit</option>
-        </select>
-      </label>
+          <option value="mde">neighbor map</option><option value="axes">axis scatter</option><option value="orbit">3D orbit</option>
+        </select></label>
       {#if layout === "axes"}
-        <label class="mb-1.5 flex items-center gap-2 text-xs">
-          <span class="w-9 flex-none font-mono text-[10px] text-neutral-500">x-axis</span>
-          <select bind:value={xKey} class="min-w-0 flex-1 rounded-md border border-neutral-700 bg-neutral-950 px-1.5 py-1 text-xs">
-            {#each data.axes as a}<option value={a.key}>{axl(a)}</option>{/each}
-          </select>
-        </label>
-        <label class="mb-1.5 flex items-center gap-2 text-xs">
-          <span class="w-9 flex-none font-mono text-[10px] text-neutral-500">y-axis</span>
-          <select bind:value={yKey} class="min-w-0 flex-1 rounded-md border border-neutral-700 bg-neutral-950 px-1.5 py-1 text-xs">
-            {#each data.axes as a}<option value={a.key}>{axl(a)}</option>{/each}
-          </select>
-        </label>
+        <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-neutral-500">x-axis</span>
+          <select bind:value={xKey} class="min-w-0 flex-1 rounded-md border border-neutral-700 bg-neutral-950 px-1.5 py-1 text-xs">{#each data.axes as a}<option value={a.key}>{axl(a)}</option>{/each}</select></label>
+        <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-neutral-500">y-axis</span>
+          <select bind:value={yKey} class="min-w-0 flex-1 rounded-md border border-neutral-700 bg-neutral-950 px-1.5 py-1 text-xs">{#each data.axes as a}<option value={a.key}>{axl(a)}</option>{/each}</select></label>
       {/if}
-      <label class="mb-1.5 flex items-center gap-2 text-xs">
-        <span class="w-9 flex-none font-mono text-[10px] text-neutral-500">color</span>
+      <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-neutral-500">color</span>
         <select bind:value={color} class="min-w-0 flex-1 rounded-md border border-neutral-700 bg-neutral-950 px-1.5 py-1 text-xs">
-          <option value="cluster">region</option>
-          {#each fac as f}<option value={"meta:" + f.key}>{f.label}</option>{/each}
-          {#each data.axes as a}<option value={a.key}>axis: {axl(a)}</option>{/each}
-        </select>
-      </label>
-      <label class="flex items-center gap-2 text-xs">
-        <span class="w-9 flex-none font-mono text-[10px] text-neutral-500">size</span>
+          <option value="cluster">region</option>{#each fac as f}<option value={"meta:" + f.key}>{f.label}</option>{/each}{#each data.axes as a}<option value={a.key}>axis: {axl(a)}</option>{/each}
+        </select></label>
+      <label class="flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-neutral-500">size</span>
         <select bind:value={size} class="min-w-0 flex-1 rounded-md border border-neutral-700 bg-neutral-950 px-1.5 py-1 text-xs">
-          <option value="uniform">uniform</option>
-          <option value="hub">influence (hub)</option>
-          {#each data.axes as a}<option value={a.key}>commit: {axl(a)}</option>{/each}
-        </select>
-      </label>
+          <option value="uniform">uniform</option><option value="hub">influence (hub)</option>{#each data.axes as a}<option value={a.key}>commit: {axl(a)}</option>{/each}
+        </select></label>
     </div>
 
-    <!-- legend -->
     <div class="absolute bottom-3 right-3 max-h-[48vh] w-52 overflow-auto rounded-xl border border-neutral-800 bg-neutral-900/80 p-2.5 text-xs backdrop-blur">
       {#if color === "cluster"}
         <div class="mb-1.5 font-mono text-[10px] uppercase text-neutral-500">{data.k} regions</div>
-        {#each data.clusters as c}
-          <div class="flex items-center gap-2 py-0.5"><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(col(c.c))}"></span><span class="truncate">{c.label} <span class="text-neutral-500">{c.n}</span></span></div>
-        {/each}
+        {#each data.clusters as c}<div class="flex items-center gap-2 py-0.5"><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(col(c.c))}"></span><span class="truncate">{c.label} <span class="text-neutral-500">{c.n}</span></span></div>{/each}
       {:else if curFacet}
         <div class="mb-1.5 font-mono text-[10px] uppercase text-neutral-500">{curFacet.label} · {curFacet.ord.length}</div>
-        {#each curFacet.ord.slice(0, 16) as v}
-          <div class="flex items-center gap-2 py-0.5"><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(col(curFacet.idx[v]))}"></span><span class="truncate">{v} <span class="text-neutral-500">{curFacet.cnt[v]}</span></span></div>
-        {/each}
+        {#each curFacet.ord.slice(0, 16) as v}<div class="flex items-center gap-2 py-0.5"><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(col(curFacet.idx[v]))}"></span><span class="truncate">{v} <span class="text-neutral-500">{curFacet.cnt[v]}</span></span></div>{/each}
         {#if curFacet.ord.length > 16}<div class="text-neutral-500">+{curFacet.ord.length - 16} more</div>{/if}
       {:else}
         {@const a = data.axes.find((x) => x.key === color)}
-        {#if a}
-          <div class="mb-1.5 font-mono text-[10px] uppercase text-neutral-500">{a.name}</div>
+        {#if a}<div class="mb-1.5 font-mono text-[10px] uppercase text-neutral-500">{a.name}</div>
           <div class="flex items-center gap-2 py-0.5"><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(axisColor(0))}"></span>{a.low}</div>
-          <div class="flex items-center gap-2 py-0.5"><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(axisColor(1))}"></span>{a.high}</div>
-        {/if}
+          <div class="flex items-center gap-2 py-0.5"><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(axisColor(1))}"></span>{a.high}</div>{/if}
       {/if}
     </div>
 
-    <!-- axis hint -->
     <div class="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 font-mono text-[11px] text-neutral-500">{hint}</div>
   {/if}
 
+  <!-- hover tooltip -->
+  {#if hovered && data && selected === null}
+    <div class="pointer-events-none absolute z-10 max-w-xs rounded-lg border border-neutral-800 bg-neutral-900/95 p-2.5 text-xs shadow-xl" style="left:{Math.min(hovered.x + 14, window.innerWidth - 280)}px; top:{Math.min(hovered.y + 14, window.innerHeight - 120)}px">
+      <div class="mb-1 font-bold">{data.titles[hovered.i]}</div>
+      <div class="mb-1 line-clamp-2 text-neutral-400">{data.cores[hovered.i].slice(0, 140)}</div>
+      <div class="font-mono text-[10px] text-neutral-500">hub {data.hub[hovered.i]} · {topAxes(hovered.i).map((t) => t.n + " " + t.s).join(" · ")}</div>
+    </div>
+  {/if}
+
+  <!-- detail panel -->
   {#if selected !== null && data}
-    <div class="absolute bottom-3 left-3 right-3 rounded-xl border border-neutral-800 bg-neutral-900/90 p-4 text-sm backdrop-blur sm:right-auto sm:w-80">
-      <button class="absolute right-3 top-3 font-mono text-neutral-500" onclick={() => (selected = null)} aria-label="close">✕</button>
+    <div class="absolute bottom-3 left-3 right-3 max-h-[64vh] overflow-auto rounded-xl border border-neutral-800 bg-neutral-900/95 p-4 text-sm backdrop-blur sm:right-auto sm:w-80">
+      <button class="absolute right-3 top-3 font-mono text-neutral-500 hover:text-neutral-200" onclick={() => focusCard(null)} aria-label="close">✕</button>
       <div class="mb-1 pr-6 font-bold">{data.titles[selected]}</div>
-      <div class="text-xs leading-relaxed text-neutral-400">{data.cores[selected].slice(0, 280)}…</div>
-      {#if data.urls?.[selected]}
-        <a class="mt-2 inline-block font-mono text-xs font-bold text-blue-400" href={data.urls[selected]} target="_blank" rel="noopener">open source →</a>
-      {/if}
+      <div class="mb-2 font-mono text-[10px] text-neutral-500">{[data.authors?.[selected], dateOf(selected), regionOf(selected)].filter(Boolean).join(" · ")}</div>
+      {#if data.urls?.[selected]}<a class="mb-2 inline-block font-mono text-xs font-bold text-blue-400 hover:underline" href={data.urls[selected]} target="_blank" rel="noopener">open source →</a>{/if}
+      <div class="mb-1 text-xs leading-relaxed text-neutral-300">{data.cores[selected].slice(0, 420)}{data.cores[selected].length > 420 ? "…" : ""}</div>
+
+      <div class="mt-3 mb-1 font-mono text-[10px] uppercase tracking-wide text-neutral-500">where it sits</div>
+      {#each placements(selected) as p}
+        <div class="flex items-center justify-between gap-2 border-b border-neutral-800 py-1 text-xs" title={(p.s >= 50 ? p.a.high : p.a.low) + " — " + p.note}>
+          <span class="truncate text-neutral-400">{p.a.name}</span>
+          <span class="flex-none font-mono text-[10px]">{p.s >= 50 ? "▲" : "▼"} <b>{p.s}</b></span>
+        </div>
+      {/each}
+
+      <div class="mt-3 mb-1 font-mono text-[10px] uppercase tracking-wide text-neutral-500">nearest {data.nbr[selected]?.length ?? 0}</div>
+      {#each data.nbr[selected] ?? [] as j}
+        <button class="block w-full truncate rounded px-1 py-0.5 text-left text-xs hover:bg-neutral-800" onclick={() => focusCard(j)}>→ {data.titles[j]}</button>
+      {/each}
     </div>
   {/if}
 </div>

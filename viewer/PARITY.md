@@ -43,11 +43,11 @@ nothing here may be silently dropped. `[ ]` = not yet ported, `[x]` = ported + v
 - [x] Colourblind-safe palette; identity carried by position + labels + isolate (colours cycle past ~8 — that's accepted, not a bug).
 
 ## Card interaction
-- [ ] **Tap/click a card → detail panel**: title, meta (author · date · region), **restatement** (core), **"where it sits"** = axis placements ranked by extremity with ▲/▼ + score, **nearest-N** neighbors (clickable → focus that card), **open source →** link (opens the reader).
-- [ ] **Hover → tooltip** (desktop): title, core, hub, top axes.
-- [ ] **Focus → neighbor spokes** drawn from the card to its nearest neighbors; dim non-neighbors.
-- [ ] Click empty space clears focus.
-- [ ] **Finger-sized picking** (pickingRadius) — tiny dots are still tappable.
+- [x] **Tap/click a card → detail panel**: title, meta (author · date · region), **restatement** (core), **"where it sits"** = axis placements ranked by extremity with ▲/▼ + score, **nearest-N** neighbors (clickable → focus that card), **open source →** link (opens the reader).
+- [ ] **Hover → tooltip** (desktop): title, core, hub, top axes. _(implemented + wired; deck.gl onHover doesn't fire under browser automation, so NOT machine-verified — needs a real-device check.)_
+- [x] **Focus → neighbor spokes** drawn from the card to its nearest neighbors; dim non-neighbors.
+- [x] Click empty space clears focus.
+- [x] **Finger-sized picking** (pickingRadius) — tiny dots are still tappable.
 
 ## Deck / list view (the reader — and the accessibility surface)
 - [ ] Cards as a **sortable, filterable list** (real DOM).
