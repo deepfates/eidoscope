@@ -13,10 +13,10 @@ nothing here may be silently dropped. `[ ]` = not yet ported, `[x]` = ported + v
 - [ ] Feels like a toy you can't put down, not a competent chart (craft ticket `eid-ywry`).
 
 ## Layout (position is a control)
-- [ ] **Neighbor map** (UMAP 2D) — default; proximity = similarity.
-- [ ] **Axis scatter** — position by ANY two discovered axes; pole labels on the four edges (← low / high →); the "~ minor axis" hint when a weak axis is chosen.
-- [ ] **3D orbit** — draggable rotation; depth cue (front points brighter/larger).
-- [ ] Smooth animated transition between layouts (the "smoosh").
+- [x] **Neighbor map** (UMAP 2D) — default; proximity = similarity.
+- [x] **Axis scatter** — position by ANY two discovered axes; pole labels on the four edges (← low / high →); the "~ minor axis" hint when a weak axis is chosen.
+- [x] **3D orbit** — draggable rotation; depth cue (front points brighter/larger).
+- [x] Smooth animated transition between layouts (the "smoosh").
 
 ## Color encoding
 - [x] By **region** (emergent cluster) — the default.
@@ -70,7 +70,7 @@ nothing here may be silently dropped. `[ ]` = not yet ported, `[x]` = ported + v
 - [ ] **Reset** — restores view + default grain + clears focus/pin.
 - [ ] **Intro** modal — first-run explainer of the core interactions; remembered (localStorage).
 - [ ] **Count readout** (N cards · layout · size).
-- [ ] **Axis hint** — contextual guidance text per layout.
+- [x] **Axis hint** — contextual guidance text per layout.
 - [x] **Weak/minor axis flagging** (~ prefix, `< 2%` variance) everywhere axes are listed; the report/intro states minor-axis count.
 
 ## Touch / mobile (must feel good — the reason for the rewrite)

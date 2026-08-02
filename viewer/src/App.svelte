@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { loadMap } from "./loader";
-  import { createMap, type MapHandle } from "./deckmap";
+  import { createMap, type MapHandle, type Layout } from "./deckmap";
   import { facets, colorFor, sizeFor, col, axisColor, type Facet } from "./encode";
   import type { MapContract } from "../../src/schema";
 
@@ -11,20 +11,26 @@
   let selected = $state<number | null>(null);
   let color = $state("cluster");
   let size = $state("hub");
+  let layout = $state<Layout>("mde");
+  let xKey = $state("");
+  let yKey = $state("");
   let fac = $state<Facet[]>([]);
   let handle: MapHandle | null = null;
 
   const axl = (a: any) => (a.weak ? "~ " : "") + a.name;
   const rgb = (c: [number, number, number]) => `rgb(${c[0]},${c[1]},${c[2]})`;
+  const trunc = (s: string, m = 44) => (s && s.length > m ? s.slice(0, m - 1) + "…" : s);
 
   onMount(() => {
     (async () => {
       try {
         const D = await loadMap("./map.eido");
         fac = facets(D);
+        xKey = D.axes[0]?.key ?? "";
+        yKey = D.axes[1]?.key ?? D.axes[0]?.key ?? "";
         data = D;
         status = "";
-        handle = createMap(canvas, D, { getColor: colorFor(D, color, fac), getRadius: sizeFor(D, size), onClick: (i) => (selected = i) });
+        handle = createMap(canvas, D, { getColor: colorFor(D, color, fac), getRadius: sizeFor(D, size), layout, xKey, yKey, onClick: (i) => (selected = i) });
       } catch (e: any) {
         status = "couldn't load map: " + (e?.message ?? e);
       }
@@ -32,28 +38,60 @@
     return () => handle?.destroy();
   });
 
-  // re-encode reactively when color / size change
   $effect(() => {
-    if (handle && data) handle.update({ getColor: colorFor(data, color, fac), getRadius: sizeFor(data, size) });
+    if (handle && data) handle.update({ getColor: colorFor(data, color, fac), getRadius: sizeFor(data, size), layout, xKey, yKey });
   });
 
   const curFacet = $derived(fac.find((f) => "meta:" + f.key === color));
+  const xAxis = $derived(data?.axes.find((a) => a.key === xKey));
+  const yAxis = $derived(data?.axes.find((a) => a.key === yKey));
+  const hint = $derived(layout === "axes" ? "positioned by where each card projects on the two axes" : layout === "orbit" ? "drag to rotate · pinch to zoom" : "proximity = similarity · tap a card");
 </script>
 
 <div class="relative h-screen w-screen overflow-hidden bg-neutral-950 text-neutral-100 touch-none">
   <canvas bind:this={canvas} class="absolute inset-0 h-full w-full"></canvas>
 
-  {#if status}
-    <div class="absolute inset-0 grid place-items-center font-mono text-sm text-neutral-400">{status}</div>
-  {/if}
+  {#if status}<div class="absolute inset-0 grid place-items-center font-mono text-sm text-neutral-400">{status}</div>{/if}
 
   {#if data}
+    <!-- axis-scatter pole labels -->
+    {#if layout === "axes" && xAxis && yAxis}
+      <div class="pointer-events-none absolute inset-0 font-mono text-xs text-neutral-300/90">
+        <div class="absolute left-3 top-1/2 -translate-y-1/2">← {trunc(xAxis.low)}</div>
+        <div class="absolute right-3 top-1/2 -translate-y-1/2 text-right">{trunc(xAxis.high)} →</div>
+        <div class="absolute left-1/2 top-3 -translate-x-1/2">↑ {trunc(yAxis.high)}</div>
+        <div class="absolute bottom-9 left-1/2 -translate-x-1/2">↓ {trunc(yAxis.low)}</div>
+      </div>
+    {/if}
+
     <!-- control panel -->
     <div class="absolute left-3 top-3 w-56 rounded-xl border border-neutral-800 bg-neutral-900/80 p-3 backdrop-blur">
       <div class="mb-2 font-mono text-[10px] uppercase tracking-widest text-neutral-500">eidoscope 🔭</div>
       <div class="mb-2 text-xs text-neutral-400">{data.ids.length} cards · {data.k} regions</div>
       <label class="mb-1.5 flex items-center gap-2 text-xs">
-        <span class="w-9 font-mono text-[10px] text-neutral-500">color</span>
+        <span class="w-9 flex-none font-mono text-[10px] text-neutral-500">layout</span>
+        <select bind:value={layout} class="min-w-0 flex-1 rounded-md border border-neutral-700 bg-neutral-950 px-1.5 py-1 text-xs">
+          <option value="mde">neighbor map</option>
+          <option value="axes">axis scatter</option>
+          <option value="orbit">3D orbit</option>
+        </select>
+      </label>
+      {#if layout === "axes"}
+        <label class="mb-1.5 flex items-center gap-2 text-xs">
+          <span class="w-9 flex-none font-mono text-[10px] text-neutral-500">x-axis</span>
+          <select bind:value={xKey} class="min-w-0 flex-1 rounded-md border border-neutral-700 bg-neutral-950 px-1.5 py-1 text-xs">
+            {#each data.axes as a}<option value={a.key}>{axl(a)}</option>{/each}
+          </select>
+        </label>
+        <label class="mb-1.5 flex items-center gap-2 text-xs">
+          <span class="w-9 flex-none font-mono text-[10px] text-neutral-500">y-axis</span>
+          <select bind:value={yKey} class="min-w-0 flex-1 rounded-md border border-neutral-700 bg-neutral-950 px-1.5 py-1 text-xs">
+            {#each data.axes as a}<option value={a.key}>{axl(a)}</option>{/each}
+          </select>
+        </label>
+      {/if}
+      <label class="mb-1.5 flex items-center gap-2 text-xs">
+        <span class="w-9 flex-none font-mono text-[10px] text-neutral-500">color</span>
         <select bind:value={color} class="min-w-0 flex-1 rounded-md border border-neutral-700 bg-neutral-950 px-1.5 py-1 text-xs">
           <option value="cluster">region</option>
           {#each fac as f}<option value={"meta:" + f.key}>{f.label}</option>{/each}
@@ -61,7 +99,7 @@
         </select>
       </label>
       <label class="flex items-center gap-2 text-xs">
-        <span class="w-9 font-mono text-[10px] text-neutral-500">size</span>
+        <span class="w-9 flex-none font-mono text-[10px] text-neutral-500">size</span>
         <select bind:value={size} class="min-w-0 flex-1 rounded-md border border-neutral-700 bg-neutral-950 px-1.5 py-1 text-xs">
           <option value="uniform">uniform</option>
           <option value="hub">influence (hub)</option>
@@ -75,18 +113,12 @@
       {#if color === "cluster"}
         <div class="mb-1.5 font-mono text-[10px] uppercase text-neutral-500">{data.k} regions</div>
         {#each data.clusters as c}
-          <div class="flex items-center gap-2 py-0.5">
-            <span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(col(c.c))}"></span>
-            <span class="truncate">{c.label} <span class="text-neutral-500">{c.n}</span></span>
-          </div>
+          <div class="flex items-center gap-2 py-0.5"><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(col(c.c))}"></span><span class="truncate">{c.label} <span class="text-neutral-500">{c.n}</span></span></div>
         {/each}
       {:else if curFacet}
         <div class="mb-1.5 font-mono text-[10px] uppercase text-neutral-500">{curFacet.label} · {curFacet.ord.length}</div>
         {#each curFacet.ord.slice(0, 16) as v}
-          <div class="flex items-center gap-2 py-0.5">
-            <span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(col(curFacet.idx[v]))}"></span>
-            <span class="truncate">{v} <span class="text-neutral-500">{curFacet.cnt[v]}</span></span>
-          </div>
+          <div class="flex items-center gap-2 py-0.5"><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(col(curFacet.idx[v]))}"></span><span class="truncate">{v} <span class="text-neutral-500">{curFacet.cnt[v]}</span></span></div>
         {/each}
         {#if curFacet.ord.length > 16}<div class="text-neutral-500">+{curFacet.ord.length - 16} more</div>{/if}
       {:else}
@@ -98,6 +130,9 @@
         {/if}
       {/if}
     </div>
+
+    <!-- axis hint -->
+    <div class="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 font-mono text-[11px] text-neutral-500">{hint}</div>
   {/if}
 
   {#if selected !== null && data}
