@@ -1,29 +1,43 @@
 import { Deck, OrthographicView, OrbitView } from "@deck.gl/core";
-import { ScatterplotLayer, LineLayer } from "@deck.gl/layers";
+import { ScatterplotLayer, LineLayer, PolygonLayer, TextLayer } from "@deck.gl/layers";
 import type { MapContract } from "../../src/schema";
-import type { RGB } from "./encode";
+import { col, type RGB } from "./encode";
 
-// The map's rendering + interaction core. ONE Deck for its whole life (so canvas pointer capture is never
-// lost); layout switches swap the view + camera via setProps. deck.gl gives GPU rendering, a controller
-// with pan/pinch-zoom/inertia (2D) or drag-rotate (3D OrbitView), and finger-sized picking. Encodings +
-// layout + focus arrive via update()/setFocus(); positions animate between 2D layouts. When a card is
-// focused, spokes (LineLayer) connect it to its nearest neighbours and everything else dims.
+// The map's rendering + interaction core. ONE Deck for its whole life (canvas pointer capture never lost);
+// layout switches swap the view + camera via setProps. deck.gl gives GPU rendering, a controller with
+// pan/pinch-zoom/inertia (2D) or drag-rotate (3D OrbitView), and finger-sized picking. Composed layers:
+// points (encoded colour/size) · region hulls (PolygonLayer, on highlight) · region labels (TextLayer,
+// collision-decluttered) · neighbour spokes (LineLayer, on focus). Everything drives through update().
 
 export type Layout = "mde" | "axes" | "orbit";
 export type MapHandle = {
   update: (o: Partial<Opts>) => void;
   setFocus: (i: number | null) => void;
+  setHighlight: (c: number | null) => void;
   resetView: () => void;
   destroy: () => void;
 };
-type Opts = { getColor: (i: number) => RGB; getRadius: (i: number) => number; layout: Layout; xKey: string; yKey: string };
+type Opts = { getColor: (i: number) => RGB; getRadius: (i: number) => number; layout: Layout; xKey: string; yKey: string; showLabels: boolean };
+
+const hull2d = (pts: number[][]): number[][] => {
+  if (pts.length < 3) return pts;
+  const p = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cr = (o: number[], a: number[], b: number[]) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo: number[][] = []; for (const q of p) { while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
+  const up: number[][] = []; for (let i = p.length - 1; i >= 0; i--) { const q = p[i]; while (up.length >= 2 && cr(up[up.length - 2], up[up.length - 1], q) <= 0) up.pop(); up.push(q); }
+  return lo.slice(0, -1).concat(up.slice(0, -1));
+};
 
 export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts & { onClick?: (i: number) => void; onHover?: (i: number | null, x: number, y: number) => void }): MapHandle {
   const n = D.ids.length;
-  let { getColor, getRadius, layout, xKey, yKey } = init;
+  let { getColor, getRadius, layout, xKey, yKey, showLabels } = init;
   let colorVer = 0, sizeVer = 0, posVer = 0;
-  let focus: number | null = null;
-  let fSet: Set<number> | null = null;
+  let focus: number | null = null, fSet: Set<number> | null = null;
+  let highlight: number | null = null;
+
+  // per default-grain region: member indices (for hulls, labels, highlight dimming)
+  const members: number[][] = Array.from({ length: D.k }, () => []);
+  D.cluster.forEach((c, i) => { if (c >= 0 && c < D.k) members[c].push(i); });
 
   const bb = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
   for (const [x, y] of D.xy) { if (x < bb.minX) bb.minX = x; if (x > bb.maxX) bb.maxX = x; if (y < bb.minY) bb.minY = y; if (y > bb.maxY) bb.maxY = y; }
@@ -40,12 +54,23 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     if (layout === "orbit") return [D.xyz[index][0], D.xyz[index][1], D.xyz[index][2]];
     return [D.xy[index][0], D.xy[index][1]];
   };
+  const centroid = (idx: number[]): [number, number] => { let x = 0, y = 0; for (const i of idx) { const p = pos(i); x += p[0]; y += p[1]; } return [x / (idx.length || 1), y / (idx.length || 1)]; };
+  // greedy declutter: biggest regions first, skip any whose centroid is too close to one already placed
+  // (world-space — deck's CollisionFilterExtension culled everything). Recomputed per layout via posVer.
+  const decluttered = () => {
+    const cand = members.map((idx, c) => ({ c, label: D.clusters[c]?.label ?? "", n: idx.length, p: centroid(idx) })).filter((d) => d.n > 0 && d.label).sort((a, b) => b.n - a.n);
+    const placed: typeof cand = []; const minD = span * 0.13;
+    for (const d of cand) if (placed.every((q) => Math.hypot(q.p[0] - d.p[0], q.p[1] - d.p[1]) > minD)) placed.push(d);
+    return placed;
+  };
+  const dimSet = () => (focus != null ? fSet : highlight != null ? new Set(members[highlight]) : null);
+
   const view = () => (layout === "orbit" ? new OrbitView({ id: "orbit", orbitAxis: "Y", fovy: 50 }) : new OrthographicView({ id: "ortho", flipY: false }));
 
   const pointsLayer = () => new ScatterplotLayer({
     id: "points", data: { length: n },
     getPosition: (_: any, { index }: any) => pos(index) as any,
-    getFillColor: (_: any, { index }: any) => { const c = getColor(index); return (fSet && !fSet.has(index) ? [c[0], c[1], c[2], 38] : [c[0], c[1], c[2], 255]) as any; },
+    getFillColor: (_: any, { index }: any) => { const c = getColor(index); const ds = dimSet(); return (ds && !ds.has(index) ? [c[0], c[1], c[2], 34] : [c[0], c[1], c[2], 255]) as any; },
     getRadius: (_: any, { index }: any) => getRadius(index),
     radiusUnits: "pixels", radiusMinPixels: 1.2, billboard: true,
     pickable: true, autoHighlight: true, highlightColor: [255, 255, 255, 180],
@@ -53,22 +78,38 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     updateTriggers: { getFillColor: colorVer, getRadius: sizeVer, getPosition: posVer },
   });
   const spokesLayer = () => new LineLayer({
-    id: "spokes",
-    data: focus == null ? [] : (D.nbr[focus] || []).map((j) => ({ j })),
-    getSourcePosition: () => pos(focus as number) as any,
-    getTargetPosition: (d: any) => pos(d.j) as any,
+    id: "spokes", data: focus == null ? [] : (D.nbr[focus] || []).map((j) => ({ j })),
+    getSourcePosition: () => pos(focus as number) as any, getTargetPosition: (d: any) => pos(d.j) as any,
     getColor: [255, 255, 255, 110], getWidth: 1,
-    updateTriggers: { getSourcePosition: [colorVer, posVer], getTargetPosition: [colorVer, posVer] },
+    updateTriggers: { getSourcePosition: [posVer], getTargetPosition: [posVer] },
   });
-  const layers = () => (focus == null ? [pointsLayer()] : [spokesLayer(), pointsLayer()]);
+  const hullLayer = () => new PolygonLayer({
+    id: "hull",
+    data: highlight == null || layout === "orbit" ? [] : [hull2d(members[highlight].map((i) => pos(i)))],
+    getPolygon: (d: any) => d, stroked: true, filled: true,
+    getFillColor: [...col(highlight ?? 0), 22] as any, getLineColor: [...col(highlight ?? 0), 150] as any, getLineWidth: 1.5, lineWidthUnits: "pixels",
+    updateTriggers: { data: [highlight, posVer], getFillColor: highlight, getLineColor: highlight },
+  });
+  const labelLayer = () => new TextLayer({
+    id: "labels",
+    data: decluttered(),
+    getPosition: (d: any) => d.p, getText: (d: any) => d.label,
+    getColor: (d: any) => [...col(d.c), 240] as any, getSize: 13, sizeUnits: "pixels",
+    fontFamily: "ui-monospace, monospace", fontWeight: 700, getTextAnchor: "middle", getAlignmentBaseline: "center",
+    getBackgroundColor: [10, 12, 18, 180], background: true, backgroundPadding: [4, 2],
+    updateTriggers: { getPosition: [posVer], data: [posVer] },
+  });
+  const layers = () => [
+    ...(highlight != null ? [hullLayer()] : []),
+    ...(focus != null ? [spokesLayer()] : []),
+    pointsLayer(),
+    ...(showLabels ? [labelLayer()] : []),
+  ];
 
   let viewState: any = home(layout);
   const deck = new Deck({
-    canvas,
-    views: [view()],
-    viewState,
-    controller: { doubleClickZoom: false, inertia: true },
-    pickingRadius: 8,
+    canvas, views: [view()], viewState,
+    controller: { doubleClickZoom: false, inertia: true }, pickingRadius: 8,
     onViewStateChange: ({ viewState: vs }: any) => { viewState = vs; deck.setProps({ viewState }); },
     layers: layers(),
     onClick: (info: any) => { if (init.onClick) init.onClick(info && info.index >= 0 ? info.index : -1); },
@@ -82,12 +123,14 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
       if (o.getRadius) { getRadius = o.getRadius; sizeVer++; }
       if (o.xKey && o.xKey !== xKey) { xKey = o.xKey; posVer++; }
       if (o.yKey && o.yKey !== yKey) { yKey = o.yKey; posVer++; }
+      if (o.showLabels !== undefined) showLabels = o.showLabels;
       const prev = layout;
       if (o.layout) layout = o.layout;
       if (layout !== prev) { posVer++; viewState = home(layout); deck.setProps({ views: [view()], viewState }); }
       deck.setProps({ layers: layers() });
     },
     setFocus: (i) => { focus = i; fSet = i == null ? null : new Set<number>([i, ...(D.nbr[i] || [])]); colorVer++; deck.setProps({ layers: layers() }); },
+    setHighlight: (c) => { highlight = c; colorVer++; deck.setProps({ layers: layers() }); },
     resetView: () => { viewState = home(layout); deck.setProps({ viewState }); },
     destroy: () => deck.finalize(),
   };

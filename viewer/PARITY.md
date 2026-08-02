@@ -33,12 +33,12 @@ nothing here may be silently dropped. `[ ]` = not yet ported, `[x]` = ported + v
 - [ ] **Grain slider** across the ladder (continents ↔ towns); region count + names update at each level.
 - [ ] **Drill-in**: click a region (legend) or double-click the map → fit camera to it + step grain finer so it resolves into sub-clumps (gentle step, not max).
 - [ ] Legend region **click = isolate + zoom** (sticky pin; click again releases + zooms out) — must NOT change grain (the bug we fixed).
-- [ ] Legend region **hover = transient isolate** (hull + dim others).
+- [x] Legend region **hover = transient isolate** (hull + dim others).
 - [ ] Grain change clears stale pins/highlights (cluster ids are grain-specific).
 
 ## Regions
-- [ ] **Convex-hull** highlight around an isolated region.
-- [ ] **On-map labels** at region centroids, collision-decluttered (deck TextLayer collision filter), **toggle on/off**.
+- [x] **Convex-hull** highlight around an isolated region.
+- [x] **On-map labels** at region centroids, collision-decluttered (deck TextLayer collision filter), **toggle on/off**.
 - [x] **Legend**: region list with counts + colors + blurb on hover; header states the interaction ("click to isolate + zoom").
 - [x] Colourblind-safe palette; identity carried by position + labels + isolate (colours cycle past ~8 — that's accepted, not a bug).
 

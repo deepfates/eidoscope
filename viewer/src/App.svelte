@@ -17,6 +17,8 @@
   let yKey = $state("");
   let fac = $state<Facet[]>([]);
   let handle = $state<MapHandle | null>(null);
+  let showLabels = $state(true);
+  const labelsOn = $derived(showLabels && color === "cluster" && layout !== "orbit");
 
   const axl = (a: any) => (a.weak ? "~ " : "") + a.name;
   const rgb = (c: [number, number, number]) => `rgb(${c[0]},${c[1]},${c[2]})`;
@@ -31,6 +33,7 @@
       .sort((x, y) => Math.abs(y.s - 50) - Math.abs(x.s - 50)).slice(0, 3) : [];
 
   function focusCard(i: number | null) { selected = i; handle?.setFocus(i); }
+  function reset() { focusCard(null); handle?.setHighlight(null); handle?.resetView(); }
 
   onMount(() => {
     (async () => {
@@ -42,7 +45,7 @@
         data = D;
         status = "";
         handle = createMap(canvas, D, {
-          getColor: colorFor(D, color, fac), getRadius: sizeFor(D, size), layout, xKey, yKey,
+          getColor: colorFor(D, color, fac), getRadius: sizeFor(D, size), layout, xKey, yKey, showLabels: labelsOn,
           onClick: (i) => focusCard(i < 0 ? null : i),
           onHover: (i, x, y) => (hovered = i == null ? null : { i, x, y }),
         });
@@ -54,8 +57,8 @@
   });
 
   $effect(() => {
-    const l = layout, c = color, s = size, xk = xKey, yk = yKey, h = handle, d = data, f = fac;
-    if (h && d) h.update({ getColor: colorFor(d, c, f), getRadius: sizeFor(d, s), layout: l, xKey: xk, yKey: yk });
+    const l = layout, c = color, s = size, xk = xKey, yk = yKey, sl = labelsOn, h = handle, d = data, f = fac;
+    if (h && d) h.update({ getColor: colorFor(d, c, f), getRadius: sizeFor(d, s), layout: l, xKey: xk, yKey: yk, showLabels: sl });
   });
 
   const curFacet = $derived(fac.find((f) => "meta:" + f.key === color));
@@ -100,12 +103,16 @@
         <select bind:value={size} class="min-w-0 flex-1 rounded-md border border-neutral-700 bg-neutral-950 px-1.5 py-1 text-xs">
           <option value="uniform">uniform</option><option value="hub">influence (hub)</option>{#each data.axes as a}<option value={a.key}>commit: {axl(a)}</option>{/each}
         </select></label>
+      <div class="mt-2 flex gap-2">
+        <button class="flex-1 rounded-md border border-neutral-700 px-2 py-1 font-mono text-[11px] {showLabels ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-500'}" onclick={() => (showLabels = !showLabels)}>labels</button>
+        <button class="flex-1 rounded-md border border-neutral-700 px-2 py-1 font-mono text-[11px] text-neutral-300 hover:bg-neutral-800" onclick={reset}>reset</button>
+      </div>
     </div>
 
     <div class="absolute bottom-3 right-3 max-h-[48vh] w-52 overflow-auto rounded-xl border border-neutral-800 bg-neutral-900/80 p-2.5 text-xs backdrop-blur">
       {#if color === "cluster"}
         <div class="mb-1.5 font-mono text-[10px] uppercase text-neutral-500">{data.k} regions</div>
-        {#each data.clusters as c}<div class="flex items-center gap-2 py-0.5"><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(col(c.c))}"></span><span class="truncate">{c.label} <span class="text-neutral-500">{c.n}</span></span></div>{/each}
+        {#each data.clusters as c}<div class="flex cursor-pointer items-center gap-2 py-0.5 hover:text-white" role="button" tabindex="0" onmouseenter={() => handle?.setHighlight(c.c)} onmouseleave={() => handle?.setHighlight(null)}><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(col(c.c))}"></span><span class="truncate">{c.label} <span class="text-neutral-500">{c.n}</span></span></div>{/each}
       {:else if curFacet}
         <div class="mb-1.5 font-mono text-[10px] uppercase text-neutral-500">{curFacet.label} · {curFacet.ord.length}</div>
         {#each curFacet.ord.slice(0, 16) as v}<div class="flex items-center gap-2 py-0.5"><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(col(curFacet.idx[v]))}"></span><span class="truncate">{v} <span class="text-neutral-500">{curFacet.cnt[v]}</span></span></div>{/each}
