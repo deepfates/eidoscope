@@ -34,7 +34,7 @@ export function renderHTML(D: MapData): string {
 :root{--bg:#0b0e15;--ink:#eef2fa;--soft:#93a1b7;--hair:#232c3c;--panel:#141b27;--sans:"Inter",system-ui,sans-serif;--mono:ui-monospace,Menlo,monospace}
 :root[data-theme=light]{--bg:#f4f6fa;--ink:#161c28;--soft:#5a6578;--hair:#dde3ee;--panel:#fff}
 *{box-sizing:border-box}html,body{margin:0;height:100%}body{background:var(--bg);color:var(--ink);font-family:var(--sans);overflow:hidden}
-#c{position:fixed;inset:0;width:100%;height:100%;display:block;cursor:grab}#c.drag{cursor:grabbing}
+#c{position:fixed;inset:0;width:100%;height:100%;display:block;cursor:grab;touch-action:none}#c.drag{cursor:grabbing}
 .pane{position:fixed;background:color-mix(in srgb,var(--panel) 92%,transparent);backdrop-filter:blur(10px);border:1px solid var(--hair);border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.4)}
 #hud{top:14px;left:14px;padding:12px 14px;width:290px}#hud .k{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--soft)}#hud h1{font-size:16px;margin:3px 0 9px;font-weight:800}
 .ctl{display:flex;gap:8px;align-items:center;margin:5px 0;font-size:12px}.ctl label{font-family:var(--mono);font-size:10px;color:var(--soft);width:46px;flex:none}
@@ -124,6 +124,23 @@ let clickTimer=null;// disambiguate single-click (open card) from double-click (
 addEventListener('mouseup',e=>{if(drag&&drag.m<4){const g=pickG(e.clientX,e.clientY);if(g){window.open(g.url,'_blank')}else{const mx=e.clientX,my=e.clientY;clearTimeout(clickTimer);clickTimer=setTimeout(()=>{const n=pick(mx,my);if(n)showDetail(n);else clearFocus()},180)}}drag=null;cv.classList.remove('drag')});
 addEventListener('mousemove',e=>{if(drag){drag.m+=Math.abs(e.movementX)+Math.abs(e.movementY);if(layout==='orbit'){rotY=drag.ry+(e.clientX-drag.x)*.008;rotX=drag.rx+(e.clientY-drag.y)*.008;relayout()}else{view.x=drag.vx+e.clientX-drag.x;view.y=drag.vy+e.clientY-drag.y;draw()}return}const g=pickG(e.clientX,e.clientY);const n=g?null:pick(e.clientX,e.clientY);if(g!==ghover){ghover=g;draw()}if(n!==hover){hover=n;draw();if(n)tip.innerHTML=tipHTML(n)}if(g)tip.innerHTML='<div class="t">'+esc(g.title)+'</div><div class="co">'+esc(g.core)+'</div><div class="f">cited by '+g.n+' of your papers · click → arxiv</div>';if(g||n){tip.style.opacity=1;tip.style.left=Math.min(e.clientX+14,W-tip.offsetWidth-8)+'px';tip.style.top=Math.min(e.clientY+14,H-tip.offsetHeight-8)+'px'}else tip.style.opacity=0});
 cv.addEventListener('wheel',e=>{e.preventDefault();const f=Math.exp(-e.deltaY*.0015),ns=Math.max(.4,Math.min(22,view.s*f));const wx=(e.clientX-W/2-view.x)/view.s,wy=(e.clientY-H/2-view.y)/view.s;view.s=ns;view.x=e.clientX-W/2-wx*ns;view.y=e.clientY-H/2-wy*ns;draw()},{passive:false});
+// TOUCH (the ratchet — makes it explorable on a phone now; the proper viz-lib rebuild is later):
+// one finger pans (or rotates in orbit), two fingers pinch-zoom toward the pinch midpoint, a tap opens a card.
+let touch=null;
+cv.addEventListener('touchstart',e=>{e.preventDefault();
+  if(e.touches.length===1){const t=e.touches[0];touch={mode:'pan',x:t.clientX,y:t.clientY,vx:view.x,vy:view.y,ry:rotY,rx:rotX,moved:0}}
+  else if(e.touches.length>=2){const a=e.touches[0],b=e.touches[1],mx=(a.clientX+b.clientX)/2,my=(a.clientY+b.clientY)/2;touch={mode:'pinch',d0:Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY)||1,s0:view.s,wx:(mx-W/2-view.x)/view.s,wy:(my-H/2-view.y)/view.s}}
+},{passive:false});
+cv.addEventListener('touchmove',e=>{if(!touch)return;e.preventDefault();
+  if(touch.mode==='pan'&&e.touches.length===1){const t=e.touches[0];touch.moved+=Math.abs(t.clientX-touch.x)+Math.abs(t.clientY-touch.y);
+    if(layout==='orbit'){rotY=touch.ry+(t.clientX-touch.x)*.008;rotX=touch.rx+(t.clientY-touch.y)*.008;relayout()}
+    else{view.x=touch.vx+(t.clientX-touch.x);view.y=touch.vy+(t.clientY-touch.y);draw()}}
+  else if(touch.mode==='pinch'&&e.touches.length>=2){const a=e.touches[0],b=e.touches[1],mx=(a.clientX+b.clientX)/2,my=(a.clientY+b.clientY)/2,d=Math.hypot(a.clientX-b.clientX,a.clientY-b.clientY),ns=Math.max(.4,Math.min(22,touch.s0*d/touch.d0));view.s=ns;view.x=mx-W/2-touch.wx*ns;view.y=my-H/2-touch.wy*ns;draw()}
+},{passive:false});
+cv.addEventListener('touchend',e=>{
+  if(touch&&touch.mode==='pan'&&touch.moved<10){const n=pick(touch.x,touch.y);if(n)showDetail(n);else clearFocus()}
+  if(e.touches.length===1){const t=e.touches[0];touch={mode:'pan',x:t.clientX,y:t.clientY,vx:view.x,vy:view.y,ry:rotY,rx:rotX,moved:99}}else if(e.touches.length===0)touch=null;
+},{passive:false});
 function esc(s){return(s||'').toString().replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}
 const axl=a=>(a.weak?'~ ':'')+a.name;const xax=document.getElementById('xax'),yax=document.getElementById('yax');axes.forEach(a=>{xax.add(new Option(axl(a),a.key));yax.add(new Option(axl(a),a.key))});xax.value=xKey;yax.value=yKey;
 const lsel=document.getElementById('layout');function syncXY(){const on=layout==='axes';document.getElementById('xrow').classList.toggle('on',on);document.getElementById('yrow').classList.toggle('on',on)}

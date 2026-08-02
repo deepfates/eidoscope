@@ -53,7 +53,7 @@ const fails: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (cond) console.log("  ✓", msg); else { console.log("  ✗", msg); fails.push(msg); } };
 
 const b = await chromium.launch();
-const p = await b.newPage({ viewport: { width: 1600, height: 1050 }, deviceScaleFactor: 2 });
+const p = await b.newPage({ viewport: { width: 1600, height: 1050 }, deviceScaleFactor: 2, hasTouch: true });
 const pageErrs: string[] = []; p.on("pageerror", (e) => pageErrs.push(String(e)));
 const consoleErrs: string[] = []; p.on("console", (m) => { if (m.type() === "error") consoleErrs.push(m.text()); });
 await p.goto("file://" + file);
@@ -98,7 +98,12 @@ try {
   await p.evaluate(() => (window as any).focusIdx(5)); await p.waitForTimeout(150); s = await st();
   ok(s.detail === true && s.focus === 5, `opening a card shows its detail panel — detail=${s.detail} focus=${s.focus}`);
 
-  // 6. reset returns to the default grain and clears everything
+  // 6. TOUCH (the mobile ratchet): a tap on a node opens its card
+  await p.click("#reset"); await p.waitForTimeout(150);
+  await p.touchscreen.tap(800, 525); await p.waitForTimeout(200); s = await st();  // node 0 sits at screen center
+  ok(s.detail === true && s.focus === 0, `tap opens a card on touch — detail=${s.detail} focus=${s.focus}`);
+
+  // 7. reset returns to the default grain and clears everything
   await p.click("#reset"); await p.waitForTimeout(200); s = await st();
   ok(s.grain === 2 && s.pin === null && s.focus === null && s.zoom < 1.05 && s.detail === false, `reset restores default grain + clears pin/focus/zoom — ${JSON.stringify(s)}`);
 
