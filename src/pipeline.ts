@@ -22,7 +22,7 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
   console.error(`[2/5] carding ${docs.length} docs over ${axes.length} axes…`);
   let n = 0;
   const conc = Number(process.env.EIDOSCOPE_CONCURRENCY || 24); // the card reads dominate wall-clock; raise for faster cloud runs
-  const deck = await cardCorpus(docs, axes, { llm, concurrency: conc, cache: "deck-cache.jsonl", onProgress: (d) => { if (++n % 100 === 0) process.stderr.write(`  ${n}/${docs.length}\r`); } });
+  const deck = await cardCorpus(docs, axes, { llm, concurrency: conc, cache: ".", onProgress: (d) => { if (++n % 100 === 0) process.stderr.write(`  ${n}/${docs.length}\r`); } });
   writeFileSync("deck.jsonl", deckToJSONL(deck));
   console.error(`  ${deck.length} cards -> deck.jsonl`);
 

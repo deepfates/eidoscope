@@ -4,14 +4,22 @@ import { ax } from "@ax-llm/ax";
 // The model may LABEL axes and SCORE documents — it never invents the axes themselves.
 // (Ax requires descriptive field names, so no bare `text`/`title`/`name`.)
 
-// Restate a document in one uniform voice and place it on the corpus's discovered axes. The result IS
-// the card (its eidos) — the normalized form we embed and compare to build the map. Intent lives in the
-// field descriptions (declarative); wording/format is the optimizer's job later, so no length cuffs here.
-export const deriveCard = ax(`
+// The card is derived in two axis-INDEPENDENT vs axis-DEPENDENT halves, so the expensive half caches
+// forever and re-running over relabeled axes only redoes the cheap half.
+
+// (1) Axis-BLIND. Restate a document in one uniform voice. Depends only on the document — cache forever.
+export const deriveCore = ax(`
   documentTitle:string,
-  documentText:string "the full document",
+  documentText:string "the full document" ->
+  restatement:string "restate this document in one neutral, uniform voice — the same voice for every author, source, and format — so documents can be compared by content instead of style. Keep every distinguishing detail: named entities, quantities, specific claims, mechanisms. Remove only genuine redundancy; match the source's information density — a short, dense document stays short, never padded, and a rich one is never flattened into a vague gist. This is a normalization, not a summary."
+`);
+
+// (2) Axis-DEPENDENT. Place the (already-restated) document on the corpus's discovered axes. Reads the
+// short restatement, not the whole document, so it's cheap to redo whenever the axes change.
+export const placeOnAxes = ax(`
+  documentTitle:string,
+  documentSummary:string "a neutral restatement of the document's content",
   corpusAxes:string "the corpus's discovered axes, each with its low pole and high pole, in order" ->
-  restatement:string "restate this document in one neutral, uniform voice — the same voice for every author, source, and format — so documents can be compared by content instead of style. Keep every distinguishing detail: named entities, quantities, specific claims, mechanisms. Remove only genuine redundancy; match the source's information density — a short, dense document stays short, never padded, and a rich one is never flattened into a vague gist. This is a normalization, not a summary.",
   axisPlacements:string[] "one entry per axis, in the given order: in neutral language, what in this document places it where it sits on that axis relative to the rest of the corpus. Every document has a position on every axis."
 `);
 

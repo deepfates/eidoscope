@@ -2,7 +2,7 @@
 // Proves the gorm-via-Ax card works in-grain (typed output, notes aligned to axes).
 // (Positions come from the PCA projection now, not the LLM — the card carries summary + per-axis notes.)
 import { readFileSync, readdirSync } from "node:fs";
-import { deriveCard } from "./signatures.ts";
+import { deriveCore, placeOnAxes } from "./signatures.ts";
 import { provider } from "./provider.ts";
 
 const FIX = process.env.EIDOSCOPE_FIXTURE ?? "";
@@ -18,7 +18,8 @@ const text = pick.t.split(/\n---\n/).slice(1).join("\n").replace(/\s+/g, " ");
 
 const llm = provider();
 
-const card = await deriveCard.forward(llm, { documentTitle: title, documentText: text, corpusAxes: axesText });
+const core = await deriveCore.forward(llm, { documentTitle: title, documentText: text });
+const card = { restatement: core.restatement, ...(await placeOnAxes.forward(llm, { documentTitle: title, documentSummary: core.restatement, corpusAxes: axesText })) };
 
 console.log("TITLE:", title, "\n");
 console.log("RESTATEMENT:", card.restatement, "\n");

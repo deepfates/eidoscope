@@ -106,31 +106,29 @@ test("scoreRedundancy: flags collapsed axes, passes distinct ones", () => {
   expect(distinct.meanAbsR).toBeLessThan(collapsed.meanAbsR);
 });
 
-test("cardCorpus: resumable — reuses cached cards, only cards missing ids, invalidates on axis change", async () => {
+test("cardCorpus: cores cache by content forever; relabeling axes only re-places (the re-card fix)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "eido-cache-"));
-  const cache = join(dir, "deck-cache.jsonl");
   const axesA = [{ pc: 1, var: 0, coherence: 5, key: "a", name: "A", pole_low: "", pole_high: "" }] as any;
+  const axesB = [{ pc: 1, var: 0, coherence: 5, key: "b", name: "B", pole_low: "", pole_high: "" }] as any;
   const docs = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `d${i}`, title: `T${i}`, body: "word ".repeat(50) }));
-  let calls = 0;
-  const sig = { forward: async () => { calls++; return { coreSummary: "c", axisScores: [50], axisNotes: ["n"] }; } };
-  const opts = { sig, cache, concurrency: 1, llm: {} };
+  let coreCalls = 0, placeCalls = 0;
+  const deriveCoreSig = { forward: async (_llm: any, inp: any) => { coreCalls++; return { restatement: "r-" + inp.documentTitle }; } };
+  const placeSig = { forward: async () => { placeCalls++; return { axisPlacements: ["n"] }; } };
+  const opts = { deriveCoreSig, placeSig, cache: dir, concurrency: 1, llm: {} };
 
   const r1 = await cardCorpus(docs(3), axesA, opts);
-  expect(r1.length).toBe(3);
-  expect(calls).toBe(3); // all fresh
+  expect(r1.length).toBe(3); expect(coreCalls).toBe(3); expect(placeCalls).toBe(3); // all fresh
 
-  const r2 = await cardCorpus(docs(3), axesA, opts); // same docs+axes → all cached
-  expect(r2.length).toBe(3);
-  expect(calls).toBe(3); // no new LLM calls — survived "restart"
+  await cardCorpus(docs(3), axesA, opts); // same docs+axes → both caches hit, survived a "restart"
+  expect(coreCalls).toBe(3); expect(placeCalls).toBe(3);
 
-  const r3 = await cardCorpus(docs(4), axesA, opts); // one new doc → only it is carded
-  expect(r3.length).toBe(4);
-  expect(calls).toBe(4);
+  const r3 = await cardCorpus(docs(4), axesA, opts); // one new doc → only it is cored+placed
+  expect(r3.length).toBe(4); expect(coreCalls).toBe(4); expect(placeCalls).toBe(4);
 
-  const axesB = [{ pc: 1, var: 0, coherence: 5, key: "b", name: "B", pole_low: "", pole_high: "" }] as any;
-  const r4 = await cardCorpus(docs(2), axesB, opts); // axes changed → stale cache discarded → recard
-  expect(r4.length).toBe(2);
-  expect(calls).toBe(6);
+  const r4 = await cardCorpus(docs(4), axesB, opts); // AXES RELABELED: cores reused, only placements redo
+  expect(r4.length).toBe(4);
+  expect(coreCalls).toBe(4);   // the whole point — the expensive restatements are NOT re-derived
+  expect(placeCalls).toBe(8);  // 4 docs re-placed onto the new axes (the cheap half)
 
   rmSync(dir, { recursive: true, force: true });
 });
