@@ -20,6 +20,21 @@
   let showLabels = $state(true);
   let grain = $state(0);
   let pinned = $state<number | null>(null);
+  let deckOpen = $state(false);
+  let deckSort = $state("hub");
+  let deckQ = $state("");
+  let deckUnread = $state(false);
+  const hasRead = $derived(!!data?.read?.some((r) => r === true || r === false));
+  const axShort = (name: string) => name.split(/ vs\.? | and /i)[0].slice(0, 15);
+  const deckList = $derived.by(() => {
+    if (!data) return [] as number[];
+    let list = data.ids.map((_, i) => i);
+    const q = deckQ.trim().toLowerCase();
+    if (q) list = list.filter((i) => data!.titles[i].toLowerCase().includes(q) || data!.cores[i].toLowerCase().includes(q));
+    if (deckUnread && hasRead) list = list.filter((i) => data!.read![i] !== true);
+    list.sort((a, b) => (deckSort === "hub" ? data!.hub[b] - data!.hub[a] : (data!.scores[deckSort]?.[b] ?? 0) - (data!.scores[deckSort]?.[a] ?? 0)));
+    return list.slice(0, 300);
+  });
   const labelsOn = $derived(showLabels && color === "cluster" && layout !== "orbit");
   const nLevels = $derived(data?.counts?.length ?? 1);
   const assignment = $derived(data?.levels?.[grain] ?? data?.cluster ?? []);
@@ -129,6 +144,7 @@
         </label>
       {/if}
       <div class="mt-2 flex gap-2">
+        <button class="flex-1 rounded-md border border-neutral-700 px-2 py-1 font-mono text-[11px] text-neutral-300 hover:bg-neutral-800" onclick={() => (deckOpen = true)}>deck</button>
         <button class="flex-1 rounded-md border border-neutral-700 px-2 py-1 font-mono text-[11px] {showLabels ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-500'}" onclick={() => (showLabels = !showLabels)}>labels</button>
         <button class="flex-1 rounded-md border border-neutral-700 px-2 py-1 font-mono text-[11px] text-neutral-300 hover:bg-neutral-800" onclick={reset}>reset</button>
       </div>
@@ -183,6 +199,38 @@
       {#each data.nbr[selected] ?? [] as j}
         <button class="block w-full truncate rounded px-1 py-0.5 text-left text-xs hover:bg-neutral-800" onclick={() => focusCard(j)}>→ {data.titles[j]}</button>
       {/each}
+    </div>
+  {/if}
+
+  <!-- deck / list view — the accessible, sortable/filterable reader (real DOM, keyboard-navigable) -->
+  {#if deckOpen && data}
+    <div class="absolute inset-x-2 top-2 bottom-2 z-30 mx-auto flex max-w-4xl flex-col rounded-xl border border-neutral-800 bg-neutral-950/95 p-3 backdrop-blur">
+      <div class="mb-2 flex flex-wrap items-center gap-2">
+        <b class="text-sm">Deck</b>
+        <span class="font-mono text-[10px] text-neutral-500">{deckList.length} cards</span>
+        <label class="flex items-center gap-1 text-xs"><span class="font-mono text-[10px] text-neutral-500">sort</span>
+          <select bind:value={deckSort} class="rounded-md border border-neutral-700 bg-neutral-900 px-1.5 py-1 text-xs">
+            <option value="hub">influence</option>{#each data.axes as a}<option value={a.key}>{axl(a)}</option>{/each}
+          </select></label>
+        {#if hasRead}<button class="rounded-md border border-neutral-700 px-2 py-1 font-mono text-[11px] {deckUnread ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-500'}" onclick={() => (deckUnread = !deckUnread)}>unread only</button>{/if}
+        <input bind:value={deckQ} placeholder="filter…" class="min-w-0 flex-1 rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs" />
+        <button class="font-mono text-neutral-500 hover:text-neutral-200" onclick={() => (deckOpen = false)} aria-label="close deck">✕</button>
+      </div>
+      <div class="grid grid-cols-1 gap-2 overflow-auto sm:grid-cols-2">
+        {#each deckList as i (i)}
+          <button class="rounded-lg border border-neutral-800 bg-neutral-900 p-2.5 text-left hover:border-neutral-600 {data.read?.[i] === true ? 'opacity-60' : ''}" onclick={() => { focusCard(i); deckOpen = false; }}>
+            <div class="flex items-start justify-between gap-2">
+              <div class="truncate text-[13px] font-bold">{data.titles[i]}</div>
+              {#if data.urls?.[i]}<a href={data.urls[i]} target="_blank" rel="noopener" class="flex-none font-mono text-[10px] font-bold text-blue-400 hover:underline" onclick={(e) => e.stopPropagation()}>open →</a>{/if}
+            </div>
+            <div class="my-1 line-clamp-2 text-[11px] text-neutral-400">{data.cores[i].slice(0, 160)}</div>
+            <div class="flex flex-wrap gap-1">
+              <span class="rounded-full bg-neutral-800 px-2 py-0.5 font-mono text-[9px] text-neutral-200">◆ {regionOf(i)}</span>
+              {#each topAxes(i) as t}<span class="rounded-full bg-neutral-800/70 px-2 py-0.5 font-mono text-[9px] text-neutral-400">{axShort(t.n)} {t.s}</span>{/each}
+            </div>
+          </button>
+        {/each}
+      </div>
     </div>
   {/if}
 </div>

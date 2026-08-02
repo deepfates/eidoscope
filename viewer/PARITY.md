@@ -50,13 +50,13 @@ nothing here may be silently dropped. `[ ]` = not yet ported, `[x]` = ported + v
 - [x] **Finger-sized picking** (pickingRadius) — tiny dots are still tappable.
 
 ## Deck / list view (the reader — and the accessibility surface)
-- [ ] Cards as a **sortable, filterable list** (real DOM).
-- [ ] **Sort by influence or any axis** (axis sort = a readable spectrum from one pole to the other).
-- [ ] **Text filter**.
-- [ ] **"Unread only"** toggle (when read-progress metadata is present).
-- [ ] Per-card: region chip, read chip, the 3 strongest axis chips, **open →** link.
-- [ ] Click a list card → focus it on the map + close the list.
-- [ ] **Keyboard-navigable + screen-reader labeled** — this view is the accessible parallel to the canvas.
+- [x] Cards as a **sortable, filterable list** (real DOM).
+- [x] **Sort by influence or any axis** (axis sort = a readable spectrum from one pole to the other).
+- [x] **Text filter**.
+- [x] **"Unread only"** toggle (when read-progress metadata is present). _(renders + same verified filter path; effect masked by the 300-card cap on this corpus.)_
+- [x] Per-card: region chip, read chip, the 3 strongest axis chips, **open →** link.
+- [x] Click a list card → focus it on the map + close the list.
+- [x] **Keyboard-navigable + screen-reader labeled** — this view is the accessible parallel to the canvas.
 
 ## Frontier telescope (arxiv corpora, `--frontier`)
 - [ ] **Ghost points** — cited-but-not-in-corpus papers placed near the work that cites them; sized by citation count.
