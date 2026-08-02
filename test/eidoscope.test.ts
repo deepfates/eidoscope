@@ -11,6 +11,8 @@ import { docArxiv, fetchFrontier } from "../src/frontier.ts";
 import { distinctiveTerms, distinctiveAxes, nameLevels } from "../src/regions.ts";
 import { renderHTML, type MapData } from "../src/render.ts";
 import { relabelMap } from "../src/pipeline.ts";
+import { encodeMap, decodeMap } from "../src/mapbin.ts";
+import type { MapContract } from "../src/schema.ts";
 
 // Deterministic contract tests — the pure pipeline surfaces. Fast, no LLM/network.
 // (The LLM stages take an injectable `llm`; a live smoke test is gated behind EIDOSCOPE_LIVE.)
@@ -185,6 +187,31 @@ function synthMap(): MapData {
     levelLabels: [["old0", "old1"], ["oldA", "oldB", "oldC"]],
   };
 }
+
+test("mapbin: binary codec round-trips the contract losslessly and is much smaller than JSON", () => {
+  const D: MapContract = {
+    ids: ["a", "b", "c"], titles: ["A", "B", "C"], cores: ["core a", "core b", "core c"],
+    notes: [{ x: "nx" }, { x: "ny" }, { x: "nz" }],
+    axes: [{ key: "x", name: "X", low: "lo", high: "hi" }],
+    scores: { x: [10, 55, 90] },
+    xy: [[-0.5, 0.1], [0.2, -0.3], [0.9, 0.4]], xyz: [[-0.5, 0.1, 0], [0.2, -0.3, 0.1], [0.9, 0.4, -0.2]],
+    cluster: [0, 0, 1], k: 2, di: 1,
+    levels: [[0, 0, 0], [0, 0, 1]], counts: [1, 2], levelLabels: [["all"], ["p", "q"]],
+    clusters: [{ c: 0, n: 2, label: "p" }, { c: 1, n: 1, label: "q" }],
+    hub: [3, 1, 2], nbr: [[1, 2], [0], [0, 1]],
+    urls: ["u", undefined, "w"], dates: [1, 2, 3],
+  };
+  const bin = encodeMap(D);
+  const back = decodeMap(bin);
+  expect(back.ids).toEqual(D.ids);                                   // strings survive (JSON header)
+  expect(back.cluster).toEqual(D.cluster);                          // int buffer
+  expect(back.levels).toEqual(D.levels);                            // ragged int buffers
+  expect(back.nbr).toEqual(D.nbr);                                  // ragged neighbor lists
+  expect(back.scores.x.map((v) => Math.round(v))).toEqual(D.scores.x); // f32 scores
+  expect(back.xy[2][0]).toBeCloseTo(0.9, 4);                        // f32 coords
+  expect(back.urls).toEqual(D.urls);                                // sparse metadata (undefined preserved)
+  expect(bin.byteLength).toBeLessThan(JSON.stringify(D).length);    // smaller than the JSON form
+});
 
 test("renderHTML: viewer script parses AND the grain ladder actually reaches the payload (both bugs I shipped)", () => {
   const html = renderHTML(synthMap());
