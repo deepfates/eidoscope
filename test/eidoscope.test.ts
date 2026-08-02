@@ -106,29 +106,30 @@ test("scoreRedundancy: flags collapsed axes, passes distinct ones", () => {
   expect(distinct.meanAbsR).toBeLessThan(collapsed.meanAbsR);
 });
 
-test("cardCorpus: cores cache by content forever; relabeling axes only re-places (the re-card fix)", async () => {
+test("cardCorpus: cards cache by content + axis GEOMETRY; relabeling axes hits (the re-card fix)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "eido-cache-"));
-  const axesA = [{ pc: 1, var: 0, coherence: 5, key: "a", name: "A", pole_low: "", pole_high: "" }] as any;
-  const axesB = [{ pc: 1, var: 0, coherence: 5, key: "b", name: "B", pole_low: "", pole_high: "" }] as any;
+  const geom = { pc: 1, var: 0.5, coherence: 5, pole_low: "", pole_high: "" };
+  const axesA = [{ ...geom, key: "a", name: "A" }] as any;                              // geometry G, labeled "A"
+  const axesRelabeled = [{ ...geom, key: "scholarly", name: "Scholarly" }] as any;      // SAME geometry, LLM renamed it
+  const axesNewGeom = [{ pc: 2, var: 0.3, coherence: 5, key: "c", name: "C", pole_low: "", pole_high: "" }] as any; // different geometry
   const docs = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `d${i}`, title: `T${i}`, body: "word ".repeat(50) }));
-  let coreCalls = 0, placeCalls = 0;
-  const deriveCoreSig = { forward: async (_llm: any, inp: any) => { coreCalls++; return { restatement: "r-" + inp.documentTitle }; } };
-  const placeSig = { forward: async () => { placeCalls++; return { axisPlacements: ["n"] }; } };
-  const opts = { deriveCoreSig, placeSig, cache: dir, concurrency: 1, llm: {} };
+  let calls = 0;
+  const sig = { forward: async () => { calls++; return { restatement: "r", axisPlacements: ["n"] }; } };
+  const opts = { sig, cache: dir, concurrency: 1, llm: {} };
 
   const r1 = await cardCorpus(docs(3), axesA, opts);
-  expect(r1.length).toBe(3); expect(coreCalls).toBe(3); expect(placeCalls).toBe(3); // all fresh
+  expect(r1.length).toBe(3); expect(calls).toBe(3); // all fresh — one call per doc
 
-  await cardCorpus(docs(3), axesA, opts); // same docs+axes → both caches hit, survived a "restart"
-  expect(coreCalls).toBe(3); expect(placeCalls).toBe(3);
+  await cardCorpus(docs(3), axesA, opts); // same corpus + axes → all cached, survived a "restart"
+  expect(calls).toBe(3);
 
-  const r3 = await cardCorpus(docs(4), axesA, opts); // one new doc → only it is cored+placed
-  expect(r3.length).toBe(4); expect(coreCalls).toBe(4); expect(placeCalls).toBe(4);
+  const r3 = await cardCorpus(docs(3), axesRelabeled, opts); // axes RELABELED, geometry identical → HIT
+  expect(r3.length).toBe(3);
+  expect(calls).toBe(3); // the re-card fix: nondeterministic label drift does NOT re-card
 
-  const r4 = await cardCorpus(docs(4), axesB, opts); // AXES RELABELED: cores reused, only placements redo
-  expect(r4.length).toBe(4);
-  expect(coreCalls).toBe(4);   // the whole point — the expensive restatements are NOT re-derived
-  expect(placeCalls).toBe(8);  // 4 docs re-placed onto the new axes (the cheap half)
+  const r4 = await cardCorpus(docs(3), axesNewGeom, opts); // geometry ACTUALLY changed → re-card (correct)
+  expect(r4.length).toBe(3);
+  expect(calls).toBe(6);
 
   rmSync(dir, { recursive: true, force: true });
 });
