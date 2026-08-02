@@ -1,7 +1,8 @@
-import { appendFileSync, readFileSync, existsSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { deriveCard } from "./signatures.ts";
 import { provider } from "./provider.ts";
+import { hash, Store, pool, withRetry } from "./llm.ts";
 import type { Axis } from "./axes.ts";
 import type { Doc } from "./corpus.ts";
 
@@ -13,39 +14,6 @@ export type Card = { id: string; title: string; cat?: string; date?: number; url
 
 export const axesPrompt = (axes: Axis[]) =>
   axes.map((a, i) => `${i + 1}. ${a.name}: low="${a.pole_low}" high="${a.pole_high}"`).join("\n");
-
-const hash = (s: string) => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0; return h.toString(36); };
-
-// Content-addressed, crash-safe cache: one {k,v} JSON per line; entries hit whenever inputs match.
-class Store {
-  private map = new Map<string, any>();
-  constructor(private file?: string) {
-    if (file && existsSync(file)) for (const l of readFileSync(file, "utf8").split("\n")) { if (!l) continue; try { const { k, v } = JSON.parse(l); this.map.set(k, v); } catch {} }
-  }
-  has(k: string) { return this.map.has(k); }
-  get(k: string) { return this.map.get(k); }
-  put(k: string, v: any) { this.map.set(k, v); if (this.file) appendFileSync(this.file, JSON.stringify({ k, v }) + "\n"); }
-}
-
-async function pool<T>(items: T[], fn: (t: T) => Promise<void>, conc: number): Promise<void> {
-  let i = 0;
-  await Promise.all(Array.from({ length: Math.max(1, conc) }, async () => { while (i < items.length) { const j = i++; await fn(items[j]); } }));
-}
-
-// Retry transient LLM failures (rate limits, network) with exponential backoff + jitter, honoring
-// Retry-After when the error exposes it. Returns undefined ONLY after retries are exhausted — the caller
-// counts that as a real, reported failure, never a silent drop.
-async function withRetry<T>(fn: () => Promise<T>, retries = 4): Promise<T | undefined> {
-  for (let a = 0; ; a++) {
-    try { return await fn(); }
-    catch (e: any) {
-      if (a >= retries) return undefined;
-      const ra = Number(e?.retryAfter ?? e?.response?.headers?.["retry-after"] ?? e?.headers?.["retry-after"]);
-      const ms = Number.isFinite(ra) && ra > 0 ? ra * 1000 : Math.min(30000, 400 * 2 ** a) + Math.floor(Math.random() * 300);
-      await new Promise((r) => setTimeout(r, ms));
-    }
-  }
-}
 
 export async function cardCorpus(docs: Doc[], axes: Axis[], opts: { llm?: any; sig?: any; concurrency?: number; cache?: string } = {}): Promise<Card[]> {
   const llm = opts.llm ?? provider();

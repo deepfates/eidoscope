@@ -11,10 +11,11 @@ import { HNSW } from "hnsw";
 // Embed the DECK (local MiniLM) and lay it out (umap-js) — the readers' coordinates.
 // Embeds the cleaned, structured card text, not the raw document: that's what de-noises the map.
 
-// The human-readable full card: title + restatement + every axis placement, concatenated. Used for
-// DISPLAY and the frontier ghost embedding — NOT for the map geometry. The map (embedCards, below)
-// embeds the restatement and the placements as SEPARATE pooled vectors, because flattening them into one
-// string lets the 16 placements drown the specific content (measured: hurts topical relatedness).
+// The human-readable full card: title + restatement + every axis placement, concatenated into ONE
+// string. This is also exactly what the map geometry embeds (embedCards, below) — we briefly split it
+// into two weighted vectors to keep the placements from drowning the restatement, but building the maps
+// three ways and LOOKING settled it: the combined card stays cleanly structured, so the split was
+// unnecessary machinery. Both parts are the LLM card — no full-text, no PCA in the geometry.
 export const cardText = (c: Card, axes: Axis[]) => (c.title ? c.title + ". " : "") + (c.core || "") + " " + axes.map((a) => c.axes[a.key]?.note || "").filter(Boolean).join(". ");
 
 // Calibrated axis positions straight from the deterministic PCA projection (grug), rank-normalized to
@@ -62,11 +63,7 @@ async function poolEmbed(texts: string[], cacheDir: string): Promise<number[][]>
   });
 }
 
-// The card as the map's coordinates: one chunk-pooled embedding of the whole card (title + restatement
-// + axis placements). We briefly split it into two weighted vectors to keep the restatement from being
-// "drowned" by the placements — but building the maps three ways and LOOKING settled it: the combined
-// card stays cleanly structured (placements-only is the only one that mushes), so the split and its
-// weight were unnecessary machinery. Both parts are the LLM card — no full-text, no PCA in the geometry.
+// The card as the map's coordinates: one chunk-pooled embedding of the whole card text (see cardText).
 export async function embedCards(cards: Card[], axes: Axis[]): Promise<number[][]> {
   return poolEmbed(cards.map((c) => cardText(c, axes)), "cache-eidoscope-cards");
 }
@@ -88,7 +85,7 @@ export async function projectAndCluster(embs: number[][]) {
   if (n < 5) { // too few points for UMAP/clustering — lay them on a ring so the tool still runs
     const xy = X.map((_, i) => [Math.cos((2 * Math.PI * i) / n) * 0.6, Math.sin((2 * Math.PI * i) / n) * 0.6] as number[]);
     const one = X.map(() => 0);
-    return { xy, xyz: xy.map((p) => [p[0], p[1], 0]), cluster: one, k: 1, levels: [one], counts: [1], hub: X.map(() => 0), nbr: X.map(() => [] as number[]) };
+    return { xy, xyz: xy.map((p) => [p[0], p[1], 0]), cluster: one, k: 1, di: 0, levels: [one], counts: [1], hub: X.map(() => 0), nbr: X.map(() => [] as number[]) };
   }
   const nn = Math.max(2, Math.min(15, n - 1)); // small corpora have fewer points than neighbors
   const xy = normPct(new UMAP({ nComponents: 2, nNeighbors: nn, minDist: 0.15 }).fit(X), 2);
@@ -97,7 +94,7 @@ export async function projectAndCluster(embs: number[][]) {
   const { levels, counts } = n < 6 ? { levels: [X.map(() => 0)], counts: [1] } : divisiveLevels(X);
   // default view = the level nearest ~18 groups (human-scannable); the slider exposes the rest.
   let di = 0, best = Infinity; counts.forEach((c, i) => { const d = Math.abs(c - 18); if (d < best) { best = d; di = i; } });
-  const cluster = levels[di] ?? X.map(() => 0), k = counts[di] ?? 1;
+  const cluster = levels[di] ?? X.map(() => 0), k = counts[di] ?? 1; // di = default level index; the slider exposes the rest
   // kNN + hubness (cosine on unit vectors = dot). hnsw at scale (O(n log n)); brute for small n.
   const K = 8, nbr: number[][] = [], hub = new Array(n).fill(0);
   if (n > 3000) {
@@ -115,7 +112,7 @@ export async function projectAndCluster(embs: number[][]) {
       const top = sims.slice(0, K).map(([j]) => j); nbr.push(top); for (const j of top) hub[j]++;
     }
   }
-  return { xy, xyz, cluster, k, levels, counts, hub, nbr };
+  return { xy, xyz, cluster, k, di, levels, counts, hub, nbr };
 }
 
 // verify: (1) MiniLM embeds card text, (2) umap-js + curare-cluster lay out real card embeddings

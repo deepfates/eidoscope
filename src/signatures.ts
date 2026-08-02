@@ -36,9 +36,14 @@ export const labelAxes = ax(`
   coherenceScores:number[] "1-5 per axis, in order: 5=a crisp single interpretable contrast, 1=incoherent/noise"
 `);
 
-// Name a cluster / region from a sample of its most typical members.
+// Name a region — but PHRASE a contrast the deterministic layer already computed, don't rediscover it.
+// distinctiveTerms/distinctiveAxes are what makes this region distinct from the REST of the corpus
+// (globally-frequent tokens are already filtered out upstream); the members ground it in specifics.
+// So the label names what SEPARATES this region, not the generic theme it shares with its neighbors.
 export const nameCluster = ax(`
-  memberSamples:string "titles and summaries of documents in one region" ->
-  regionLabel:string "2-4 word landmark label",
-  regionBlurb:string "one line describing the region"
+  distinctiveTerms:string "terms this region over-uses relative to the rest of the corpus — the words that set it apart",
+  distinctiveAxes:string "the discovered axes this region sits at an extreme on vs other regions, each with the pole it leans toward",
+  memberSamples:string "titles and one-line restatements of representative documents in this region" ->
+  regionLabel:string "2-4 word landmark label naming what makes THIS region distinct from the rest — lead with the distinctive terms/axes, not a generic theme that many regions would share",
+  regionBlurb:string "one line: what this region is and how it differs from its neighbors"
 `);

@@ -3,14 +3,29 @@
 // eidoscope --fixture                run on the readwise fixture (precomputed embeddings)
 // eidoscope <folder> --frontier      also pull the Semantic Scholar citation frontier (arxiv corpora)
 // eidoscope <folder> --embed raw     build the map from raw full-text instead of cards (A/B the bottleneck)
+// eidoscope --relabel <dir>          re-name regions of an existing map-data.json (no re-carding) + re-render
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { loadFolder, loadFixture, type Doc } from "./corpus.ts";
 import { embedDocs } from "./map.ts";
-import { run } from "./pipeline.ts";
+import { run, relabelMap } from "./pipeline.ts";
+import { renderHTML } from "./render.ts";
 
 const args = process.argv.slice(2);
 const val = (f: string) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : undefined; };
 const dir = args.find((a) => !a.startsWith("--"));
 const limit = val("--limit") ? Number(val("--limit")) : undefined;
+
+// --relabel: geometry is cached; only the names drift. Re-name from stored cards, re-render, done.
+if (args.includes("--relabel")) {
+  const d = dir; if (!d) { console.error("usage: eidoscope --relabel <dir-with-map-data.json>"); process.exit(1); }
+  const D = JSON.parse(readFileSync(join(d, "map-data.json"), "utf8"));
+  const D2 = await relabelMap(D, { cacheDir: d });
+  writeFileSync(join(d, "map-data.json"), JSON.stringify(D2));
+  writeFileSync(join(d, "eidoscope.html"), renderHTML(D2));
+  console.error(`\n✅ relabeled ${D2.counts?.length ?? 1} grain levels → ${join(d, "eidoscope.html")}`);
+  process.exit(0);
+}
 
 let docs: Doc[], embeddings: number[][];
 if (args.includes("--fixture")) {

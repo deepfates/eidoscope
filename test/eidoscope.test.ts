@@ -8,6 +8,7 @@ import { deckToJSONL, cardCorpus, type Card } from "../src/card.ts";
 import { cardText, projectionScores } from "../src/map.ts";
 import { scoreRedundancy } from "../src/redundancy.ts";
 import { docArxiv, fetchFrontier } from "../src/frontier.ts";
+import { distinctiveTerms, distinctiveAxes } from "../src/regions.ts";
 
 // Deterministic contract tests — the pure pipeline surfaces. Fast, no LLM/network.
 // (The LLM stages take an injectable `llm`; a live smoke test is gated behind EIDOSCOPE_LIVE.)
@@ -104,6 +105,33 @@ test("scoreRedundancy: flags collapsed axes, passes distinct ones", () => {
 
   const distinct = scoreRedundancy({ x: a, y: c, z: a.map((i) => (i * 7) % 11) });
   expect(distinct.meanAbsR).toBeLessThan(collapsed.meanAbsR);
+});
+
+test("distinctiveTerms: surfaces what a region OVER-uses, suppresses a token frequent corpus-wide (the 'Hazards' fix)", () => {
+  // every doc says "hazard"; only the first group also says "poison", only the second "sword".
+  const cores = [
+    "hazard poison poison venom", "hazard poison antidote", "hazard poison toxin",   // group 0: poisons
+    "hazard sword blade steel", "hazard sword parry", "hazard sword hilt",           // group 1: blades
+  ];
+  const groups = [[0, 1, 2], [3, 4, 5]];
+  const terms = distinctiveTerms(cores, groups, { top: 3, minDocs: 2 });
+  // the globally-frequent token never headlines EITHER region (it's in every doc → filtered by df)
+  expect(terms[0]).not.toContain("hazard");
+  expect(terms[1]).not.toContain("hazard");
+  // each region is named by its OWN over-used vocabulary
+  expect(terms[0]).toContain("poison");
+  expect(terms[1]).toContain("sword");
+  expect(terms[0]).not.toContain("sword");
+});
+
+test("distinctiveAxes: ranks a region's most extreme axes with the pole it leans toward", () => {
+  const axes = [{ key: "a", name: "AxisA", low: "LowA", high: "HighA" }, { key: "b", name: "AxisB", low: "LowB", high: "HighB" }];
+  const scores = { a: [90, 92, 88, 50], b: [51, 49, 50, 50] }; // group is extreme-high on a, centered on b
+  const d = distinctiveAxes(scores, axes, [0, 1, 2]);
+  expect(d[0].name).toBe("AxisA");           // most extreme axis first
+  expect(d[0].pole).toBe("HighA");           // leans to the high pole
+  expect(d[0].mean).toBe(90);
+  expect(d[1].name).toBe("AxisB");           // the centered axis ranks last
 });
 
 test("cardCorpus: cards cache by content + axis GEOMETRY; relabeling axes hits (the re-card fix)", async () => {
