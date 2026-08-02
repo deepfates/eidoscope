@@ -19,15 +19,15 @@ nothing here may be silently dropped. `[ ]` = not yet ported, `[x]` = ported + v
 - [ ] Smooth animated transition between layouts (the "smoosh").
 
 ## Color encoding
-- [ ] By **region** (emergent cluster) — the default.
-- [ ] By **folder** (source-folder metadata lens) — self-filtering: only offered if it covers most of the corpus with a legible number of values.
-- [ ] By **author** (metadata lens) — same self-filtering rule.
-- [ ] By **any discovered axis** — continuous low→high gradient.
+- [x] By **region** (emergent cluster) — the default.
+- [x] By **folder** (source-folder metadata lens) — self-filtering: only offered if it covers most of the corpus with a legible number of values.
+- [x] By **author** (metadata lens) — same self-filtering rule.
+- [x] By **any discovered axis** — continuous low→high gradient.
 
 ## Size encoding
-- [ ] **Uniform**.
-- [ ] **Influence (hub)** — kNN in-degree; default.
-- [ ] **Commit to an axis** — |score − 50|, how strongly a card sits toward a pole.
+- [x] **Uniform**.
+- [x] **Influence (hub)** — kNN in-degree; default.
+- [x] **Commit to an axis** — |score − 50|, how strongly a card sits toward a pole.
 
 ## Grain (the nested clumps-all-the-way-down ladder)
 - [ ] **Grain slider** across the ladder (continents ↔ towns); region count + names update at each level.
@@ -39,8 +39,8 @@ nothing here may be silently dropped. `[ ]` = not yet ported, `[x]` = ported + v
 ## Regions
 - [ ] **Convex-hull** highlight around an isolated region.
 - [ ] **On-map labels** at region centroids, collision-decluttered (deck TextLayer collision filter), **toggle on/off**.
-- [ ] **Legend**: region list with counts + colors + blurb on hover; header states the interaction ("click to isolate + zoom").
-- [ ] Colourblind-safe palette; identity carried by position + labels + isolate (colours cycle past ~8 — that's accepted, not a bug).
+- [x] **Legend**: region list with counts + colors + blurb on hover; header states the interaction ("click to isolate + zoom").
+- [x] Colourblind-safe palette; identity carried by position + labels + isolate (colours cycle past ~8 — that's accepted, not a bug).
 
 ## Card interaction
 - [ ] **Tap/click a card → detail panel**: title, meta (author · date · region), **restatement** (core), **"where it sits"** = axis placements ranked by extremity with ▲/▼ + score, **nearest-N** neighbors (clickable → focus that card), **open source →** link (opens the reader).
@@ -71,7 +71,7 @@ nothing here may be silently dropped. `[ ]` = not yet ported, `[x]` = ported + v
 - [ ] **Intro** modal — first-run explainer of the core interactions; remembered (localStorage).
 - [ ] **Count readout** (N cards · layout · size).
 - [ ] **Axis hint** — contextual guidance text per layout.
-- [ ] **Weak/minor axis flagging** (~ prefix, `< 2%` variance) everywhere axes are listed; the report/intro states minor-axis count.
+- [x] **Weak/minor axis flagging** (~ prefix, `< 2%` variance) everywhere axes are listed; the report/intro states minor-axis count.
 
 ## Touch / mobile (must feel good — the reason for the rewrite)
 - [ ] One-finger **pan** (rotate in orbit), two-finger **pinch-zoom** with inertia (deck controller).
