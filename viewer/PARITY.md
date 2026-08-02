@@ -30,11 +30,11 @@ nothing here may be silently dropped. `[ ]` = not yet ported, `[x]` = ported + v
 - [x] **Commit to an axis** — |score − 50|, how strongly a card sits toward a pole.
 
 ## Grain (the nested clumps-all-the-way-down ladder)
-- [ ] **Grain slider** across the ladder (continents ↔ towns); region count + names update at each level.
-- [ ] **Drill-in**: click a region (legend) or double-click the map → fit camera to it + step grain finer so it resolves into sub-clumps (gentle step, not max).
-- [ ] Legend region **click = isolate + zoom** (sticky pin; click again releases + zooms out) — must NOT change grain (the bug we fixed).
+- [x] **Grain slider** across the ladder (continents ↔ towns); region count + names update at each level.
+- [x] **Drill-in**: click a region (legend) or double-click the map → fit camera to it + step grain finer so it resolves into sub-clumps (gentle step, not max).
+- [x] Legend region **click = isolate + zoom** (sticky pin; click again releases + zooms out) — must NOT change grain (the bug we fixed).
 - [x] Legend region **hover = transient isolate** (hull + dim others).
-- [ ] Grain change clears stale pins/highlights (cluster ids are grain-specific).
+- [x] Grain change clears stale pins/highlights (cluster ids are grain-specific).
 
 ## Regions
 - [x] **Convex-hull** highlight around an isolated region.

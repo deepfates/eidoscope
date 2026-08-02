@@ -40,9 +40,10 @@ export function facets(D: MapContract): Facet[] {
   }).filter((f) => f.ord.length >= 2 && f.ord.length <= 40 && f.ord.reduce((a, v) => a + f.cnt[v], 0) >= n * 0.4);
 }
 
-// colour accessor for a mode: "cluster" | "meta:<facet>" | "<axisKey>"
-export function colorFor(D: MapContract, mode: string, fac: Facet[]): (i: number) => RGB {
-  if (mode === "cluster") return (i) => col(D.cluster[i]);
+// colour accessor for a mode: "cluster" | "meta:<facet>" | "<axisKey>". `assign` = the per-node region
+// at the CURRENT grain (defaults to D.cluster) so colour follows the grain slider, not just the default level.
+export function colorFor(D: MapContract, mode: string, fac: Facet[], assign?: number[]): (i: number) => RGB {
+  if (mode === "cluster") { const a = assign ?? D.cluster; return (i) => col(a[i]); }
   const f = fac.find((x) => "meta:" + x.key === mode);
   if (f) return (i) => { const v = f.get(i); return v == null ? [58, 58, 58] : col(f.idx[v]); };
   return (i) => axisColor((D.scores[mode]?.[i] ?? 50) / 100);

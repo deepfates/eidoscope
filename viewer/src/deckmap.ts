@@ -14,10 +14,11 @@ export type MapHandle = {
   update: (o: Partial<Opts>) => void;
   setFocus: (i: number | null) => void;
   setHighlight: (c: number | null) => void;
+  fitToIndices: (idx: number[]) => void;
   resetView: () => void;
   destroy: () => void;
 };
-type Opts = { getColor: (i: number) => RGB; getRadius: (i: number) => number; layout: Layout; xKey: string; yKey: string; showLabels: boolean };
+type Opts = { getColor: (i: number) => RGB; getRadius: (i: number) => number; layout: Layout; xKey: string; yKey: string; showLabels: boolean; grain: number };
 
 const hull2d = (pts: number[][]): number[][] => {
   if (pts.length < 3) return pts;
@@ -28,16 +29,26 @@ const hull2d = (pts: number[][]): number[][] => {
   return lo.slice(0, -1).concat(up.slice(0, -1));
 };
 
-export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts & { onClick?: (i: number) => void; onHover?: (i: number | null, x: number, y: number) => void }): MapHandle {
+export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts & { onClick?: (i: number) => void; onHover?: (i: number | null, x: number, y: number) => void; onGrainChange?: (g: number) => void }): MapHandle {
   const n = D.ids.length;
-  let { getColor, getRadius, layout, xKey, yKey, showLabels } = init;
+  let { getColor, getRadius, layout, xKey, yKey, showLabels, grain } = init;
   let colorVer = 0, sizeVer = 0, posVer = 0;
   let focus: number | null = null, fSet: Set<number> | null = null;
   let highlight: number | null = null;
 
-  // per default-grain region: member indices (for hulls, labels, highlight dimming)
-  const members: number[][] = Array.from({ length: D.k }, () => []);
-  D.cluster.forEach((c, i) => { if (c >= 0 && c < D.k) members[c].push(i); });
+  // per-region (at the CURRENT grain level) member indices + label — for hulls, labels, dimming, drill.
+  // Recomputed whenever the grain slider moves. Falls back to the default cluster if no ladder is present.
+  let members: number[][] = [];
+  let labelOf: (c: number) => string = () => "";
+  const recomputeGrain = () => {
+    const assign = D.levels?.[grain] ?? D.cluster;
+    const k = D.counts?.[grain] ?? D.k;
+    members = Array.from({ length: k }, () => []);
+    assign.forEach((c, i) => { if (c >= 0 && c < k) members[c].push(i); });
+    const labels = D.levelLabels?.[grain];
+    labelOf = (c: number) => labels?.[c] ?? D.clusters[c]?.label ?? "";
+  };
+  recomputeGrain();
 
   const bb = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
   for (const [x, y] of D.xy) { if (x < bb.minX) bb.minX = x; if (x > bb.maxX) bb.maxX = x; if (y < bb.minY) bb.minY = y; if (y > bb.maxY) bb.maxY = y; }
@@ -58,7 +69,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   // greedy declutter: biggest regions first, skip any whose centroid is too close to one already placed
   // (world-space — deck's CollisionFilterExtension culled everything). Recomputed per layout via posVer.
   const decluttered = () => {
-    const cand = members.map((idx, c) => ({ c, label: D.clusters[c]?.label ?? "", n: idx.length, p: centroid(idx) })).filter((d) => d.n > 0 && d.label).sort((a, b) => b.n - a.n);
+    const cand = members.map((idx, c) => ({ c, label: labelOf(c), n: idx.length, p: centroid(idx) })).filter((d) => d.n > 0 && d.label).sort((a, b) => b.n - a.n);
     const placed: typeof cand = []; const minD = span * 0.13;
     for (const d of cand) if (placed.every((q) => Math.hypot(q.p[0] - d.p[0], q.p[1] - d.p[1]) > minD)) placed.push(d);
     return placed;
@@ -117,6 +128,30 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     getCursor: ({ isDragging, isHovering }: any) => (isDragging ? "grabbing" : isHovering ? "pointer" : "grab"),
   });
 
+  const fit = (idx: number[]) => {
+    if (!idx.length) return;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const i of idx) { const p = pos(i); if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0]; if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1]; }
+    const b = Math.min(window.innerWidth, window.innerHeight), h = home(layout);
+    const zoom = Math.max(h.minZoom, Math.min(h.maxZoom, Math.log2((b * 0.6) / Math.max(x1 - x0 || 0.1, y1 - y0 || 0.1))));
+    viewState = { ...viewState, target: [(x0 + x1) / 2, (y0 + y1) / 2, 0], zoom, transitionDuration: 500 };
+    deck.setProps({ viewState });
+  };
+  // drill: step grain finer so the clicked region resolves into sub-clumps (gentle, ≤3 levels), fit to it.
+  const drill = (nodeIdx: number) => {
+    const levels = D.levels; if (!levels || layout === "orbit") return;
+    const curRegion = (levels[grain] ?? D.cluster)[nodeIdx];
+    const curMembers = members[curRegion] || [];
+    let newGrain = grain;
+    for (let l = grain + 1; l < levels.length && l <= grain + 3; l++) { const sub = new Set<number>(); for (const i of curMembers) sub.add(levels[l][i]); newGrain = l; if (sub.size >= 2) break; }
+    if (newGrain === grain) return;
+    grain = newGrain; recomputeGrain(); highlight = null; colorVer++;
+    deck.setProps({ layers: layers() });
+    fit(members[levels[newGrain][nodeIdx]] || []);
+    init.onGrainChange?.(newGrain);
+  };
+  canvas.addEventListener("dblclick", (e) => { const info = (deck as any).pickObject({ x: (e as MouseEvent).offsetX, y: (e as MouseEvent).offsetY, radius: 8 }); if (info && info.index >= 0) drill(info.index); });
+
   return {
     update: (o) => {
       if (o.getColor) { getColor = o.getColor; colorVer++; }
@@ -124,6 +159,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
       if (o.xKey && o.xKey !== xKey) { xKey = o.xKey; posVer++; }
       if (o.yKey && o.yKey !== yKey) { yKey = o.yKey; posVer++; }
       if (o.showLabels !== undefined) showLabels = o.showLabels;
+      if (o.grain !== undefined && o.grain !== grain) { grain = o.grain; recomputeGrain(); highlight = null; colorVer++; }  // grain change clears stale highlight
       const prev = layout;
       if (o.layout) layout = o.layout;
       if (layout !== prev) { posVer++; viewState = home(layout); deck.setProps({ views: [view()], viewState }); }
@@ -131,6 +167,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     },
     setFocus: (i) => { focus = i; fSet = i == null ? null : new Set<number>([i, ...(D.nbr[i] || [])]); colorVer++; deck.setProps({ layers: layers() }); },
     setHighlight: (c) => { highlight = c; colorVer++; deck.setProps({ layers: layers() }); },
+    fitToIndices: (idx) => fit(idx),
     resetView: () => { viewState = home(layout); deck.setProps({ viewState }); },
     destroy: () => deck.finalize(),
   };
