@@ -26,6 +26,10 @@
   let deckUnread = $state(false);
   let query = $state("");
   let showIntro = $state(false);
+  let citeOn = $state(false);
+  let ghostsOn = $state(false);
+  const hasCite = $derived(!!data?.cite?.some((e) => e.length));
+  const hasGhosts = $derived(!!data?.ghosts?.length);
   const sizeLabel = $derived(size === "hub" ? "influence" : size === "uniform" ? "uniform" : "axis");
   function dismissIntro() { showIntro = false; try { localStorage.setItem("eido-seen", "1"); } catch {} }
   const hasRead = $derived(!!data?.read?.some((r) => r === true || r === false));
@@ -102,8 +106,8 @@
   });
 
   $effect(() => {
-    const l = layout, c = color, s = size, xk = xKey, yk = yKey, sl = labelsOn, g = grain, a = assignment, h = handle, d = data, f = fac;
-    if (h && d) h.update({ getColor: colorFor(d, c, f, a), getRadius: sizeFor(d, s), layout: l, xKey: xk, yKey: yk, showLabels: sl, grain: g });
+    const l = layout, c = color, s = size, xk = xKey, yk = yKey, sl = labelsOn, g = grain, a = assignment, co = citeOn, go = ghostsOn, h = handle, d = data, f = fac;
+    if (h && d) h.update({ getColor: colorFor(d, c, f, a), getRadius: sizeFor(d, s), layout: l, xKey: xk, yKey: yk, showLabels: sl, grain: g, citeOn: co, ghostsOn: go });
   });
   $effect(() => { const q = query, h = handle; if (h) h.setQuery(q); }); // search dims non-matching map points
 
@@ -162,6 +166,12 @@
         <button class="flex-1 rounded-md border border-neutral-700 px-2 py-1 font-mono text-[11px] text-neutral-300 hover:bg-neutral-800" onclick={reset}>reset</button>
       </div>
       <input type="search" bind:value={query} placeholder="find a card…" class="mt-2 w-full rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-xs" />
+      {#if hasCite || hasGhosts}
+        <div class="mt-2 flex gap-2">
+          {#if hasCite}<button class="flex-1 rounded-md border border-neutral-700 px-2 py-1 font-mono text-[11px] {citeOn ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-500'}" onclick={() => (citeOn = !citeOn)}>cite edges</button>{/if}
+          {#if hasGhosts}<button class="flex-1 rounded-md border border-neutral-700 px-2 py-1 font-mono text-[11px] {ghostsOn ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-500'}" onclick={() => (ghostsOn = !ghostsOn)}>frontier</button>{/if}
+        </div>
+      {/if}
     </div>
 
     <div class="absolute bottom-3 right-3 max-h-[48vh] w-52 overflow-auto rounded-xl border border-neutral-800 bg-neutral-900/80 p-2.5 text-xs backdrop-blur">

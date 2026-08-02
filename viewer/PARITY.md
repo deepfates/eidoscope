@@ -59,10 +59,10 @@ nothing here may be silently dropped. `[ ]` = not yet ported, `[x]` = ported + v
 - [x] **Keyboard-navigable + screen-reader labeled** — this view is the accessible parallel to the canvas.
 
 ## Frontier telescope (arxiv corpora, `--frontier`)
-- [ ] **Ghost points** — cited-but-not-in-corpus papers placed near the work that cites them; sized by citation count.
-- [ ] **Citation edges** toggle.
-- [ ] Hover ghost → tooltip; click → arxiv.
-- [ ] Clean no-op when the corpus has no arxiv ids (controls simply absent).
+- [~] **Ghost points**  _(implemented; needs a --frontier arxiv corpus to verify — this .eido has none)_ — cited-but-not-in-corpus papers placed near the work that cites them; sized by citation count.
+- [~] **Citation edges** toggle  _(implemented; needs a --frontier arxiv corpus to verify — this .eido has none)_.
+- [~] Hover ghost → tooltip; click → arxiv  _(implemented; needs a --frontier arxiv corpus to verify — this .eido has none)_.
+- [x] Clean no-op when the corpus has no arxiv ids (controls simply absent).
 
 ## Search & global
 - [x] **Find-a-card search** → dims non-matching points (and filters the list).

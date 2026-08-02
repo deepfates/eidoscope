@@ -19,7 +19,7 @@ export type MapHandle = {
   resetView: () => void;
   destroy: () => void;
 };
-type Opts = { getColor: (i: number) => RGB; getRadius: (i: number) => number; layout: Layout; xKey: string; yKey: string; showLabels: boolean; grain: number };
+type Opts = { getColor: (i: number) => RGB; getRadius: (i: number) => number; layout: Layout; xKey: string; yKey: string; showLabels: boolean; grain: number; citeOn?: boolean; ghostsOn?: boolean };
 
 const hull2d = (pts: number[][]): number[][] => {
   if (pts.length < 3) return pts;
@@ -38,6 +38,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   let focus: number | null = null, fSet: Set<number> | null = null;
   let highlight: number | null = null;
   let queryMatch: Set<number> | null = null;
+  let citeOn = init.citeOn ?? false, ghostsOn = init.ghostsOn ?? false;
 
   // per-region (at the CURRENT grain level) member indices + label — for hulls, labels, dimming, drill.
   // Recomputed whenever the grain slider moves. Falls back to the default cluster if no ladder is present.
@@ -115,10 +116,29 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     getBackgroundColor: [10, 12, 18, 180], background: true, backgroundPadding: [4, 2],
     updateTriggers: { getPosition: [posVer], data: [posVer] },
   });
+  // frontier telescope (only for --frontier arxiv corpora; absent otherwise): intra-corpus citation edges
+  // + "ghost" papers cited-but-not-in-corpus, placed near the work that cites them, sized by citation count.
+  const citeLayer = () => new LineLayer({
+    id: "cite",
+    data: (D.cite || []).flatMap((tgts, s) => tgts.map((t) => ({ s, t }))),
+    getSourcePosition: (d: any) => pos(d.s) as any, getTargetPosition: (d: any) => pos(d.t) as any,
+    getColor: [147, 161, 183, 40], getWidth: 0.6,
+    updateTriggers: { getSourcePosition: [posVer], getTargetPosition: [posVer] },
+  });
+  const gmax = Math.max(1, ...(D.ghosts || []).map((g) => g.n));
+  const ghostLayer = () => new ScatterplotLayer({
+    id: "ghosts", data: D.ghosts || [],
+    getPosition: (g: any) => g.xy as any, getRadius: (g: any) => 2 + 3 * Math.sqrt(g.n / gmax),
+    radiusUnits: "pixels", radiusMinPixels: 2, stroked: true, filled: false,
+    getLineColor: [200, 210, 225, 190], lineWidthUnits: "pixels", getLineWidth: 1.2,
+    pickable: true, autoHighlight: true, highlightColor: [255, 255, 255, 200],
+  });
   const layers = () => [
     ...(highlight != null ? [hullLayer()] : []),
+    ...(citeOn && D.cite ? [citeLayer()] : []),
     ...(focus != null ? [spokesLayer()] : []),
     pointsLayer(),
+    ...(ghostsOn && D.ghosts ? [ghostLayer()] : []),
     ...(showLabels ? [labelLayer()] : []),
   ];
 
@@ -128,7 +148,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     controller: { doubleClickZoom: false, inertia: true }, pickingRadius: 8,
     onViewStateChange: ({ viewState: vs }: any) => { viewState = vs; deck.setProps({ viewState }); },
     layers: layers(),
-    onClick: (info: any) => { if (init.onClick) init.onClick(info && info.index >= 0 ? info.index : -1); },
+    onClick: (info: any) => { if (info?.layer?.id === "ghosts" && info.object?.url) { window.open(info.object.url, "_blank"); return; } if (init.onClick) init.onClick(info && info.index >= 0 ? info.index : -1); },
     onHover: (info: any) => { if (init.onHover) init.onHover(info && info.index >= 0 ? info.index : null, info?.x ?? 0, info?.y ?? 0); },
     getCursor: ({ isDragging, isHovering }: any) => (isDragging ? "grabbing" : isHovering ? "pointer" : "grab"),
   });
@@ -164,6 +184,8 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
       if (o.xKey && o.xKey !== xKey) { xKey = o.xKey; posVer++; }
       if (o.yKey && o.yKey !== yKey) { yKey = o.yKey; posVer++; }
       if (o.showLabels !== undefined) showLabels = o.showLabels;
+      if (o.citeOn !== undefined) citeOn = o.citeOn;
+      if (o.ghostsOn !== undefined) ghostsOn = o.ghostsOn;
       if (o.grain !== undefined && o.grain !== grain) { grain = o.grain; recomputeGrain(); highlight = null; colorVer++; }  // grain change clears stale highlight
       const prev = layout;
       if (o.layout) layout = o.layout;
