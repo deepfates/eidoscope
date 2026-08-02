@@ -3,3 +3,18 @@
 :root { color-scheme: dark; }
 html, body { margin: 0; height: 100%; overscroll-behavior: none; }
 #app { height: 100%; }
+
+/* a11y: a visible keyboard-focus ring on every interactive control (canvas map aside — the deck/list
+   view is the accessible parallel). Mouse users don't see it thanks to :focus-visible. */
+button:focus-visible, select:focus-visible, input:focus-visible, a:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* a11y: honour reduced-motion — kill CSS transitions/animations and the panel blur (deck.gl's own
+   position transitions are disabled from JS, see deckmap.ts). */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; scroll-behavior: auto !important; }
+  [class*="backdrop-blur"] { backdrop-filter: none !important; }
+}

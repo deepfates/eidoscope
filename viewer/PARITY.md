@@ -79,9 +79,9 @@ nothing here may be silently dropped. `[ ]` = not yet ported, `[x]` = ported + v
 - [ ] **Responsive layout** — panels to corners / detail as a bottom sheet; controls usable one-handed.
 
 ## Accessibility
-- [ ] Keyboard operable end-to-end; ARIA on all controls (accessible dropdowns/slider/dialog).
-- [ ] Focus management; visible focus states; `prefers-reduced-motion` honored.
-- [ ] The list view is the map's accessible parallel (canvas can't be screen-read).
+- [x] Keyboard operable end-to-end; ARIA on all controls (accessible dropdowns/slider/dialog).
+- [x] Focus management; visible focus states; `prefers-reduced-motion` honored. _(focus-visible ring + reduced-motion CSS/JS verified present; the reduced-motion effect itself not emulated in-harness.)_
+- [x] The list view is the map's accessible parallel (canvas can't be screen-read).
 
 ## Performance (the goal, not just parity)
 - [ ] GPU rendering smooth at 15k (Pathfinder) and up to ~100k points.

@@ -32,6 +32,7 @@ const hull2d = (pts: number[][]): number[][] => {
 
 export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts & { onClick?: (i: number) => void; onHover?: (i: number | null, x: number, y: number) => void; onGrainChange?: (g: number) => void }): MapHandle {
   const n = D.ids.length;
+  const reduce = typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;  // a11y: no motion
   let { getColor, getRadius, layout, xKey, yKey, showLabels, grain } = init;
   let colorVer = 0, sizeVer = 0, posVer = 0;
   let focus: number | null = null, fSet: Set<number> | null = null;
@@ -89,7 +90,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     getRadius: (_: any, { index }: any) => getRadius(index),
     radiusUnits: "pixels", radiusMinPixels: 1.2, billboard: true,
     pickable: true, autoHighlight: true, highlightColor: [255, 255, 255, 180],
-    transitions: { getPosition: { duration: 700 } },
+    transitions: reduce ? undefined : { getPosition: { duration: 700 } },
     updateTriggers: { getFillColor: colorVer, getRadius: sizeVer, getPosition: posVer },
   });
   const spokesLayer = () => new LineLayer({
@@ -138,7 +139,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     for (const i of idx) { const p = pos(i); if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0]; if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1]; }
     const b = Math.min(window.innerWidth, window.innerHeight), h = home(layout);
     const zoom = Math.max(h.minZoom, Math.min(h.maxZoom, Math.log2((b * 0.6) / Math.max(x1 - x0 || 0.1, y1 - y0 || 0.1))));
-    viewState = { ...viewState, target: [(x0 + x1) / 2, (y0 + y1) / 2, 0], zoom, transitionDuration: 500 };
+    viewState = { ...viewState, target: [(x0 + x1) / 2, (y0 + y1) / 2, 0], zoom, transitionDuration: reduce ? 0 : 500 };
     deck.setProps({ viewState });
   };
   // drill: step grain finer so the clicked region resolves into sub-clumps (gentle, ≤3 levels), fit to it.

@@ -91,7 +91,14 @@
         status = "couldn't load map: " + (e?.message ?? e);
       }
     })();
-    return () => handle?.destroy();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (showIntro) dismissIntro();
+      else if (deckOpen) deckOpen = false;
+      else if (selected !== null) focusCard(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => { handle?.destroy(); window.removeEventListener("keydown", onKey); };
   });
 
   $effect(() => {
@@ -107,7 +114,7 @@
 </script>
 
 <div class="relative h-screen w-screen overflow-hidden bg-neutral-950 text-neutral-100 touch-none">
-  <canvas bind:this={canvas} class="absolute inset-0 h-full w-full"></canvas>
+  <canvas bind:this={canvas} class="absolute inset-0 h-full w-full" role="img" aria-label="Document similarity map (visual). Use the deck list for a screen-reader-accessible view of the same cards."></canvas>
 
   {#if status}<div class="absolute inset-0 grid place-items-center font-mono text-sm text-neutral-400">{status}</div>{/if}
 
@@ -145,7 +152,7 @@
       {#if nLevels > 1}
         <label class="mt-2 flex items-center gap-2 text-xs">
           <span class="w-9 flex-none font-mono text-[10px] text-neutral-500">grain</span>
-          <input type="range" min="0" max={nLevels - 1} bind:value={grain} oninput={() => (pinned = null)} class="min-w-0 flex-1 accent-neutral-400" />
+          <input type="range" min="0" max={nLevels - 1} bind:value={grain} oninput={() => (pinned = null)} class="min-w-0 flex-1 accent-neutral-400" aria-label="grain level: how finely the map is divided into regions" aria-valuetext="{curCount} regions" />
           <span class="w-6 flex-none text-right font-mono text-[10px] text-neutral-500">{curCount}</span>
         </label>
       {/if}
@@ -160,7 +167,7 @@
     <div class="absolute bottom-3 right-3 max-h-[48vh] w-52 overflow-auto rounded-xl border border-neutral-800 bg-neutral-900/80 p-2.5 text-xs backdrop-blur">
       {#if color === "cluster"}
         <div class="mb-1.5 font-mono text-[10px] uppercase text-neutral-500">{curCount} regions · click to isolate</div>
-        {#each curClusters as c}<div class="flex cursor-pointer items-center gap-2 py-0.5 hover:text-white {pinned === c.c ? 'text-white' : ''}" role="button" tabindex="0" onmouseenter={() => { if (pinned === null) handle?.setHighlight(c.c); }} onmouseleave={() => { if (pinned === null) handle?.setHighlight(null); }} onclick={() => togglePin(c.c)}><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(col(c.c))}"></span><span class="truncate">{c.label} <span class="text-neutral-500">{c.n}</span></span></div>{/each}
+        {#each curClusters as c}<div class="flex cursor-pointer items-center gap-2 py-0.5 hover:text-white {pinned === c.c ? 'text-white' : ''}" role="button" tabindex="0" aria-label="isolate region {c.label}" aria-pressed={pinned === c.c} onmouseenter={() => { if (pinned === null) handle?.setHighlight(c.c); }} onmouseleave={() => { if (pinned === null) handle?.setHighlight(null); }} onclick={() => togglePin(c.c)} onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); togglePin(c.c); } }}><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(col(c.c))}"></span><span class="truncate">{c.label} <span class="text-neutral-500">{c.n}</span></span></div>{/each}
       {:else if curFacet}
         <div class="mb-1.5 font-mono text-[10px] uppercase text-neutral-500">{curFacet.label} · {curFacet.ord.length}</div>
         {#each curFacet.ord.slice(0, 16) as v}<div class="flex items-center gap-2 py-0.5"><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(col(curFacet.idx[v]))}"></span><span class="truncate">{v} <span class="text-neutral-500">{curFacet.cnt[v]}</span></span></div>{/each}
