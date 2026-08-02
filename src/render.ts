@@ -54,6 +54,15 @@ select{flex:1;background:var(--bg);border:1px solid var(--hair);border-radius:7p
 .ctrl2{position:fixed;top:14px;left:316px;display:flex;gap:8px;z-index:9;font-family:var(--mono);font-size:11px}.ctrl2 button{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--hair);border-radius:7px;padding:6px 9px;cursor:pointer}.ctrl2 button.on{background:var(--ink);color:var(--bg)}
 #axhint{position:fixed;left:0;right:0;bottom:12px;text-align:center;font-family:var(--mono);font-size:11px;color:var(--soft);pointer-events:none}#count{position:fixed;bottom:14px;left:14px;font-family:var(--mono);font-size:11px;color:var(--soft)}
 #intro{position:fixed;inset:0;background:color-mix(in srgb,var(--bg) 70%,transparent);backdrop-filter:blur(3px);display:none;align-items:center;justify-content:center;z-index:50}#intro.on{display:flex}#intro .box{max-width:440px;margin:16px;padding:24px 26px;border:1px solid var(--hair);border-radius:14px;background:var(--panel);box-shadow:0 20px 60px rgba(0,0,0,.35)}#intro h2{font-size:17px;margin:0}#intro .sub{font-family:var(--mono);font-size:11px;color:var(--soft);margin:4px 0 10px}#intro ul{font-size:12.5px;line-height:1.7;color:var(--soft);margin:0;padding-left:18px}#intro b{color:var(--ink)}#intro button{margin-top:16px;font:600 12px var(--sans);background:var(--ink);color:var(--bg);border:none;border-radius:8px;padding:8px 16px;cursor:pointer}
+/* phone: panels to the corners, detail as a bottom sheet, no hover-tip (there's no hover on touch) */
+@media (max-width:640px){
+  #hud{top:8px;left:8px;width:44vw;max-width:230px;padding:8px 10px}#hud h1{font-size:13px;margin:2px 0 7px}#hud .ctl{margin:4px 0}#hud .ctl label{width:36px}
+  .ctrl2{top:8px;right:8px;left:auto;flex-wrap:wrap;justify-content:flex-end;max-width:44vw;gap:6px}
+  #legend{right:8px;bottom:8px;max-width:46vw;max-height:32vh;font-size:10px;padding:7px 8px}
+  #detail{top:auto;left:8px;right:8px;bottom:8px;width:auto;max-height:52vh}
+  #deck{width:94vw}
+  #tip{display:none}#axhint{display:none}
+}
 </style>
 <canvas id="c"></canvas>
 <div id="hud" class="pane"><div class="k">eidoscope 🔭</div><h1>the forms of the corpus</h1>
