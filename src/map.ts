@@ -5,7 +5,8 @@ import type { Axis } from "./axes.ts";
 import type { Doc } from "./corpus.ts";
 import { CFG } from "./config.ts";
 import { getTextEmbeddings, EmbeddingCache } from "./embed.ts";
-import { findOptimalK, clusterEmbeddings } from "./cluster.ts";
+import { divisiveLevels } from "./cluster.ts";
+import { HNSW } from "hnsw";
 
 // Embed the DECK (local MiniLM) and lay it out (umap-js) — the readers' coordinates.
 // Embeds the cleaned, structured card text, not the raw document: that's what de-noises the map.
@@ -89,25 +90,38 @@ function normPct(arr: number[][], dims: number): number[][] {
 
 export async function projectAndCluster(embs: number[][]) {
   const X = embs.map(unit);
-  if (X.length < 5) { // too few points for UMAP/clustering — lay them on a ring so the tool still runs
-    const xy = X.map((_, i) => [Math.cos((2 * Math.PI * i) / X.length) * 0.6, Math.sin((2 * Math.PI * i) / X.length) * 0.6] as number[]);
-    return { xy, xyz: xy.map((p) => [p[0], p[1], 0]), cluster: X.map(() => 0), k: 1, hub: X.map(() => 0), nbr: X.map(() => [] as number[]) };
+  const n = X.length;
+  if (n < 5) { // too few points for UMAP/clustering — lay them on a ring so the tool still runs
+    const xy = X.map((_, i) => [Math.cos((2 * Math.PI * i) / n) * 0.6, Math.sin((2 * Math.PI * i) / n) * 0.6] as number[]);
+    const one = X.map(() => 0);
+    return { xy, xyz: xy.map((p) => [p[0], p[1], 0]), cluster: one, k: 1, levels: [one], counts: [1], hub: X.map(() => 0), nbr: X.map(() => [] as number[]) };
   }
-  const nn = Math.max(2, Math.min(15, X.length - 1)); // small corpora have fewer points than neighbors
+  const nn = Math.max(2, Math.min(15, n - 1)); // small corpora have fewer points than neighbors
   const xy = normPct(new UMAP({ nComponents: 2, nNeighbors: nn, minDist: 0.15 }).fit(X), 2);
   const xyz = normPct(new UMAP({ nComponents: 3, nNeighbors: nn, minDist: 0.15 }).fit(X), 3);
-  const kMax = Math.max(2, Math.min(60, Math.floor(X.length / 4)));  // k must stay < #points
-  const k = X.length < 6 ? 1 : findOptimalK(X, kMax);
-  const clusters = k <= 1 ? X.map(() => 0) : clusterEmbeddings(X, k).clusters;
-  // kNN + hubness (cosine on unit vectors = dot)
-  const K = 8, n = X.length, nbr: number[][] = [], hub = new Array(n).fill(0);
-  for (let i = 0; i < n; i++) {
-    const sims: [number, number][] = [];
-    for (let j = 0; j < n; j++) { if (j === i) continue; let s = 0; const a = X[i], b = X[j]; for (let d = 0; d < a.length; d++) s += a[d] * b[d]; sims.push([j, s]); }
-    sims.sort((a, b) => b[1] - a[1]);
-    const top = sims.slice(0, K).map(([j]) => j); nbr.push(top); for (const j of top) hub[j]++;
+  // GRAIN LEVELS: a nested tree of clusterings, not one arbitrary k. The viewer slides between them.
+  const { levels, counts } = n < 6 ? { levels: [X.map(() => 0)], counts: [1] } : divisiveLevels(X);
+  // default view = the level nearest ~18 groups (human-scannable); the slider exposes the rest.
+  let di = 0, best = Infinity; counts.forEach((c, i) => { const d = Math.abs(c - 18); if (d < best) { best = d; di = i; } });
+  const cluster = levels[di] ?? X.map(() => 0), k = counts[di] ?? 1;
+  // kNN + hubness (cosine on unit vectors = dot). hnsw at scale (O(n log n)); brute for small n.
+  const K = 8, nbr: number[][] = [], hub = new Array(n).fill(0);
+  if (n > 3000) {
+    const index = new HNSW(16, 200, X[0].length, "cosine");
+    await index.buildIndex(X.map((v, i) => ({ id: i, vector: v })));
+    for (let i = 0; i < n; i++) {
+      const top = (await index.searchKNN(X[i], K + 1)).map((r: any) => r.id as number).filter((j) => j !== i).slice(0, K);
+      nbr.push(top); for (const j of top) hub[j]++;
+    }
+  } else {
+    for (let i = 0; i < n; i++) {
+      const sims: [number, number][] = [];
+      for (let j = 0; j < n; j++) { if (j === i) continue; let s = 0; const a = X[i], b = X[j]; for (let d = 0; d < a.length; d++) s += a[d] * b[d]; sims.push([j, s]); }
+      sims.sort((a, b) => b[1] - a[1]);
+      const top = sims.slice(0, K).map(([j]) => j); nbr.push(top); for (const j of top) hub[j]++;
+    }
   }
-  return { xy, xyz, cluster: clusters as number[], k, hub, nbr };
+  return { xy, xyz, cluster, k, levels, counts, hub, nbr };
 }
 
 // verify: (1) MiniLM embeds card text, (2) umap-js + curare-cluster lay out real card embeddings

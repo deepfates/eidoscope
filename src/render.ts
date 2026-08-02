@@ -11,6 +11,7 @@ export type MapData = {
   scores: Record<string, number[]>;
   xy: number[][]; xyz: number[][]; cluster: number[]; k: number; hub: number[]; nbr: number[][];
   clusters: { c: number; n: number; label: string; cx: number; cy: number }[];
+  levels?: number[][]; counts?: number[];   // nested grain ladder for the region-granularity slider
   urls?: (string | undefined)[]; authors?: (string | undefined)[]; tags?: (string[] | undefined)[]; dates?: (number | undefined)[]; read?: (boolean | undefined)[];
   cite?: number[][]; citec?: number[];  // intra-corpus citation edges + impact (frontier telescope)
   ghosts?: { title: string; arxiv: string; url: string; n: number; core: string; xy: [number, number]; sim: number }[];

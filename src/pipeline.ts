@@ -33,9 +33,9 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
   const useRaw = opts.embed === "raw";
   console.error(`[3/5] embedding ${useRaw ? "raw full text (no card bottleneck)" : "cards (restatement + placements)"} + projecting…`);
   const embs = useRaw ? embeddings : await embedCards(deck, axes);
-  const { xy, xyz, cluster, k, hub, nbr } = await projectAndCluster(embs);
+  const { xy, xyz, cluster, k, levels, counts, hub, nbr } = await projectAndCluster(embs);
 
-  console.error(`[4/5] naming ${k} regions…`);
+  console.error(`[4/5] naming ${k} regions (default grain; ${counts.length} levels available: ${counts.join("·")})…`);
   const groups: number[][] = Array.from({ length: k }, () => []);
   cluster.forEach((c, i) => groups[c].push(i));
   const clusters = await Promise.all(groups.map(async (g, c) => {
@@ -51,7 +51,7 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
     notes: deck.map((c) => Object.fromEntries(axes.map((a) => [a.key, c.axes[a.key]?.note || ""]))),
     axes: axes.map((a) => ({ key: a.key, name: a.name, low: a.pole_low, high: a.pole_high, variance: a.var })),
     scores: projectionScores(projections, axes),
-    xy, xyz, cluster, k, hub, nbr, clusters,
+    xy, xyz, cluster, k, hub, nbr, clusters, levels, counts,
     urls: deck.map((c) => c.url || (c.path ? "file://" + c.path : undefined)),
     authors: deck.map((c) => c.author), tags: deck.map((c) => c.tags), dates: deck.map((c) => c.date),
     read: deck.map((c) => (c.readProgress != null ? c.readProgress > 0.05 : undefined)),
