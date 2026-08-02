@@ -36,9 +36,13 @@ export function distinctiveTerms(cores: string[], groups: number[][], opts: { to
     if (!tot) return [];
     const scored: [string, number][] = [];
     for (const [t, c] of cnt) {
-      if ((inDocs.get(t) || 0) < Math.min(minDocs, idx.length) || (df.get(t) || 0) > dfCut) continue;
+      const docs = inDocs.get(t) || 0;
+      if (docs < Math.min(minDocs, idx.length) || (df.get(t) || 0) > dfCut) continue;
       const pIn = c / tot, pAll = (corpusCnt.get(t) || 1) / corpusTot;
-      scored.push([t, Math.log(pIn / pAll) * Math.log(1 + c)]); // log-ratio, damped by in-group count so a real term beats a fluke
+      // log-ratio (distinctive vs corpus) weighted by COVERAGE — how many of the region's docs use the term,
+      // NOT raw count. So a term hammered by one doc (distinctive but narrow, e.g. a class-specific word) can't
+      // headline a broad region; a lead term must be both distinctive AND spread across the region's members.
+      scored.push([t, Math.log(pIn / pAll) * Math.log(1 + docs)]);
     }
     scored.sort((a, b) => b[1] - a[1]);
     return scored.slice(0, top).map(([t]) => t);

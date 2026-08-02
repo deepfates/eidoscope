@@ -109,21 +109,31 @@ test("scoreRedundancy: flags collapsed axes, passes distinct ones", () => {
   expect(distinct.meanAbsR).toBeLessThan(collapsed.meanAbsR);
 });
 
-test("distinctiveTerms: surfaces what a region OVER-uses, suppresses a token frequent corpus-wide (the 'Hazards' fix)", () => {
-  // every doc says "hazard"; only the first group also says "poison", only the second "sword".
+test("distinctiveTerms: a term common ACROSS the corpus never headlines a region (document-frequency filter)", () => {
+  // every doc says "common"; only group 0 also says "poison", only group 1 "sword".
   const cores = [
-    "hazard poison poison venom", "hazard poison antidote", "hazard poison toxin",   // group 0: poisons
-    "hazard sword blade steel", "hazard sword parry", "hazard sword hilt",           // group 1: blades
+    "common poison poison venom", "common poison antidote", "common poison toxin",   // group 0: poisons
+    "common sword blade steel", "common sword parry", "common sword hilt",           // group 1: blades
   ];
   const groups = [[0, 1, 2], [3, 4, 5]];
   const terms = distinctiveTerms(cores, groups, { top: 3, minDocs: 2 });
-  // the globally-frequent token never headlines EITHER region (it's in every doc → filtered by df)
-  expect(terms[0]).not.toContain("hazard");
-  expect(terms[1]).not.toContain("hazard");
-  // each region is named by its OWN over-used vocabulary
-  expect(terms[0]).toContain("poison");
+  expect(terms[0]).not.toContain("common");   // in every doc → filtered by df, can't headline either region
+  expect(terms[1]).not.toContain("common");
+  expect(terms[0]).toContain("poison");        // each region named by its OWN over-used vocabulary
   expect(terms[1]).toContain("sword");
   expect(terms[0]).not.toContain("sword");
+});
+
+test("distinctiveTerms: coverage weighting — with EQUAL total count, the term spread across more docs ranks first", () => {
+  // "shared" and "codeword" have the SAME total count (12) and same corpus-distinctiveness — they differ
+  // ONLY in spread: "shared" across 4 region docs, "codeword" concentrated in 2. Coverage must rank shared
+  // first (this is what stops a class-specific term hammered by a few docs from headlining a broad region).
+  const d0 = "shared shared shared codeword codeword codeword codeword codeword codeword";
+  const region = [d0, d0, "shared shared shared", "shared shared shared"]; // shared: 4 docs; codeword: 2 docs; both count 12
+  const other = Array.from({ length: 8 }, (_, i) => "context" + i);          // dilute corpus df so neither is "common"
+  const terms = distinctiveTerms([...region, ...other], [[0, 1, 2, 3]], { top: 3, minDocs: 2 });
+  expect(terms[0][0]).toBe("shared");                        // more spread wins at equal count
+  expect(terms[0].indexOf("codeword")).toBeGreaterThan(0);  // still present (2 docs ≥ minDocs), just ranked below
 });
 
 test("distinctiveAxes: ranks a region's most extreme axes with the pole it leans toward", () => {

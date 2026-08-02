@@ -44,6 +44,6 @@ export const nameCluster = ax(`
   distinctiveTerms:string "terms this region over-uses relative to the rest of the corpus — the words that set it apart",
   distinctiveAxes:string "the discovered axes this region sits at an extreme on vs other regions, each with the pole it leans toward",
   memberSamples:string "titles and one-line restatements of representative documents in this region" ->
-  regionLabel:string "2-4 word landmark label naming what makes THIS region distinct from the rest — lead with the distinctive terms/axes, not a generic theme that many regions would share",
+  regionLabel:string "2-4 word landmark label for what makes THIS region distinct from the rest. Build it ONLY from the distinctive terms and the member samples — every significant word must be grounded in them. Do NOT add a generic category word (a genre/format label) that is not supported by the terms or members, even if it seems to fit the domain. Lead with the distinctive vocabulary, not a theme many regions would share.",
   regionBlurb:string "one line: what this region is and how it differs from its neighbors"
 `);
