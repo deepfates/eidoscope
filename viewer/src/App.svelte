@@ -15,7 +15,7 @@
   let xKey = $state("");
   let yKey = $state("");
   let fac = $state<Facet[]>([]);
-  let handle: MapHandle | null = null;
+  let handle = $state<MapHandle | null>(null);
 
   const axl = (a: any) => (a.weak ? "~ " : "") + a.name;
   const rgb = (c: [number, number, number]) => `rgb(${c[0]},${c[1]},${c[2]})`;
@@ -39,7 +39,10 @@
   });
 
   $effect(() => {
-    if (handle && data) handle.update({ getColor: colorFor(data, color, fac), getRadius: sizeFor(data, size), layout, xKey, yKey });
+    // read every reactive dep FIRST so they're tracked even before handle/data exist — otherwise the
+    // guard short-circuits on the first (pre-load) run and the effect never re-subscribes.
+    const l = layout, c = color, s = size, xk = xKey, yk = yKey, h = handle, d = data, f = fac;
+    if (h && d) h.update({ getColor: colorFor(d, c, f), getRadius: sizeFor(d, s), layout: l, xKey: xk, yKey: yk });
   });
 
   const curFacet = $derived(fac.find((f) => "meta:" + f.key === color));
