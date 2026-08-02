@@ -94,14 +94,14 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
 // idempotent-ish: recompute every level's region names (contrastively) from the stored cores + scores,
 // rebuild the default-grain regions, and hand back an updated map to re-render. This is the "cache the
 // geometry, rename as needed" path — the labels are the one nondeterministic thing, kept out of the geometry.
-export async function relabelMap(D: MapData, opts: { llm?: any; concurrency?: number; cacheDir?: string } = {}): Promise<MapData> {
+export async function relabelMap(D: MapData, opts: { llm?: any; sig?: any; concurrency?: number; cacheDir?: string; quiet?: boolean } = {}): Promise<MapData> {
   const llm = opts.llm ?? provider();
   const conc = opts.concurrency ?? Number(process.env.EIDOSCOPE_CONCURRENCY || 24);
   const levels = D.levels ?? [D.cluster], counts = D.counts ?? [D.k];
   let di = 0, best = Infinity; counts.forEach((c, i) => { const d = Math.abs(c - 18); if (d < best) { best = d; di = i; } }); // same default-grain rule as projectAndCluster
   const axLite = D.axes.map((a) => ({ key: a.key, name: a.name, low: a.low, high: a.high }));
-  console.error(`relabeling ${counts.length} grain levels (${counts.join("·")}; default ${counts[di]})…`);
-  const { labels: levelLabels, blurbs: levelBlurbs, regionsByLevel } = await nameLevels(levels, counts, D.titles, D.cores, D.scores, axLite, { llm, concurrency: conc, cache: opts.cacheDir });
+  if (!opts.quiet) console.error(`relabeling ${counts.length} grain levels (${counts.join("·")}; default ${counts[di]})…`);
+  const { labels: levelLabels, blurbs: levelBlurbs, regionsByLevel } = await nameLevels(levels, counts, D.titles, D.cores, D.scores, axLite, { llm, sig: opts.sig, concurrency: conc, cache: opts.cacheDir });
   const cluster = levels[di], k = counts[di];
   const dGroups: number[][] = Array.from({ length: k }, () => []); cluster.forEach((c, i) => dGroups[c].push(i));
   const clusters = regionsByLevel[di].map((r, c) => {

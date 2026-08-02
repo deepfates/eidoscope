@@ -8,7 +8,9 @@ import { deckToJSONL, cardCorpus, type Card } from "../src/card.ts";
 import { cardText, projectionScores } from "../src/map.ts";
 import { scoreRedundancy } from "../src/redundancy.ts";
 import { docArxiv, fetchFrontier } from "../src/frontier.ts";
-import { distinctiveTerms, distinctiveAxes } from "../src/regions.ts";
+import { distinctiveTerms, distinctiveAxes, nameLevels } from "../src/regions.ts";
+import { renderHTML, type MapData } from "../src/render.ts";
+import { relabelMap } from "../src/pipeline.ts";
 
 // Deterministic contract tests — the pure pipeline surfaces. Fast, no LLM/network.
 // (The LLM stages take an injectable `llm`; a live smoke test is gated behind EIDOSCOPE_LIVE.)
@@ -132,6 +134,68 @@ test("distinctiveAxes: ranks a region's most extreme axes with the pole it leans
   expect(d[0].pole).toBe("HighA");           // leans to the high pole
   expect(d[0].mean).toBe(90);
   expect(d[1].name).toBe("AxisB");           // the centered axis ranks last
+});
+
+// A tiny synthetic map with a NESTED 2-level grain ladder: level0 has 2 regions, level1 splits the
+// first into two → 3 regions. Enough to exercise the whole viewer + relabel contract without an embedder.
+function synthMap(): MapData {
+  const N = 6;
+  const axes = [{ key: "a", name: "AxisA", low: "LowA", high: "HighA" }, { key: "b", name: "AxisB", low: "LowB", high: "HighB" }];
+  return {
+    ids: Array.from({ length: N }, (_, i) => "d" + i),
+    titles: Array.from({ length: N }, (_, i) => "Title " + i),
+    cores: ["poison venom toxin", "poison antidote", "poison cure", "sword blade steel", "sword hilt", "sword parry"],
+    notes: Array.from({ length: N }, () => ({ a: "noteA", b: "noteB" })),
+    axes,
+    scores: { a: [90, 88, 92, 10, 12, 8], b: [50, 52, 48, 51, 49, 50] },
+    xy: Array.from({ length: N }, (_, i) => [i < 3 ? -0.5 : 0.5, (i % 3) * 0.2]),
+    xyz: Array.from({ length: N }, (_, i) => [i < 3 ? -0.5 : 0.5, 0, 0]),
+    cluster: [0, 0, 0, 1, 1, 1], k: 2,
+    hub: Array.from({ length: N }, () => 1), nbr: Array.from({ length: N }, (_, i) => [(i + 1) % N]),
+    clusters: [{ c: 0, n: 3, label: "old0", cx: -0.5, cy: 0 }, { c: 1, n: 3, label: "old1", cx: 0.5, cy: 0 }],
+    levels: [[0, 0, 0, 1, 1, 1], [0, 0, 1, 2, 2, 2]], counts: [2, 3], di: 0,
+    levelLabels: [["old0", "old1"], ["oldA", "oldB", "oldC"]],
+  };
+}
+
+test("renderHTML: viewer script parses AND the grain ladder actually reaches the payload (both bugs I shipped)", () => {
+  const html = renderHTML(synthMap());
+  const script = html.match(/<script>([\s\S]*)<\/script>/)![1];
+  expect(() => new Function(script)).not.toThrow();               // catches syntax bugs (e.g. a backtick inside the template)
+  const payload = JSON.parse(html.match(/<script id="data"[^>]*>([\s\S]*?)<\/script>/)![1].replace(/<\\\//g, "</"));
+  expect(payload.levels.length).toBe(2);                          // the ladder is SHIPPED, not thrown away
+  expect(payload.counts).toEqual([2, 3]);
+  expect(payload.levelLabels.length).toBe(2);
+  expect(payload.nodes.length).toBe(6);
+  expect(html).toContain('id="grain"');                          // the grain slider control is rendered
+});
+
+test("relabelMap: end-to-end — names every grain level, picks the ~18 default, rebuilds regions (mock LLM)", async () => {
+  let calls = 0;
+  const sig = { forward: async (_llm: any, inp: any) => { calls++; return { regionLabel: "R:" + inp.distinctiveTerms.split(",")[0].trim(), regionBlurb: "b" }; } };
+  const D2 = await relabelMap(synthMap(), { llm: {}, sig, quiet: true });
+  expect(D2.levelLabels!.length).toBe(2);
+  expect(D2.levelLabels![0].length).toBe(2);                     // level 0: 2 regions named
+  expect(D2.levelLabels![1].length).toBe(3);                     // level 1: 3 regions named
+  expect(D2.di).toBe(1);                                          // counts [2,3] → 3 is nearer 18 → default level 1
+  expect(D2.k).toBe(3);
+  expect(D2.clusters.length).toBe(3);                             // default-grain regions rebuilt from level 1
+  expect(D2.clusters.every((c) => c.label.startsWith("R:"))).toBe(true); // labels come from the (mock) namer
+  // the poison region is named from its OWN distinctive term, not a shared one
+  expect(D2.clusters.some((c) => c.label.includes("poison"))).toBe(true);
+});
+
+test("nameLevels: a region unchanged across grain levels is named ONCE (dedup), not per level", async () => {
+  let calls = 0;
+  const sig = { forward: async () => { calls++; return { regionLabel: "R" + calls, regionBlurb: "" }; } };
+  // region {3,4,5} is identical in both levels; only {0,1,2} splits → 4 UNIQUE member-sets, not 5
+  const levels = [[0, 0, 0, 1, 1, 1], [0, 0, 1, 2, 2, 2]], counts = [2, 3];
+  const cores = ["a", "b", "c", "d", "e", "f"], titles = cores;
+  const axes = [{ key: "a", name: "A", low: "lo", high: "hi" }];
+  const scores = { a: [1, 2, 3, 4, 5, 6] };
+  const { labels } = await nameLevels(levels, counts, titles, cores, scores, axes, { llm: {}, sig, concurrency: 1 });
+  expect(calls).toBe(4);                                          // {0,1,2},{3,4,5} (L0) + {0,1},{2} (L1); {3,4,5} reused
+  expect(labels[0].length).toBe(2); expect(labels[1].length).toBe(3);
 });
 
 test("cardCorpus: cards cache by content + axis GEOMETRY; relabeling axes hits (the re-card fix)", async () => {
