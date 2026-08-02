@@ -24,6 +24,10 @@
   let deckSort = $state("hub");
   let deckQ = $state("");
   let deckUnread = $state(false);
+  let query = $state("");
+  let showIntro = $state(false);
+  const sizeLabel = $derived(size === "hub" ? "influence" : size === "uniform" ? "uniform" : "axis");
+  function dismissIntro() { showIntro = false; try { localStorage.setItem("eido-seen", "1"); } catch {} }
   const hasRead = $derived(!!data?.read?.some((r) => r === true || r === false));
   const axShort = (name: string) => name.split(/ vs\.? | and /i)[0].slice(0, 15);
   const deckList = $derived.by(() => {
@@ -76,6 +80,7 @@
         grain = D.di ?? 0;
         data = D;
         status = "";
+        try { showIntro = !localStorage.getItem("eido-seen"); } catch { showIntro = true; }
         handle = createMap(canvas, D, {
           getColor: colorFor(D, color, fac, D.levels?.[grain] ?? D.cluster), getRadius: sizeFor(D, size), layout, xKey, yKey, showLabels: labelsOn, grain,
           onClick: (i) => focusCard(i < 0 ? null : i),
@@ -93,6 +98,7 @@
     const l = layout, c = color, s = size, xk = xKey, yk = yKey, sl = labelsOn, g = grain, a = assignment, h = handle, d = data, f = fac;
     if (h && d) h.update({ getColor: colorFor(d, c, f, a), getRadius: sizeFor(d, s), layout: l, xKey: xk, yKey: yk, showLabels: sl, grain: g });
   });
+  $effect(() => { const q = query, h = handle; if (h) h.setQuery(q); }); // search dims non-matching map points
 
   const curFacet = $derived(fac.find((f) => "meta:" + f.key === color));
   const xAxis = $derived(data?.axes.find((a) => a.key === xKey));
@@ -148,6 +154,7 @@
         <button class="flex-1 rounded-md border border-neutral-700 px-2 py-1 font-mono text-[11px] {showLabels ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-500'}" onclick={() => (showLabels = !showLabels)}>labels</button>
         <button class="flex-1 rounded-md border border-neutral-700 px-2 py-1 font-mono text-[11px] text-neutral-300 hover:bg-neutral-800" onclick={reset}>reset</button>
       </div>
+      <input type="search" bind:value={query} placeholder="find a card…" class="mt-2 w-full rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-xs" />
     </div>
 
     <div class="absolute bottom-3 right-3 max-h-[48vh] w-52 overflow-auto rounded-xl border border-neutral-800 bg-neutral-900/80 p-2.5 text-xs backdrop-blur">
@@ -167,6 +174,9 @@
     </div>
 
     <div class="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 font-mono text-[11px] text-neutral-500">{hint}</div>
+    {#if selected === null && !deckOpen}
+      <div class="pointer-events-none absolute bottom-3 right-56 font-mono text-[10px] text-neutral-600">{data.ids.length} cards · {layout} · {sizeLabel}</div>
+    {/if}
   {/if}
 
   <!-- hover tooltip -->
@@ -230,6 +240,23 @@
             </div>
           </button>
         {/each}
+      </div>
+    </div>
+  {/if}
+
+  <!-- first-run intro (remembered in localStorage) -->
+  {#if showIntro && data}
+    <div class="absolute inset-0 z-40 grid place-items-center bg-neutral-950/70 p-4 backdrop-blur-sm">
+      <div class="max-w-md rounded-2xl border border-neutral-800 bg-neutral-900 p-6 shadow-2xl">
+        <div class="text-lg font-bold">the forms of the corpus 🔭</div>
+        <div class="mt-1 font-mono text-[11px] text-neutral-500">{data.ids.length} documents · {data.axes.length} discovered axes · {data.k} regions</div>
+        <ul class="mt-3 space-y-2 text-sm text-neutral-400">
+          <li><b class="text-neutral-100">Proximity is similarity</b> — nearby cards are alike; colour is an emergent region, size is influence.</li>
+          <li><b class="text-neutral-100">Slide the grain</b> to move regions from continents to towns; click a region to isolate, double-click the map to drill in.</li>
+          <li><b class="text-neutral-100">Tap any card</b> to read it, see its nearest neighbours, and open the source.</li>
+          <li><b class="text-neutral-100">Open the deck</b> to read the corpus as a sortable, filterable list — or switch layout to axis scatter.</li>
+        </ul>
+        <button class="mt-4 rounded-lg bg-neutral-100 px-4 py-2 text-sm font-semibold text-neutral-900 hover:bg-white" onclick={dismissIntro}>explore →</button>
       </div>
     </div>
   {/if}

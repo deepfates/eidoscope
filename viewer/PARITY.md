@@ -65,11 +65,11 @@ nothing here may be silently dropped. `[ ]` = not yet ported, `[x]` = ported + v
 - [ ] Clean no-op when the corpus has no arxiv ids (controls simply absent).
 
 ## Search & global
-- [ ] **Find-a-card search** → dims non-matching points (and filters the list).
-- [ ] **Theme** toggle (light/dark), full token-level theming.
-- [ ] **Reset** — restores view + default grain + clears focus/pin.
-- [ ] **Intro** modal — first-run explainer of the core interactions; remembered (localStorage).
-- [ ] **Count readout** (N cards · layout · size).
+- [x] **Find-a-card search** → dims non-matching points (and filters the list).
+- [ ] **Theme** toggle (light/dark), full token-level theming. _(DEFERRED to the design pass eid-imbx — a real light palette is a design-system task; a half-toggle looks broken. App is dark-committed for now.)_
+- [x] **Reset** — restores view + default grain + clears focus/pin.
+- [x] **Intro** modal — first-run explainer of the core interactions; remembered (localStorage).
+- [x] **Count readout** (N cards · layout · size).
 - [x] **Axis hint** — contextual guidance text per layout.
 - [x] **Weak/minor axis flagging** (~ prefix, `< 2%` variance) everywhere axes are listed; the report/intro states minor-axis count.
 

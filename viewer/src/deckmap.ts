@@ -14,6 +14,7 @@ export type MapHandle = {
   update: (o: Partial<Opts>) => void;
   setFocus: (i: number | null) => void;
   setHighlight: (c: number | null) => void;
+  setQuery: (q: string) => void;
   fitToIndices: (idx: number[]) => void;
   resetView: () => void;
   destroy: () => void;
@@ -35,6 +36,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   let colorVer = 0, sizeVer = 0, posVer = 0;
   let focus: number | null = null, fSet: Set<number> | null = null;
   let highlight: number | null = null;
+  let queryMatch: Set<number> | null = null;
 
   // per-region (at the CURRENT grain level) member indices + label — for hulls, labels, dimming, drill.
   // Recomputed whenever the grain slider moves. Falls back to the default cluster if no ladder is present.
@@ -75,13 +77,15 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     return placed;
   };
   const dimSet = () => (focus != null ? fSet : highlight != null ? new Set(members[highlight]) : null);
+  // a point dims if excluded by the active focus/highlight isolate OR by the search query
+  const isDim = (index: number) => { const ds = dimSet(); if (ds && !ds.has(index)) return true; if (queryMatch && !queryMatch.has(index)) return true; return false; };
 
   const view = () => (layout === "orbit" ? new OrbitView({ id: "orbit", orbitAxis: "Y", fovy: 50 }) : new OrthographicView({ id: "ortho", flipY: false }));
 
   const pointsLayer = () => new ScatterplotLayer({
     id: "points", data: { length: n },
     getPosition: (_: any, { index }: any) => pos(index) as any,
-    getFillColor: (_: any, { index }: any) => { const c = getColor(index); const ds = dimSet(); return (ds && !ds.has(index) ? [c[0], c[1], c[2], 34] : [c[0], c[1], c[2], 255]) as any; },
+    getFillColor: (_: any, { index }: any) => { const c = getColor(index); return (isDim(index) ? [c[0], c[1], c[2], 28] : [c[0], c[1], c[2], 255]) as any; },
     getRadius: (_: any, { index }: any) => getRadius(index),
     radiusUnits: "pixels", radiusMinPixels: 1.2, billboard: true,
     pickable: true, autoHighlight: true, highlightColor: [255, 255, 255, 180],
@@ -167,6 +171,11 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     },
     setFocus: (i) => { focus = i; fSet = i == null ? null : new Set<number>([i, ...(D.nbr[i] || [])]); colorVer++; deck.setProps({ layers: layers() }); },
     setHighlight: (c) => { highlight = c; colorVer++; deck.setProps({ layers: layers() }); },
+    setQuery: (q) => {
+      const s = q.trim().toLowerCase();
+      queryMatch = !s ? null : new Set<number>(D.ids.map((_, i) => i).filter((i) => D.titles[i].toLowerCase().includes(s) || D.cores[i].toLowerCase().includes(s)));
+      colorVer++; deck.setProps({ layers: layers() });
+    },
     fitToIndices: (idx) => fit(idx),
     resetView: () => { viewState = home(layout); deck.setProps({ viewState }); },
     destroy: () => deck.finalize(),
