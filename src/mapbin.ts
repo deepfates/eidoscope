@@ -97,6 +97,9 @@ export function decodeMap(gz: Uint8Array): MapContract {
   const unflat = (a: ArrayLike<number>, w: number) => Array.from({ length: n }, (_, i) => Array.from({ length: w }, (_, j) => a[i * w + j]));
   const unragged = (vals: ArrayLike<number>, offs: ArrayLike<number>) => Array.from({ length: offs.length - 1 }, (_, i) => Array.from({ length: offs[i + 1] - offs[i] }, (_, j) => vals[offs[i] + j]));
 
+  // JSON turns undefined-in-array into null; the contract's optional metadata is (T | undefined)[], so
+  // restore that exactly — null and undefined both mean "absent", but we honor the declared type.
+  const sparse = <T>(a: (T | null)[] | undefined) => (a ? a.map((x) => (x === null ? undefined : x)) : a);
   const scores: Record<string, number[]> = {};
   const sc = get("scores"); meta.axes.forEach((a: any, ai: number) => { scores[a.key] = Array.from({ length: n }, (_, i) => sc[ai * n + i]); });
   const nbr = unragged(get("nbr_v"), get("nbr_o"));
@@ -109,6 +112,6 @@ export function decodeMap(gz: Uint8Array): MapContract {
     cluster: Array.from(get("cluster")), k: meta.k, di: meta.di, levels, counts: meta.counts,
     levelLabels: meta.levelLabels, levelBlurbs: meta.levelBlurbs, clusters: meta.clusters,
     hub: Array.from(get("hub")), nbr, cite, citec: meta.citec,
-    urls: meta.urls, authors: meta.authors, tags: meta.tags, dates: meta.dates, read: meta.read, ghosts: meta.ghosts,
+    urls: sparse(meta.urls), authors: sparse(meta.authors), tags: sparse(meta.tags), dates: sparse(meta.dates), read: sparse(meta.read), ghosts: meta.ghosts,
   };
 }
