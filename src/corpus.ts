@@ -47,6 +47,30 @@ export function loadFolder(dir: string, opts: { limit?: number; minChars?: numbe
   return opts.limit ? docs.slice(0, opts.limit) : docs;
 }
 
+// Split any doc whose body exceeds the model's input maximum into the FEWEST contiguous pieces that fit.
+// This is the only size rule in the pipeline and it exists for one non-negotiable reason: a doc that
+// won't fit the LLM's context can't be carded. There is no semantic segmentation, no chosen piece count,
+// no theory of "what a book is" — just contiguous slices sized to the limit (snapped to a space so we
+// don't cut mid-word). Each piece is an ordinary Doc (id#k, "Title (part k/n)") that cards and embeds on
+// its own; where the pieces land relative to each other and to everything else is left to the geometry.
+export function splitOversized(docs: Doc[], maxChars: number): { docs: Doc[]; split: number; pieces: number } {
+  if (!(maxChars > 0)) return { docs, split: 0, pieces: 0 };
+  const out: Doc[] = []; let split = 0, pieces = 0;
+  for (const d of docs) {
+    if (d.body.length <= maxChars) { out.push(d); continue; }
+    const parts: string[] = [];
+    for (let pos = 0; pos < d.body.length;) {
+      let end = Math.min(d.body.length, pos + maxChars);
+      if (end < d.body.length) { const sp = d.body.lastIndexOf(" ", end); if (sp > pos + maxChars / 2) end = sp + 1; }
+      parts.push(d.body.slice(pos, end));
+      pos = end;
+    }
+    split++; pieces += parts.length;
+    parts.forEach((body, k) => out.push({ ...d, id: `${d.id}#${k}`, title: `${d.title} (part ${k + 1}/${parts.length})`, body }));
+  }
+  return { docs: out, split, pieces };
+}
+
 // The fixture (`--fixture`) is a personal corpus with precomputed embeddings; point these at your own
 // via EIDOSCOPE_FIXTURE / EIDOSCOPE_FIXTURE_MD (e.g. in a gitignored .env — bun auto-loads it). Most
 // users don't need it: `bun run src/cli.ts <folder>` works on any folder of .md/.txt with no setup.

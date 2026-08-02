@@ -5,5 +5,7 @@ export const CFG = {
   apiURL: process.env.EIDOSCOPE_API_URL ?? "https://openrouter.ai/api/v1",
   embedModel: process.env.EIDOSCOPE_EMBED ?? "Xenova/all-MiniLM-L6-v2",
   key: process.env.OPENROUTER_API_KEY ?? process.env.EIDOSCOPE_API_KEY,
-  params: { minChars: 400, topN: 16, minCoherence: 4, knn: 8, concurrency: 12, chunkWords: 220, maxChunks: 50 },
+  // maxDocChars = the model's input ceiling for one card call. Docs above it are split to fit (corpus.ts
+  // splitOversized) — the ONLY size rule, tied to a real limit, overridable for smaller-context models.
+  params: { minChars: 400, topN: 16, minCoherence: 4, knn: 8, concurrency: 12, chunkWords: 220, maxChunks: 50, maxDocChars: Number(process.env.EIDOSCOPE_MAX_DOC_CHARS || 1_000_000) },
 };

@@ -6,10 +6,11 @@
 // eidoscope --relabel <dir>          re-name regions of an existing map-data.json (no re-carding) + re-render
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { loadFolder, loadFixture, type Doc } from "./corpus.ts";
+import { loadFolder, loadFixture, splitOversized, type Doc } from "./corpus.ts";
 import { embedDocs } from "./map.ts";
 import { run, relabelMap } from "./pipeline.ts";
 import { renderHTML } from "./render.ts";
+import { CFG } from "./config.ts";
 
 const args = process.argv.slice(2);
 const val = (f: string) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : undefined; };
@@ -35,7 +36,11 @@ if (args.includes("--fixture")) {
   if (!dir) { console.error("usage: eidoscope <folder> [--limit N]   |   eidoscope --fixture"); process.exit(1); }
   docs = loadFolder(dir, { limit, minChars: val("--min-chars") ? Number(val("--min-chars")) : undefined });
   if (!docs.length) { console.error(`no .md/.txt documents found under ${dir}`); process.exit(1); }
-  console.error(`loaded ${docs.length} docs from ${dir}; embedding full text (local MiniLM)…`);
+  // respect the LLM input max: split only docs that exceed it, into contiguous pieces (corpus.ts)
+  const loaded = docs.length;
+  const sp = splitOversized(docs, CFG.params.maxDocChars); docs = sp.docs;
+  if (sp.split) console.error(`  split ${sp.split} oversized doc(s) into ${sp.pieces} pieces (> ${CFG.params.maxDocChars} chars, the input max)`);
+  console.error(`loaded ${loaded} docs from ${dir}${sp.split ? ` → ${docs.length} after splitting` : ""}; embedding full text (local MiniLM)…`);
   embeddings = await embedDocs(docs);
 }
 const name = args.includes("--fixture") ? "Readwise library" : (dir?.split("/").filter(Boolean).pop() || "Corpus");

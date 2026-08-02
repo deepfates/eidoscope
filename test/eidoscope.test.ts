@@ -2,7 +2,7 @@ import { test, expect } from "bun:test";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { loadFolder } from "../src/corpus.ts";
+import { loadFolder, splitOversized, type Doc } from "../src/corpus.ts";
 import { trajectory } from "../src/trajectory.ts";
 import { deckToJSONL, cardCorpus, type Card } from "../src/card.ts";
 import { cardText, projectionScores } from "../src/map.ts";
@@ -31,6 +31,24 @@ test("loadFolder: parses frontmatter, derives titles, skips short docs", () => {
   expect(docs.find((x) => x.title === "Beta Heading")).toBeTruthy(); // title from # heading
   const c = docs.find((x) => x.title === "Gamma")!;
   expect(c.url).toBe("https://arxiv.org/abs/2401.00001"); // url pulled from body when frontmatter lacks it
+});
+
+test("splitOversized: only oversized docs split; pieces are contiguous, lossless, and ordered", () => {
+  const short: Doc = { id: "s", title: "Short", body: "word ".repeat(20).trim() };            // 99 chars, under max
+  const bigBody = Array.from({ length: 500 }, (_, i) => "w" + i).join(" ");                     // ~2900 chars
+  const big: Doc = { id: "b", title: "Big Book", body: bigBody, url: "file:///x", author: "A" };
+  const { docs, split, pieces } = splitOversized([short, big], 1000);
+  expect(split).toBe(1);                                                                        // only the big one split
+  const shortOut = docs.filter((d) => d.id === "s");
+  expect(shortOut.length).toBe(1); expect(shortOut[0].body).toBe(short.body);                   // short doc untouched
+  const parts = docs.filter((d) => d.id.startsWith("b#"));
+  expect(parts.length).toBe(pieces);
+  expect(parts.every((p) => p.body.length <= 1000)).toBe(true);                                 // every piece fits the max
+  // LOSSLESS: joining the pieces back reproduces the original body exactly (contiguous, nothing dropped/dup'd)
+  expect(parts.map((p) => p.body).join("")).toBe(bigBody);
+  expect(parts.every((p) => p.url === "file:///x" && p.author === "A")).toBe(true);             // metadata carried to each piece
+  expect(parts.map((p) => p.title)).toEqual(parts.map((_, k) => `Big Book (part ${k + 1}/${parts.length})`));
+  expect(splitOversized([big], 0).split).toBe(0);                                               // maxChars<=0 disables splitting
 });
 
 test("trajectory: flags the late-loaded region as rising and reports drift", () => {
