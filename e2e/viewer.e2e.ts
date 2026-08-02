@@ -13,13 +13,15 @@ import { renderHTML, type MapData } from "../src/render.ts";
 function synth(): MapData {
   const B = 3, PER = 30, N = B * PER;
   const axes = [{ key: "a", name: "AxisA", low: "LowA", high: "HighA" }, { key: "b", name: "AxisB", low: "LowB", high: "HighB" }];
-  const centers = [[0, 0], [0.7, 0.5], [-0.7, -0.5]];
+  // blobs spread far apart with a WIDE internal spread, so a region occupies a real fraction of the
+  // map and fitTo computes a genuine, non-saturated zoom (a tiny synthetic region would just hit the clamp).
+  const centers = [[0, 0], [1.6, 1.1], [-1.6, -1.1]];
   const ids: string[] = [], titles: string[] = [], cores: string[] = [], xy: number[][] = [], xyz: number[][] = [];
   const L0: number[] = [], L1: number[] = [], L2: number[] = [], L3: number[] = [], hub: number[] = [], nbr: number[][] = [];
   const sa: number[] = [], sb: number[] = [];
   for (let b = 0; b < B; b++) for (let i0 = 0; i0 < PER; i0++) {
     const k = b * PER + i0;
-    const jx = (((i0 * 37) % 11) / 11 - 0.5) * 0.08, jy = (((i0 * 53) % 11) / 11 - 0.5) * 0.08;
+    const jx = (((i0 * 37) % 11) / 11 - 0.5) * 0.5, jy = (((i0 * 53) % 11) / 11 - 0.5) * 0.5;
     ids.push("d" + k); titles.push(`Doc ${b}.${i0}`); cores.push(`blob${b} item ${i0} ${["alpha", "beta", "gamma"][b]}`);
     // node 0 sits EXACTLY at the origin so a center dbl-click is guaranteed a hit
     xy.push(k === 0 ? [0, 0] : [centers[b][0] + jx, centers[b][1] + jy]);
@@ -76,13 +78,14 @@ try {
   ok(s.grain === 3 && s.k === 24, `grain slider → finest (24 regions) — got grain=${s.grain} k=${s.k}`);
 
   // 3. THE REGRESSION: legend-click isolates + zooms but must NOT change the grain
-  await p.click("#reset"); await p.waitForTimeout(150); const g0 = (await st()).grain;
+  await p.click("#reset"); await p.waitForTimeout(150); s = await st(); const g0 = s.grain, z0 = s.zoom;
   await p.click("#legend [data-cl]"); await p.waitForTimeout(150); s = await st();
-  ok(s.grain === g0, `legend-click leaves grain unchanged (was the bug) — grain ${g0}→${s.grain}`);
+  ok(s.grain === g0, `legend-click leaves grain unchanged (THE bug) — grain ${g0}→${s.grain}`);
   ok(s.pin !== null, "legend-click pins/isolates the region");
-  ok(s.zoom > 1.02, `legend-click zooms in — zoom=${s.zoom}`);
+  // zoom BEHAVIOR (separate from the grain regression): fitTo computed a real zoom-in, not the max clamp
+  ok(s.zoom > z0 * 1.3 && s.zoom < 21.9, `legend-click zooms IN to a sensible, non-clamped level — ${z0}→${s.zoom}`);
   await p.click("#legend [data-cl]"); await p.waitForTimeout(150); s = await st();
-  ok(s.pin === null && s.zoom < 1.05, `clicking the pinned region again releases + zooms out — pin=${s.pin} zoom=${s.zoom}`);
+  ok(s.pin === null && Math.abs(s.zoom - z0) < 0.05, `clicking the pinned region again releases + returns to baseline zoom — pin=${s.pin} zoom=${s.zoom} (base ${z0})`);
 
   // 4. drill via map double-click DOES step the grain finer (and doesn't leave a stray card open)
   await p.click("#reset"); await p.waitForTimeout(150); const gd = (await st()).grain;
