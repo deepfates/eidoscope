@@ -7,6 +7,7 @@
 
   let canvas: HTMLCanvasElement;
   let status = $state("loading your map…");
+  let loadFailed = $state(false);
   let data = $state<MapContract | null>(null);
   let selected = $state<number | null>(null);
   let hovered = $state<{ kind: "point"; i: number; x: number; y: number } | { kind: "ghost"; g: any; x: number; y: number } | null>(null);
@@ -149,7 +150,8 @@
         (window as any).__eidoPick = (x: number, y: number) => handle?.pickAt(x, y);
         applyUrlState(); urlReady = true;  // restore any deep-linked view/card, then start mirroring state → URL
       } catch (e: any) {
-        status = "couldn't load map: " + (e?.message ?? e);
+        loadFailed = true;
+        status = "couldn't load the map — " + (e?.message ?? e);
       }
     })();
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") requestClose(); };
@@ -175,7 +177,15 @@
 <div class="relative h-screen w-screen overflow-hidden bg-[var(--bg)] text-[var(--ink)] touch-none">
   <canvas bind:this={canvas} class="absolute inset-0 h-full w-full" role="img" aria-label="Document similarity map (visual). Use the deck list for a screen-reader-accessible view of the same cards."></canvas>
 
-  {#if status}<div class="absolute inset-0 grid place-items-center font-mono text-sm text-[var(--dim)]">{status}</div>{/if}
+  {#if status}
+    <div class="absolute inset-0 z-50 grid place-items-center bg-[var(--bg)] px-6">
+      <div class="flex max-w-sm flex-col items-center gap-3 text-center font-mono text-sm">
+        {#if !loadFailed}<div class="h-6 w-6 animate-spin rounded-full border-2 border-[var(--hair2)] border-t-[var(--accent)]" aria-hidden="true"></div>{/if}
+        <div class="{loadFailed ? 'text-[var(--ink)]' : 'text-[var(--dim)]'}" role="status">{status}</div>
+        {#if loadFailed}<button class="rounded-md border border-[var(--hair2)] px-3 py-1.5 text-xs text-[var(--soft)] hover:bg-[var(--chip)]" onclick={() => location.reload()}>reload</button>{/if}
+      </div>
+    </div>
+  {/if}
 
   {#if data}
     {#if layout === "axes" && xAxis && yAxis}

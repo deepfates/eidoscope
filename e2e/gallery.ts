@@ -34,8 +34,8 @@ const btn = (page: Page, re: RegExp) => page.getByRole("button", { name: re }).f
 const settle = (page: Page, ms = 550) => page.waitForTimeout(ms);
 const dismissIntro = (page: Page) => page.evaluate(() => { try { localStorage.setItem("eido-seen", "1"); } catch {} });
 
-type Shot = { name: string; caption: string; map?: string; theme?: "light" | "dark"; vp?: { width: number; height: number }; intro?: boolean; setup?: (p: Page) => Promise<void> };
-const DESKTOP = { width: 1440, height: 900 }, NARROW = { width: 860, height: 720 }, MOBILE = { width: 390, height: 844 };
+type Shot = { name: string; caption: string; map?: string; theme?: "light" | "dark"; vp?: { width: number; height: number }; intro?: boolean; noReady?: boolean; setup?: (p: Page) => Promise<void> };
+const DESKTOP = { width: 1440, height: 900 }, NARROW = { width: 860, height: 720 }, MOBILE = { width: 390, height: 844 }, LANDSCAPE = { width: 812, height: 375 };
 
 const shots: Shot[] = [
   // ── first impression ──
@@ -65,6 +65,8 @@ const shots: Shot[] = [
   { name: "18-mobile-controls", caption: "Mobile — controls expanded (tap the bar)", vp: MOBILE, setup: async (p) => { await btn(p, /expand controls/i).click(); } },
   { name: "19-mobile-deck", caption: "Mobile — deck reader open (close ✕ is a 40px tap target; back gesture also closes it)", vp: MOBILE, setup: async (p) => { await btn(p, /^deck$/).click(); } },
   { name: "19b-mobile-detail", caption: "Mobile — card detail as a full-width bottom sheet", vp: MOBILE, setup: async (p) => { await btn(p, /^deck$/).click(); await settle(p, 300); await p.locator(".grid button").first().click(); } },
+  { name: "19c-mobile-landscape", caption: "Mobile landscape (812×375) — layout holds, map stays the hero", vp: LANDSCAPE },
+  { name: "24-load-error", caption: "Load error (bad ?map=) — error message + reload affordance", map: "doesnotexist.eido", vp: DESKTOP, noReady: true },
 ];
 if (hasPf) shots.push(
   { name: "20-pf-region", caption: "Pathfinder SRD (13,830 cards) · color by region", map: "pathfinder.eido", vp: DESKTOP },
@@ -86,7 +88,8 @@ for (const s of shots) {
   try {
     await page.addInitScript(({ theme, intro }) => { try { if (!intro) localStorage.setItem("eido-seen", "1"); if (theme) localStorage.setItem("eido-theme", theme); } catch {} }, { theme: s.theme, intro: !!s.intro });
     await page.goto(`${base}/index.html${s.map ? `?map=${s.map}` : ""}`);
-    await page.waitForFunction(() => !!(window as any).__eido, null, { timeout: 20000 });
+    if (s.noReady) await page.waitForSelector('[role="status"]', { timeout: 15000 });
+    else await page.waitForFunction(() => !!(window as any).__eido, null, { timeout: 20000 });
     await settle(page, 700);
     if (s.setup) { await s.setup(page); await settle(page, 700); }
     await page.screenshot({ path: join(out, s.name + ".png") });
