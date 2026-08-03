@@ -46,11 +46,12 @@ function synth(): MapContract {
     scores: { a: sa, b: sb }, xy, xyz, cluster, k, di: 2, hub, nbr, clusters, levels, counts, levelLabels,
     levelBlurbs: counts.map((n) => Array.from({ length: n }, () => "blurb")),
     cite, citec: hub.map((h) => h * 2), ghosts, read,
-    urls: ids.map((_, i) => `https://read.example/${i}`),
-    sources: ids.map((_, i) => (i % 2 ? `https://src.example/${i}` : undefined)),
-    siteNames: ids.map((_, i) => (i % 2 ? "src.example" : undefined)),
-    authors: ids.map((_, i) => `Author ${i % 4}`),
-    dates: ids.map((_, i) => 1_700_000_000_000 + i * 86_400_000),
+    // the LAST card is deliberately bare (no author/date/url/source) to prove the detail panel degrades gracefully (eid-m107)
+    urls: ids.map((_, i) => (i === N - 1 ? undefined : `https://read.example/${i}`)),
+    sources: ids.map((_, i) => (i === N - 1 ? undefined : i % 2 ? `https://src.example/${i}` : undefined)),
+    siteNames: ids.map((_, i) => (i === N - 1 ? undefined : i % 2 ? "src.example" : undefined)),
+    authors: ids.map((_, i) => (i === N - 1 ? undefined : `Author ${i % 4}`)),
+    dates: ids.map((_, i) => (i === N - 1 ? undefined : 1_700_000_000_000 + i * 86_400_000)),
   };
 }
 
@@ -230,6 +231,23 @@ try {
   await facetRow.click(); await p.waitForTimeout(250);
   fs = await st();
   ok(fs.facetPin == null, `re-clicking releases the facet isolate — facetPin=${JSON.stringify(fs.facetPin)}`);
+
+  // 11f. MISSING METADATA: the bare card (no author/date/url/source) still renders cleanly — no empty '·', no broken links (eid-m107)
+  await p.goto(`${base}/index.html`); await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
+  await btn(/explore/i).click().catch(() => {}); await p.waitForTimeout(150);
+  await btn(/^deck$/).click(); await p.waitForTimeout(250);
+  await p.locator('input[placeholder="filter…"]').fill("Doc 2.29");   // unique to the bare last card
+  await p.waitForTimeout(250);
+  await p.locator(".grid button").first().click(); await p.waitForTimeout(350);
+  const bare = await p.evaluate(() => {
+    const d = document.querySelector('[role="dialog"][aria-label="card detail"]');
+    if (!d) return null;
+    const meta = (d.querySelector("div.mb-2.font-mono")?.textContent || "").trim();
+    return { hasTitle: !!d.querySelector(".font-bold"), meta, anchors: [...d.querySelectorAll("a")].length };
+  });
+  ok(!!bare?.hasTitle, "bare card still shows its detail panel (title present)");
+  ok(!!bare && bare.meta.length > 0 && !/^·|·$|·\s*·/.test(bare.meta), `meta line shows the present field(s) only, no empty '·' — meta="${bare?.meta}"`);
+  ok(bare?.anchors === 0, `no broken reader/source links when the card has none — anchors=${bare?.anchors}`);
 
   // 12. ?map= loads a DIFFERENT corpus from the SAME built viewer (the dual-deploy path)
   await p.goto(base + "/index.html?map=alt.eido");
