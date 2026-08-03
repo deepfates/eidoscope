@@ -116,6 +116,11 @@ axes, isolated region, and the open card — so any view is shareable and a relo
 straight to a card with **`?card=<id>`** (e.g. `?map=pathfinder.eido&card=<id>`); the browser Back button
 (and the mobile back gesture) steps out of the deck/detail and undoes navigation.
 
+**One portable file, works offline.** `bun run singlefile [map.eido] [out.html]` inlines the map into the
+viewer as one self-contained `.html` — no server, no separate data file. Email it, drop it on a disk, open
+it offline; its `?card=` and view links still resolve from `file://`. (Verified by `bun run e2e/offline.ts`,
+part of `bun run qa`.)
+
 ### The `.eido` seam
 
 The pipeline emits `map.eido`: a gzipped binary of the **`MapContract`** (`src/schema.ts`). Numeric

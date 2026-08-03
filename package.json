@@ -12,9 +12,10 @@
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "e2e": "bun run e2e/viewer.e2e.ts",
-    "qa": "tsc --noEmit && bun test && bun run e2e/viewer.e2e.ts",
+    "qa": "tsc --noEmit && bun test && bun run e2e/viewer.e2e.ts && bun run e2e/offline.ts",
     "check:redundancy": "bun run src/redundancy.ts",
-    "gallery": "bun run e2e/gallery.ts"
+    "gallery": "bun run e2e/gallery.ts",
+    "singlefile": "bun bin/build-singlefile.ts"
   },
   "dependencies": {
     "@ax-llm/ax": "^23.0.5",
