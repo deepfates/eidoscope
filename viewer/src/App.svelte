@@ -201,6 +201,9 @@
   const xAxis = $derived(data?.axes.find((a) => a.key === xKey));
   const yAxis = $derived(data?.axes.find((a) => a.key === yKey));
   const hint = $derived(layout === "axes" ? "positioned by where each card projects on the two axes" : layout === "orbit" ? "drag to rotate · pinch to zoom" : "proximity = similarity · tap a card");
+  const prov = $derived(data?.provenance);   // so a passed-around file introduces itself
+  const provDate = (g?: number) => (g ? new Date(g).toISOString().slice(0, 10) : "");
+  $effect(() => { try { document.title = prov?.title ? `${prov.title} · eidoscope 🔭` : "eidoscope 🔭"; } catch {} });
   const weakAxes = $derived(layout === "axes" ? (xAxis?.weak ? 1 : 0) + (yAxis?.weak ? 1 : 0) : 0);
 </script>
 
@@ -236,7 +239,8 @@
         </div>
       </div>
       {#if panelOpen}
-      <div class="mb-2 text-xs text-[var(--dim)]">{data.ids.length} cards · {curCount} regions</div>
+      {#if prov?.title}<div class="-mt-1 mb-0.5 truncate text-sm font-bold text-[var(--ink)]" title={prov.source ?? ""}>{prov.title}</div>{/if}
+      <div class="mb-2 text-xs text-[var(--dim)]">{data.ids.length} cards · {curCount} regions{#if prov?.generated} · {provDate(prov.generated)}{/if}</div>
       <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">layout</span>
         <select bind:value={layout} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">
           <option value="mde">neighbor map</option><option value="axes">axis scatter</option><option value="orbit">3D orbit</option>
@@ -383,8 +387,9 @@
   {#if showIntro && data}
     <div class="absolute inset-0 z-40 grid place-items-center bg-[var(--scrim)] p-4 backdrop-blur-sm">
       <div use:trapFocus tabindex="-1" role="dialog" aria-modal="true" aria-label="welcome" class="max-w-md rounded-2xl border border-[var(--hair)] bg-[var(--panel-solid)] p-6 shadow-2xl">
-        <div class="text-lg font-bold">the forms of the corpus 🔭</div>
-        <div class="mt-1 font-mono text-[11px] text-[var(--faint)]">{data.ids.length} documents · {data.axes.length} discovered axes · {data.k} regions</div>
+        <div class="text-lg font-bold">{prov?.title ?? "the forms of the corpus"} 🔭</div>
+        <div class="mt-1 font-mono text-[11px] text-[var(--faint)]">{data.ids.length} documents · {data.axes.length} discovered axes · {data.k} regions{#if prov?.generated} · {provDate(prov.generated)}{/if}</div>
+        {#if prov?.source}<div class="mt-0.5 truncate font-mono text-[10px] text-[var(--faint)]">from {prov.source}</div>{/if}
         <ul class="mt-3 space-y-2 text-sm text-[var(--dim)]">
           <li><b class="text-[var(--ink)]">Proximity is similarity</b> — nearby cards are alike; colour is an emergent region, size is influence.</li>
           <li><b class="text-[var(--ink)]">Slide the grain</b> to move regions from continents to towns; click a region to isolate, double-click the map to drill in.</li>

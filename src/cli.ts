@@ -45,4 +45,4 @@ if (args.includes("--fixture")) {
 }
 const name = args.includes("--fixture") ? "Readwise library" : (dir?.split("/").filter(Boolean).pop() || "Corpus");
 const embed = val("--embed") === "raw" ? "raw" : "card";
-await run(docs, embeddings, { frontier: args.includes("--frontier"), name, embed });
+await run(docs, embeddings, { frontier: args.includes("--frontier"), name, source: dir, embed });

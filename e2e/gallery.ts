@@ -79,6 +79,8 @@ if (hasPf) shots.push(
   { name: "22-pf-grain-fine", caption: "Pathfinder · finest grain (11-level ladder)", map: "pathfinder.eido", vp: DESKTOP, setup: async (p) => { await setGrain(p, await grainMax(p)); } },
   { name: "23-pf-dark", caption: "Pathfinder · dark", map: "pathfinder.eido", theme: "dark", vp: DESKTOP },
   { name: "30-pf-folder-isolate", caption: "Pathfinder · colour by folder, then click 'Equipment' in the legend → isolates just that folder (dims the rest + hull). The real answer to 34-folders-8-colours.", map: "pathfinder.eido", vp: DESKTOP, setup: async (p) => { await setControl(p, "color", "meta:folder"); await settle(p, 600); await p.locator('[role="button"][aria-label="isolate folder Equipment"]').click(); await settle(p, 600); } },
+  { name: "31-provenance-header", caption: "A received file introduces itself — corpus title + date in the panel header (Pathfinder map)", map: "pf-prov.eido", vp: DESKTOP },
+  { name: "32-provenance-intro", caption: "…and in the intro modal: what corpus, from where, when", map: "pf-prov.eido", intro: true, vp: DESKTOP },
 );
 
 // ── run ────────────────────────────────────────────────────────────────────────────────────

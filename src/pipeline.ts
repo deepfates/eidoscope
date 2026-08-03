@@ -14,7 +14,7 @@ import { loadFixture, type Doc } from "./corpus.ts";
 
 // The full instrument, end to end: docs (+embeddings) -> discover axes -> card -> embed cards ->
 // project + cluster -> name regions -> deck.jsonl + map-data.json + eidoscope.html.
-export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?: boolean; name?: string; embed?: "card" | "raw" } = {}) {
+export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?: boolean; name?: string; source?: string; embed?: "card" | "raw" } = {}) {
   const llm = provider();
   console.error(`\n[1/5] discovering axes from ${docs.length} docs…`);
   const { axes, realDims, projections } = await discoverAxes(embeddings, docs.map((d) => d.title.slice(0, 64)), { llm });
@@ -80,6 +80,8 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
       console.error(`  ${fr.corpusArxiv} arxiv docs · ${nEdges} citation edges · ${fr.ranked.length} frontier papers · ${D.ghosts.length} ghosts placed`);
     } else console.error(`  no arxiv ids in corpus — frontier skipped (clean no-op)`);
   }
+  // provenance — so a passed-around file introduces itself (what corpus, from where, when, how big)
+  (D as any).provenance = { title: opts.name || "Corpus", source: opts.source, generated: Date.now(), count: D.ids.length };
   writeFileSync("map-data.json", JSON.stringify(D));
   writeFileSync("map.eido", encodeMap(D as unknown as MapContract));   // binary wire format for the deck.gl viewer (~5× smaller)
   writeFileSync("eidoscope.html", renderHTML(D));

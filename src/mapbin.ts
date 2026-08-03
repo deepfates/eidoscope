@@ -58,7 +58,7 @@ export function encodeMap(D: MapContract): Uint8Array {
 
   // meta = the contract MINUS what we moved to buffers (+ the manifest + axis key order)
   const meta = {
-    version: CONTRACT_VERSION, n,
+    version: CONTRACT_VERSION, n, provenance: D.provenance,
     ids: D.ids, titles: D.titles, cores: D.cores, notes: D.notes,
     axes: D.axes, k: D.k, di: D.di, counts: D.counts, levelLabels: D.levelLabels, levelBlurbs: D.levelBlurbs, clusters: D.clusters,
     urls: D.urls, sources: D.sources, siteNames: D.siteNames, authors: D.authors, tags: D.tags, dates: D.dates, read: D.read, citec: D.citec, ghosts: D.ghosts,
@@ -107,7 +107,7 @@ export function decodeMap(gz: Uint8Array): MapContract {
   const cite = meta.hasCite ? unragged(get("cite_v"), get("cite_o")) : undefined;
 
   return {
-    version: meta.version, ids: meta.ids, titles: meta.titles, cores: meta.cores, notes: meta.notes,
+    version: meta.version, provenance: meta.provenance, ids: meta.ids, titles: meta.titles, cores: meta.cores, notes: meta.notes,
     axes: meta.axes, scores, xy: unflat(get("xy"), 2), xyz: unflat(get("xyz"), 3),
     cluster: Array.from(get("cluster")), k: meta.k, di: meta.di, levels, counts: meta.counts,
     levelLabels: meta.levelLabels, levelBlurbs: meta.levelBlurbs, clusters: meta.clusters,

@@ -25,6 +25,9 @@ export type GhostDef = { title: string; arxiv: string; url: string; n: number; c
 export type MapContract = {
   version?: number;                        // CONTRACT_VERSION at emit time (absent = pre-versioned, treated as v1)
 
+  // provenance — so a file that gets passed around can introduce itself (what corpus, from where, when, how big)
+  provenance?: { title?: string; source?: string; generated?: number; count?: number };
+
   // identity + reader-facing content (per node)
   ids: string[];
   titles: string[];
