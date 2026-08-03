@@ -104,6 +104,8 @@
           onHover: (h, x, y) => (hovered = h == null ? null : { ...h, x, y }),
           onGrainChange: (g) => { grain = g; pinned = null; },
         });
+        // read-only introspection seam for the integration suite (drives the REAL built app, asserts real state)
+        (window as any).__eido = () => { const d = handle?.debug(); return { grain, k: curCount, layout, color, pin: pinned, focus: selected, detail: selected !== null, deckOpen, cite: citeOn, ghosts: ghostsOn, theme, hover: hovered ? hovered.kind : null, zoom: d?.zoom ?? 0, labels: d?.labels ?? 0, regions: d?.regions ?? 0 }; };
       } catch (e: any) {
         status = "couldn't load map: " + (e?.message ?? e);
       }

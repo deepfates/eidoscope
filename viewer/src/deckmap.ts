@@ -18,6 +18,7 @@ export type MapHandle = {
   fitToIndices: (idx: number[]) => void;
   resetView: () => void;
   destroy: () => void;
+  debug: () => { zoom: number; labels: number; regions: number; grain: number };  // read-only seam for integration tests
 };
 type Opts = { getColor: (i: number) => RGB; getRadius: (i: number) => number; layout: Layout; xKey: string; yKey: string; showLabels: boolean; grain: number; citeOn?: boolean; ghostsOn?: boolean; theme?: "dark" | "light" };
 
@@ -232,6 +233,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
       colorVer++; deck.setProps({ layers: layers() });
     },
     fitToIndices: (idx) => fit(idx),
+    debug: () => ({ zoom: viewState?.zoom ?? 0, labels: decluttered().length, regions: members.filter((m) => m.length).length, grain }),
     resetView: () => { viewState = home(layout); deck.setProps({ viewState }); },
     destroy: () => deck.finalize(),
   };
