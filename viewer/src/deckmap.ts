@@ -96,9 +96,9 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   const decluttered = () => {
     const scale = Math.pow(2, viewState?.zoom ?? 0);          // deck ortho: pixels per world unit at this zoom
     const cand = members.map((idx, c) => ({ c, label: dispLabel(labelOf(c)), n: idx.length, p: centroid(idx) })).filter((d) => d.n > 0 && d.label).sort((a, b) => b.n - a.n);
-    const charPx = 8;                                         // ~monospace advance at 13px bold
-    const hw = (len: number) => (len * charPx) / 2 + charPx;  // label half-width in px (+1 char padding)
-    const lineH = 22;                                         // vertical clearance in px
+    const charPx = 8;                                             // ~monospace advance at 13px bold
+    const hw = (len: number) => (len * charPx) / 2 + charPx * 1.5; // half-width + ~1.5-char gap between neighbours
+    const lineH = 30;                                             // vertical clearance in px (row spacing; long region names stack otherwise)
     const placed: typeof cand = [];
     for (const d of cand) if (placed.every((q) => Math.abs((q.p[0] - d.p[0]) * scale) > hw(q.label.length) + hw(d.label.length) || Math.abs((q.p[1] - d.p[1]) * scale) > lineH)) placed.push(d);
     return placed;
