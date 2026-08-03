@@ -28,6 +28,9 @@
   let showIntro = $state(false);
   let citeOn = $state(false);
   let ghostsOn = $state(false);
+  let theme = $state<"dark" | "light">("dark");
+  function setTheme(t: "dark" | "light", persist = true) { theme = t; document.documentElement.dataset.theme = t; if (persist) try { localStorage.setItem("eido-theme", t); } catch {} }
+  function toggleTheme() { setTheme(theme === "dark" ? "light" : "dark"); }
   const hasCite = $derived(!!data?.cite?.some((e) => e.length));
   const hasGhosts = $derived(!!data?.ghosts?.length);
   const sizeLabel = $derived(size === "hub" ? "influence" : size === "uniform" ? "uniform" : "axis");
@@ -75,6 +78,11 @@
   function reset() { focusCard(null); pinned = null; handle?.setHighlight(null); grain = data?.di ?? 0; handle?.resetView(); }
 
   onMount(() => {
+    try {
+      const saved = localStorage.getItem("eido-theme");
+      if (saved === "light" || saved === "dark") setTheme(saved, false);
+      else theme = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+    } catch {}
     (async () => {
       try {
         const D = await loadMap("./map.eido");
@@ -86,7 +94,7 @@
         status = "";
         try { showIntro = !localStorage.getItem("eido-seen"); } catch { showIntro = true; }
         handle = createMap(canvas, D, {
-          getColor: colorFor(D, color, fac, D.levels?.[grain] ?? D.cluster), getRadius: sizeFor(D, size), layout, xKey, yKey, showLabels: labelsOn, grain,
+          getColor: colorFor(D, color, fac, D.levels?.[grain] ?? D.cluster), getRadius: sizeFor(D, size), layout, xKey, yKey, showLabels: labelsOn, grain, theme,
           onClick: (i) => focusCard(i < 0 ? null : i),
           onHover: (i, x, y) => (hovered = i == null ? null : { i, x, y }),
           onGrainChange: (g) => { grain = g; pinned = null; },
@@ -106,8 +114,8 @@
   });
 
   $effect(() => {
-    const l = layout, c = color, s = size, xk = xKey, yk = yKey, sl = labelsOn, g = grain, a = assignment, co = citeOn, go = ghostsOn, h = handle, d = data, f = fac;
-    if (h && d) h.update({ getColor: colorFor(d, c, f, a), getRadius: sizeFor(d, s), layout: l, xKey: xk, yKey: yk, showLabels: sl, grain: g, citeOn: co, ghostsOn: go });
+    const l = layout, c = color, s = size, xk = xKey, yk = yKey, sl = labelsOn, g = grain, a = assignment, co = citeOn, go = ghostsOn, th = theme, h = handle, d = data, f = fac;
+    if (h && d) h.update({ getColor: colorFor(d, c, f, a), getRadius: sizeFor(d, s), layout: l, xKey: xk, yKey: yk, showLabels: sl, grain: g, citeOn: co, ghostsOn: go, theme: th });
   });
   $effect(() => { const q = query, h = handle; if (h) h.setQuery(q); }); // search dims non-matching map points
 
@@ -117,14 +125,14 @@
   const hint = $derived(layout === "axes" ? "positioned by where each card projects on the two axes" : layout === "orbit" ? "drag to rotate · pinch to zoom" : "proximity = similarity · tap a card");
 </script>
 
-<div class="relative h-screen w-screen overflow-hidden bg-neutral-950 text-neutral-100 touch-none">
+<div class="relative h-screen w-screen overflow-hidden bg-[var(--bg)] text-[var(--ink)] touch-none">
   <canvas bind:this={canvas} class="absolute inset-0 h-full w-full" role="img" aria-label="Document similarity map (visual). Use the deck list for a screen-reader-accessible view of the same cards."></canvas>
 
-  {#if status}<div class="absolute inset-0 grid place-items-center font-mono text-sm text-neutral-400">{status}</div>{/if}
+  {#if status}<div class="absolute inset-0 grid place-items-center font-mono text-sm text-[var(--dim)]">{status}</div>{/if}
 
   {#if data}
     {#if layout === "axes" && xAxis && yAxis}
-      <div class="pointer-events-none absolute inset-0 font-mono text-xs text-neutral-300/90">
+      <div class="pointer-events-none absolute inset-0 font-mono text-xs text-[var(--dim)]">
         <div class="absolute left-3 top-1/2 -translate-y-1/2">← {trunc(xAxis.low)}</div>
         <div class="absolute right-3 top-1/2 -translate-y-1/2 text-right">{trunc(xAxis.high)} →</div>
         <div class="absolute left-1/2 top-3 -translate-x-1/2">↑ {trunc(yAxis.high)}</div>
@@ -132,128 +140,131 @@
       </div>
     {/if}
 
-    <div class="absolute left-3 top-3 w-56 rounded-xl border border-neutral-800 bg-neutral-900/80 p-3 backdrop-blur">
-      <div class="mb-2 font-mono text-[10px] uppercase tracking-widest text-neutral-500">eidoscope 🔭</div>
-      <div class="mb-2 text-xs text-neutral-400">{data.ids.length} cards · {data.k} regions</div>
-      <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-neutral-500">layout</span>
-        <select bind:value={layout} class="min-w-0 flex-1 rounded-md border border-neutral-700 bg-neutral-950 px-1.5 py-1 text-xs">
+    <div class="absolute left-3 top-3 w-56 rounded-xl border border-[var(--hair)] bg-[var(--panel)] p-3 backdrop-blur">
+      <div class="mb-2 flex items-center justify-between">
+        <span class="font-mono text-[10px] uppercase tracking-widest text-[var(--faint)]">eidoscope 🔭</span>
+        <button class="rounded-md border border-[var(--hair)] px-1.5 py-0.5 text-[11px] leading-none hover:bg-[var(--chip)]" onclick={toggleTheme} aria-label="toggle light or dark theme" title="toggle theme">{theme === "dark" ? "☾" : "☀"}</button>
+      </div>
+      <div class="mb-2 text-xs text-[var(--dim)]">{data.ids.length} cards · {data.k} regions</div>
+      <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">layout</span>
+        <select bind:value={layout} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">
           <option value="mde">neighbor map</option><option value="axes">axis scatter</option><option value="orbit">3D orbit</option>
         </select></label>
       {#if layout === "axes"}
-        <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-neutral-500">x-axis</span>
-          <select bind:value={xKey} class="min-w-0 flex-1 rounded-md border border-neutral-700 bg-neutral-950 px-1.5 py-1 text-xs">{#each data.axes as a}<option value={a.key}>{axl(a)}</option>{/each}</select></label>
-        <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-neutral-500">y-axis</span>
-          <select bind:value={yKey} class="min-w-0 flex-1 rounded-md border border-neutral-700 bg-neutral-950 px-1.5 py-1 text-xs">{#each data.axes as a}<option value={a.key}>{axl(a)}</option>{/each}</select></label>
+        <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">x-axis</span>
+          <select bind:value={xKey} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">{#each data.axes as a}<option value={a.key}>{axl(a)}</option>{/each}</select></label>
+        <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">y-axis</span>
+          <select bind:value={yKey} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">{#each data.axes as a}<option value={a.key}>{axl(a)}</option>{/each}</select></label>
       {/if}
-      <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-neutral-500">color</span>
-        <select bind:value={color} class="min-w-0 flex-1 rounded-md border border-neutral-700 bg-neutral-950 px-1.5 py-1 text-xs">
+      <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">color</span>
+        <select bind:value={color} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">
           <option value="cluster">region</option>{#each fac as f}<option value={"meta:" + f.key}>{f.label}</option>{/each}{#each data.axes as a}<option value={a.key}>axis: {axl(a)}</option>{/each}
         </select></label>
-      <label class="flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-neutral-500">size</span>
-        <select bind:value={size} class="min-w-0 flex-1 rounded-md border border-neutral-700 bg-neutral-950 px-1.5 py-1 text-xs">
+      <label class="flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">size</span>
+        <select bind:value={size} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">
           <option value="uniform">uniform</option><option value="hub">influence (hub)</option>{#each data.axes as a}<option value={a.key}>commit: {axl(a)}</option>{/each}
         </select></label>
       {#if nLevels > 1}
         <label class="mt-2 flex items-center gap-2 text-xs">
-          <span class="w-9 flex-none font-mono text-[10px] text-neutral-500">grain</span>
-          <input type="range" min="0" max={nLevels - 1} bind:value={grain} oninput={() => (pinned = null)} class="min-w-0 flex-1 accent-neutral-400" aria-label="grain level: how finely the map is divided into regions" aria-valuetext="{curCount} regions" />
-          <span class="w-6 flex-none text-right font-mono text-[10px] text-neutral-500">{curCount}</span>
+          <span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">grain</span>
+          <input type="range" min="0" max={nLevels - 1} bind:value={grain} oninput={() => (pinned = null)} class="min-w-0 flex-1 accent-[var(--accent)]" aria-label="grain level: how finely the map is divided into regions" aria-valuetext="{curCount} regions" />
+          <span class="w-6 flex-none text-right font-mono text-[10px] text-[var(--faint)]">{curCount}</span>
         </label>
       {/if}
       <div class="mt-2 flex gap-2">
-        <button class="flex-1 rounded-md border border-neutral-700 px-2 py-1 font-mono text-[11px] text-neutral-300 hover:bg-neutral-800" onclick={() => (deckOpen = true)}>deck</button>
-        <button class="flex-1 rounded-md border border-neutral-700 px-2 py-1 font-mono text-[11px] {showLabels ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-500'}" onclick={() => (showLabels = !showLabels)}>labels</button>
-        <button class="flex-1 rounded-md border border-neutral-700 px-2 py-1 font-mono text-[11px] text-neutral-300 hover:bg-neutral-800" onclick={reset}>reset</button>
+        <button class="flex-1 rounded-md border border-[var(--hair2)] px-2 py-1 font-mono text-[11px] text-[var(--soft)] hover:bg-[var(--chip)]" onclick={() => (deckOpen = true)}>deck</button>
+        <button class="flex-1 rounded-md border border-[var(--hair2)] px-2 py-1 font-mono text-[11px] {showLabels ? 'bg-[var(--chip)] text-[var(--ink)]' : 'text-[var(--faint)]'}" onclick={() => (showLabels = !showLabels)}>labels</button>
+        <button class="flex-1 rounded-md border border-[var(--hair2)] px-2 py-1 font-mono text-[11px] text-[var(--soft)] hover:bg-[var(--chip)]" onclick={reset}>reset</button>
       </div>
-      <input type="search" bind:value={query} placeholder="find a card…" class="mt-2 w-full rounded-md border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-xs" />
+      <input type="search" bind:value={query} placeholder="find a card…" class="mt-2 w-full rounded-md border border-[var(--hair2)] bg-[var(--field)] px-2 py-1.5 text-xs" />
       {#if hasCite || hasGhosts}
         <div class="mt-2 flex gap-2">
-          {#if hasCite}<button class="flex-1 rounded-md border border-neutral-700 px-2 py-1 font-mono text-[11px] {citeOn ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-500'}" onclick={() => (citeOn = !citeOn)}>cite edges</button>{/if}
-          {#if hasGhosts}<button class="flex-1 rounded-md border border-neutral-700 px-2 py-1 font-mono text-[11px] {ghostsOn ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-500'}" onclick={() => (ghostsOn = !ghostsOn)}>frontier</button>{/if}
+          {#if hasCite}<button class="flex-1 rounded-md border border-[var(--hair2)] px-2 py-1 font-mono text-[11px] {citeOn ? 'bg-[var(--chip)] text-[var(--ink)]' : 'text-[var(--faint)]'}" onclick={() => (citeOn = !citeOn)}>cite edges</button>{/if}
+          {#if hasGhosts}<button class="flex-1 rounded-md border border-[var(--hair2)] px-2 py-1 font-mono text-[11px] {ghostsOn ? 'bg-[var(--chip)] text-[var(--ink)]' : 'text-[var(--faint)]'}" onclick={() => (ghostsOn = !ghostsOn)}>frontier</button>{/if}
         </div>
       {/if}
     </div>
 
-    <div class="absolute bottom-3 right-3 max-h-[48vh] w-52 overflow-auto rounded-xl border border-neutral-800 bg-neutral-900/80 p-2.5 text-xs backdrop-blur">
+    <div class="absolute bottom-3 right-3 max-h-[48vh] w-52 overflow-auto rounded-xl border border-[var(--hair)] bg-[var(--panel)] p-2.5 text-xs backdrop-blur">
       {#if color === "cluster"}
-        <div class="mb-1.5 font-mono text-[10px] uppercase text-neutral-500">{curCount} regions · click to isolate</div>
-        {#each curClusters as c}<div class="flex cursor-pointer items-center gap-2 py-0.5 hover:text-white {pinned === c.c ? 'text-white' : ''}" role="button" tabindex="0" aria-label="isolate region {c.label}" aria-pressed={pinned === c.c} onmouseenter={() => { if (pinned === null) handle?.setHighlight(c.c); }} onmouseleave={() => { if (pinned === null) handle?.setHighlight(null); }} onclick={() => togglePin(c.c)} onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); togglePin(c.c); } }}><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(col(c.c))}"></span><span class="truncate">{c.label} <span class="text-neutral-500">{c.n}</span></span></div>{/each}
+        <div class="mb-1.5 font-mono text-[10px] uppercase text-[var(--faint)]">{curCount} regions · click to isolate</div>
+        {#each curClusters as c}<div class="flex cursor-pointer items-center gap-2 py-0.5 hover:text-[var(--ink)] {pinned === c.c ? 'text-white' : ''}" role="button" tabindex="0" aria-label="isolate region {c.label}" aria-pressed={pinned === c.c} onmouseenter={() => { if (pinned === null) handle?.setHighlight(c.c); }} onmouseleave={() => { if (pinned === null) handle?.setHighlight(null); }} onclick={() => togglePin(c.c)} onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); togglePin(c.c); } }}><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(col(c.c))}"></span><span class="truncate">{c.label} <span class="text-[var(--faint)]">{c.n}</span></span></div>{/each}
       {:else if curFacet}
-        <div class="mb-1.5 font-mono text-[10px] uppercase text-neutral-500">{curFacet.label} · {curFacet.ord.length}</div>
-        {#each curFacet.ord.slice(0, 16) as v}<div class="flex items-center gap-2 py-0.5"><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(col(curFacet.idx[v]))}"></span><span class="truncate">{v} <span class="text-neutral-500">{curFacet.cnt[v]}</span></span></div>{/each}
-        {#if curFacet.ord.length > 16}<div class="text-neutral-500">+{curFacet.ord.length - 16} more</div>{/if}
+        <div class="mb-1.5 font-mono text-[10px] uppercase text-[var(--faint)]">{curFacet.label} · {curFacet.ord.length}</div>
+        {#each curFacet.ord.slice(0, 16) as v}<div class="flex items-center gap-2 py-0.5"><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(col(curFacet.idx[v]))}"></span><span class="truncate">{v} <span class="text-[var(--faint)]">{curFacet.cnt[v]}</span></span></div>{/each}
+        {#if curFacet.ord.length > 16}<div class="text-[var(--faint)]">+{curFacet.ord.length - 16} more</div>{/if}
       {:else}
         {@const a = data.axes.find((x) => x.key === color)}
-        {#if a}<div class="mb-1.5 font-mono text-[10px] uppercase text-neutral-500">{a.name}</div>
+        {#if a}<div class="mb-1.5 font-mono text-[10px] uppercase text-[var(--faint)]">{a.name}</div>
           <div class="flex items-center gap-2 py-0.5"><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(axisColor(0))}"></span>{a.low}</div>
           <div class="flex items-center gap-2 py-0.5"><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(axisColor(1))}"></span>{a.high}</div>{/if}
       {/if}
     </div>
 
-    <div class="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 font-mono text-[11px] text-neutral-500">{hint}</div>
+    <div class="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 font-mono text-[11px] text-[var(--faint)]">{hint}</div>
     {#if selected === null && !deckOpen}
-      <div class="pointer-events-none absolute bottom-3 right-56 font-mono text-[10px] text-neutral-600">{data.ids.length} cards · {layout} · {sizeLabel}</div>
+      <div class="pointer-events-none absolute bottom-3 right-56 font-mono text-[10px] text-[var(--faint)]">{data.ids.length} cards · {layout} · {sizeLabel}</div>
     {/if}
   {/if}
 
   <!-- hover tooltip -->
   {#if hovered && data && selected === null}
-    <div class="pointer-events-none absolute z-10 max-w-xs rounded-lg border border-neutral-800 bg-neutral-900/95 p-2.5 text-xs shadow-xl" style="left:{Math.min(hovered.x + 14, window.innerWidth - 280)}px; top:{Math.min(hovered.y + 14, window.innerHeight - 120)}px">
+    <div class="pointer-events-none absolute z-10 max-w-xs rounded-lg border border-[var(--hair)] bg-[var(--panel)] p-2.5 text-xs shadow-xl" style="left:{Math.min(hovered.x + 14, window.innerWidth - 280)}px; top:{Math.min(hovered.y + 14, window.innerHeight - 120)}px">
       <div class="mb-1 font-bold">{data.titles[hovered.i]}</div>
-      <div class="mb-1 line-clamp-2 text-neutral-400">{data.cores[hovered.i].slice(0, 140)}</div>
-      <div class="font-mono text-[10px] text-neutral-500">hub {data.hub[hovered.i]} · {topAxes(hovered.i).map((t) => t.n + " " + t.s).join(" · ")}</div>
+      <div class="mb-1 line-clamp-2 text-[var(--dim)]">{data.cores[hovered.i].slice(0, 140)}</div>
+      <div class="font-mono text-[10px] text-[var(--faint)]">hub {data.hub[hovered.i]} · {topAxes(hovered.i).map((t) => t.n + " " + t.s).join(" · ")}</div>
     </div>
   {/if}
 
   <!-- detail panel -->
   {#if selected !== null && data}
-    <div class="absolute bottom-3 left-3 right-3 max-h-[64vh] overflow-auto rounded-xl border border-neutral-800 bg-neutral-900/95 p-4 text-sm backdrop-blur sm:right-auto sm:w-80">
-      <button class="absolute right-3 top-3 font-mono text-neutral-500 hover:text-neutral-200" onclick={() => focusCard(null)} aria-label="close">✕</button>
+    <div class="absolute bottom-3 left-3 right-3 max-h-[64vh] overflow-auto rounded-xl border border-[var(--hair)] bg-[var(--panel)] p-4 text-sm backdrop-blur sm:right-auto sm:w-80">
+      <button class="absolute right-3 top-3 font-mono text-[var(--faint)] hover:text-[var(--soft)]" onclick={() => focusCard(null)} aria-label="close">✕</button>
       <div class="mb-1 pr-6 font-bold">{data.titles[selected]}</div>
-      <div class="mb-2 font-mono text-[10px] text-neutral-500">{[data.authors?.[selected], dateOf(selected), regionOf(selected)].filter(Boolean).join(" · ")}</div>
-      {#if data.urls?.[selected]}<a class="mb-2 inline-block font-mono text-xs font-bold text-blue-400 hover:underline" href={data.urls[selected]} target="_blank" rel="noopener">open source →</a>{/if}
-      <div class="mb-1 text-xs leading-relaxed text-neutral-300">{data.cores[selected].slice(0, 420)}{data.cores[selected].length > 420 ? "…" : ""}</div>
+      <div class="mb-2 font-mono text-[10px] text-[var(--faint)]">{[data.authors?.[selected], dateOf(selected), regionOf(selected)].filter(Boolean).join(" · ")}</div>
+      {#if data.urls?.[selected]}<a class="mb-2 inline-block font-mono text-xs font-bold text-[var(--accent)] hover:underline" href={data.urls[selected]} target="_blank" rel="noopener">open source →</a>{/if}
+      <div class="mb-1 text-xs leading-relaxed text-[var(--soft)]">{data.cores[selected].slice(0, 420)}{data.cores[selected].length > 420 ? "…" : ""}</div>
 
-      <div class="mt-3 mb-1 font-mono text-[10px] uppercase tracking-wide text-neutral-500">where it sits</div>
+      <div class="mt-3 mb-1 font-mono text-[10px] uppercase tracking-wide text-[var(--faint)]">where it sits</div>
       {#each placements(selected) as p}
-        <div class="flex items-center justify-between gap-2 border-b border-neutral-800 py-1 text-xs" title={(p.s >= 50 ? p.a.high : p.a.low) + " — " + p.note}>
-          <span class="truncate text-neutral-400">{p.a.name}</span>
+        <div class="flex items-center justify-between gap-2 border-b border-[var(--hair)] py-1 text-xs" title={(p.s >= 50 ? p.a.high : p.a.low) + " — " + p.note}>
+          <span class="truncate text-[var(--dim)]">{p.a.name}</span>
           <span class="flex-none font-mono text-[10px]">{p.s >= 50 ? "▲" : "▼"} <b>{p.s}</b></span>
         </div>
       {/each}
 
-      <div class="mt-3 mb-1 font-mono text-[10px] uppercase tracking-wide text-neutral-500">nearest {data.nbr[selected]?.length ?? 0}</div>
+      <div class="mt-3 mb-1 font-mono text-[10px] uppercase tracking-wide text-[var(--faint)]">nearest {data.nbr[selected]?.length ?? 0}</div>
       {#each data.nbr[selected] ?? [] as j}
-        <button class="block w-full truncate rounded px-1 py-0.5 text-left text-xs hover:bg-neutral-800" onclick={() => focusCard(j)}>→ {data.titles[j]}</button>
+        <button class="block w-full truncate rounded px-1 py-0.5 text-left text-xs hover:bg-[var(--chip)]" onclick={() => focusCard(j)}>→ {data.titles[j]}</button>
       {/each}
     </div>
   {/if}
 
   <!-- deck / list view — the accessible, sortable/filterable reader (real DOM, keyboard-navigable) -->
   {#if deckOpen && data}
-    <div class="absolute inset-x-2 top-2 bottom-2 z-30 mx-auto flex max-w-4xl flex-col rounded-xl border border-neutral-800 bg-neutral-950/95 p-3 backdrop-blur">
+    <div class="absolute inset-x-2 top-2 bottom-2 z-30 mx-auto flex max-w-4xl flex-col rounded-xl border border-[var(--hair)] bg-[var(--panel-solid)] p-3 backdrop-blur">
       <div class="mb-2 flex flex-wrap items-center gap-2">
         <b class="text-sm">Deck</b>
-        <span class="font-mono text-[10px] text-neutral-500">{deckList.length} cards</span>
-        <label class="flex items-center gap-1 text-xs"><span class="font-mono text-[10px] text-neutral-500">sort</span>
-          <select bind:value={deckSort} class="rounded-md border border-neutral-700 bg-neutral-900 px-1.5 py-1 text-xs">
+        <span class="font-mono text-[10px] text-[var(--faint)]">{deckList.length} cards</span>
+        <label class="flex items-center gap-1 text-xs"><span class="font-mono text-[10px] text-[var(--faint)]">sort</span>
+          <select bind:value={deckSort} class="rounded-md border border-[var(--hair2)] bg-[var(--card)] px-1.5 py-1 text-xs">
             <option value="hub">influence</option>{#each data.axes as a}<option value={a.key}>{axl(a)}</option>{/each}
           </select></label>
-        {#if hasRead}<button class="rounded-md border border-neutral-700 px-2 py-1 font-mono text-[11px] {deckUnread ? 'bg-neutral-800 text-neutral-100' : 'text-neutral-500'}" onclick={() => (deckUnread = !deckUnread)}>unread only</button>{/if}
-        <input bind:value={deckQ} placeholder="filter…" class="min-w-0 flex-1 rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs" />
-        <button class="font-mono text-neutral-500 hover:text-neutral-200" onclick={() => (deckOpen = false)} aria-label="close deck">✕</button>
+        {#if hasRead}<button class="rounded-md border border-[var(--hair2)] px-2 py-1 font-mono text-[11px] {deckUnread ? 'bg-[var(--chip)] text-[var(--ink)]' : 'text-[var(--faint)]'}" onclick={() => (deckUnread = !deckUnread)}>unread only</button>{/if}
+        <input bind:value={deckQ} placeholder="filter…" class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--card)] px-2 py-1 text-xs" />
+        <button class="font-mono text-[var(--faint)] hover:text-[var(--soft)]" onclick={() => (deckOpen = false)} aria-label="close deck">✕</button>
       </div>
       <div class="grid grid-cols-1 gap-2 overflow-auto sm:grid-cols-2">
         {#each deckList as i (i)}
-          <button class="rounded-lg border border-neutral-800 bg-neutral-900 p-2.5 text-left hover:border-neutral-600 {data.read?.[i] === true ? 'opacity-60' : ''}" onclick={() => { focusCard(i); deckOpen = false; }}>
+          <button class="rounded-lg border border-[var(--hair)] bg-[var(--card)] p-2.5 text-left hover:border-[var(--hair2)] {data.read?.[i] === true ? 'opacity-60' : ''}" onclick={() => { focusCard(i); deckOpen = false; }}>
             <div class="flex items-start justify-between gap-2">
               <div class="truncate text-[13px] font-bold">{data.titles[i]}</div>
-              {#if data.urls?.[i]}<a href={data.urls[i]} target="_blank" rel="noopener" class="flex-none font-mono text-[10px] font-bold text-blue-400 hover:underline" onclick={(e) => e.stopPropagation()}>open →</a>{/if}
+              {#if data.urls?.[i]}<a href={data.urls[i]} target="_blank" rel="noopener" class="flex-none font-mono text-[10px] font-bold text-[var(--accent)] hover:underline" onclick={(e) => e.stopPropagation()}>open →</a>{/if}
             </div>
-            <div class="my-1 line-clamp-2 text-[11px] text-neutral-400">{data.cores[i].slice(0, 160)}</div>
+            <div class="my-1 line-clamp-2 text-[11px] text-[var(--dim)]">{data.cores[i].slice(0, 160)}</div>
             <div class="flex flex-wrap gap-1">
-              <span class="rounded-full bg-neutral-800 px-2 py-0.5 font-mono text-[9px] text-neutral-200">◆ {regionOf(i)}</span>
-              {#each topAxes(i) as t}<span class="rounded-full bg-neutral-800/70 px-2 py-0.5 font-mono text-[9px] text-neutral-400">{axShort(t.n)} {t.s}</span>{/each}
+              <span class="rounded-full bg-[var(--chip)] px-2 py-0.5 font-mono text-[9px] text-[var(--soft)]">◆ {regionOf(i)}</span>
+              {#each topAxes(i) as t}<span class="rounded-full bg-[var(--chip2)] px-2 py-0.5 font-mono text-[9px] text-[var(--dim)]">{axShort(t.n)} {t.s}</span>{/each}
             </div>
           </button>
         {/each}
@@ -263,17 +274,17 @@
 
   <!-- first-run intro (remembered in localStorage) -->
   {#if showIntro && data}
-    <div class="absolute inset-0 z-40 grid place-items-center bg-neutral-950/70 p-4 backdrop-blur-sm">
-      <div class="max-w-md rounded-2xl border border-neutral-800 bg-neutral-900 p-6 shadow-2xl">
+    <div class="absolute inset-0 z-40 grid place-items-center bg-[var(--scrim)] p-4 backdrop-blur-sm">
+      <div class="max-w-md rounded-2xl border border-[var(--hair)] bg-[var(--panel-solid)] p-6 shadow-2xl">
         <div class="text-lg font-bold">the forms of the corpus 🔭</div>
-        <div class="mt-1 font-mono text-[11px] text-neutral-500">{data.ids.length} documents · {data.axes.length} discovered axes · {data.k} regions</div>
-        <ul class="mt-3 space-y-2 text-sm text-neutral-400">
-          <li><b class="text-neutral-100">Proximity is similarity</b> — nearby cards are alike; colour is an emergent region, size is influence.</li>
-          <li><b class="text-neutral-100">Slide the grain</b> to move regions from continents to towns; click a region to isolate, double-click the map to drill in.</li>
-          <li><b class="text-neutral-100">Tap any card</b> to read it, see its nearest neighbours, and open the source.</li>
-          <li><b class="text-neutral-100">Open the deck</b> to read the corpus as a sortable, filterable list — or switch layout to axis scatter.</li>
+        <div class="mt-1 font-mono text-[11px] text-[var(--faint)]">{data.ids.length} documents · {data.axes.length} discovered axes · {data.k} regions</div>
+        <ul class="mt-3 space-y-2 text-sm text-[var(--dim)]">
+          <li><b class="text-[var(--ink)]">Proximity is similarity</b> — nearby cards are alike; colour is an emergent region, size is influence.</li>
+          <li><b class="text-[var(--ink)]">Slide the grain</b> to move regions from continents to towns; click a region to isolate, double-click the map to drill in.</li>
+          <li><b class="text-[var(--ink)]">Tap any card</b> to read it, see its nearest neighbours, and open the source.</li>
+          <li><b class="text-[var(--ink)]">Open the deck</b> to read the corpus as a sortable, filterable list — or switch layout to axis scatter.</li>
         </ul>
-        <button class="mt-4 rounded-lg bg-neutral-100 px-4 py-2 text-sm font-semibold text-neutral-900 hover:bg-white" onclick={dismissIntro}>explore →</button>
+        <button class="mt-4 rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-[var(--accent-ink)] hover:opacity-90" onclick={dismissIntro}>explore →</button>
       </div>
     </div>
   {/if}

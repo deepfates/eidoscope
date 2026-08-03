@@ -66,7 +66,7 @@ nothing here may be silently dropped. `[ ]` = not yet ported, `[x]` = ported + v
 
 ## Search & global
 - [x] **Find-a-card search** → dims non-matching points (and filters the list).
-- [ ] **Theme** toggle (light/dark), full token-level theming. _(DEFERRED to the design pass eid-imbx — a real light palette is a design-system task; a half-toggle looks broken. App is dark-committed for now.)_
+- [x] **Theme** toggle (light/dark), full token-level theming — CSS-variable tokens (`--bg/--panel/--ink/--accent/…`) swapped by `data-theme`; toggle persists to localStorage, falls through to OS `prefers-color-scheme` when unset; deck map ink (spokes, ghost strokes, label pill) inverts too. Verified by computed page/panel backgrounds flipping in both directions.
 - [x] **Reset** — restores view + default grain + clears focus/pin.
 - [x] **Intro** modal — first-run explainer of the core interactions; remembered (localStorage).
 - [x] **Count readout** (N cards · layout · size).

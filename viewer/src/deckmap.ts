@@ -19,7 +19,7 @@ export type MapHandle = {
   resetView: () => void;
   destroy: () => void;
 };
-type Opts = { getColor: (i: number) => RGB; getRadius: (i: number) => number; layout: Layout; xKey: string; yKey: string; showLabels: boolean; grain: number; citeOn?: boolean; ghostsOn?: boolean };
+type Opts = { getColor: (i: number) => RGB; getRadius: (i: number) => number; layout: Layout; xKey: string; yKey: string; showLabels: boolean; grain: number; citeOn?: boolean; ghostsOn?: boolean; theme?: "dark" | "light" };
 
 const hull2d = (pts: number[][]): number[][] => {
   if (pts.length < 3) return pts;
@@ -39,6 +39,12 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   let highlight: number | null = null;
   let queryMatch: Set<number> | null = null;
   let citeOn = init.citeOn ?? false, ghostsOn = init.ghostsOn ?? false;
+  let theme: "dark" | "light" = init.theme ?? "dark", themeVer = 0;
+  const dark = () => theme !== "light";
+  // theme-aware map ink: on a light ground, white spokes/ghost strokes and the dark label pill invert.
+  const spokeCol = () => (dark() ? [255, 255, 255, 110] : [38, 38, 52, 130]) as [number, number, number, number];
+  const labelBg = () => (dark() ? [10, 12, 18, 180] : [255, 255, 255, 214]) as [number, number, number, number];
+  const ghostCol = () => (dark() ? [200, 210, 225, 190] : [82, 92, 112, 205]) as [number, number, number, number];
 
   // per-region (at the CURRENT grain level) member indices + label — for hulls, labels, dimming, drill.
   // Recomputed whenever the grain slider moves. Falls back to the default cluster if no ladder is present.
@@ -97,8 +103,8 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   const spokesLayer = () => new LineLayer({
     id: "spokes", data: focus == null ? [] : (D.nbr[focus] || []).map((j) => ({ j })),
     getSourcePosition: () => pos(focus as number) as any, getTargetPosition: (d: any) => pos(d.j) as any,
-    getColor: [255, 255, 255, 110], getWidth: 1,
-    updateTriggers: { getSourcePosition: [posVer], getTargetPosition: [posVer] },
+    getColor: spokeCol(), getWidth: 1,
+    updateTriggers: { getSourcePosition: [posVer], getTargetPosition: [posVer], getColor: themeVer },
   });
   const hullLayer = () => new PolygonLayer({
     id: "hull",
@@ -113,8 +119,8 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     getPosition: (d: any) => d.p, getText: (d: any) => d.label,
     getColor: (d: any) => [...col(d.c), 240] as any, getSize: 13, sizeUnits: "pixels",
     fontFamily: "ui-monospace, monospace", fontWeight: 700, getTextAnchor: "middle", getAlignmentBaseline: "center",
-    getBackgroundColor: [10, 12, 18, 180], background: true, backgroundPadding: [4, 2],
-    updateTriggers: { getPosition: [posVer], data: [posVer] },
+    getBackgroundColor: labelBg(), background: true, backgroundPadding: [4, 2],
+    updateTriggers: { getPosition: [posVer], data: [posVer], getBackgroundColor: themeVer },
   });
   // frontier telescope (only for --frontier arxiv corpora; absent otherwise): intra-corpus citation edges
   // + "ghost" papers cited-but-not-in-corpus, placed near the work that cites them, sized by citation count.
@@ -130,8 +136,9 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     id: "ghosts", data: D.ghosts || [],
     getPosition: (g: any) => g.xy as any, getRadius: (g: any) => 2 + 3 * Math.sqrt(g.n / gmax),
     radiusUnits: "pixels", radiusMinPixels: 2, stroked: true, filled: false,
-    getLineColor: [200, 210, 225, 190], lineWidthUnits: "pixels", getLineWidth: 1.2,
+    getLineColor: ghostCol(), lineWidthUnits: "pixels", getLineWidth: 1.2,
     pickable: true, autoHighlight: true, highlightColor: [255, 255, 255, 200],
+    updateTriggers: { getLineColor: themeVer },
   });
   const layers = () => [
     ...(highlight != null ? [hullLayer()] : []),
@@ -186,6 +193,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
       if (o.showLabels !== undefined) showLabels = o.showLabels;
       if (o.citeOn !== undefined) citeOn = o.citeOn;
       if (o.ghostsOn !== undefined) ghostsOn = o.ghostsOn;
+      if (o.theme && o.theme !== theme) { theme = o.theme; themeVer++; }
       if (o.grain !== undefined && o.grain !== grain) { grain = o.grain; recomputeGrain(); highlight = null; colorVer++; }  // grain change clears stale highlight
       const prev = layout;
       if (o.layout) layout = o.layout;

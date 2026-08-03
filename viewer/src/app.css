@@ -1,13 +1,82 @@
 @import "tailwindcss";
 
-:root { color-scheme: dark; }
-html, body { margin: 0; height: 100%; overscroll-behavior: none; }
+/* ── Design tokens ───────────────────────────────────────────────────────────
+   One source of truth for colour. Components reference these via Tailwind
+   arbitrary values (bg-[var(--panel)], text-[var(--ink)]) so light/dark is a
+   token swap, never a per-component rewrite. Neutrals carry a faint cool bias
+   toward the blue accent so they read as chosen, not defaulted. */
+:root {
+  /* dark is the default ground (deck.gl points glow against it) */
+  --bg: #0a0a0b;
+  --panel: rgba(20, 20, 23, 0.82);
+  --panel-solid: rgba(9, 9, 11, 0.96);
+  --scrim: rgba(9, 9, 11, 0.72);
+  --field: #08080a;
+  --card: #17171a;
+  --chip: #27272b;
+  --chip2: rgba(39, 39, 43, 0.7);
+  --hair: #26262b;
+  --hair2: #3c3c42;
+  --ink: #f5f5f6;
+  --soft: #d2d2d6;
+  --dim: #a1a1aa;
+  --faint: #71717a;
+  --accent: #60a5fa;
+  --accent-ink: #08080a;
+  color-scheme: dark;
+}
+
+/* the viewer's own toggle stamps data-theme on <html> and must win over the OS
+   media query in both directions — so define light under BOTH signals. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f6f6f4;
+    --panel: rgba(255, 255, 255, 0.86);
+    --panel-solid: rgba(255, 255, 255, 0.97);
+    --scrim: rgba(244, 244, 242, 0.7);
+    --field: #ffffff;
+    --card: #ffffff;
+    --chip: #e9e9e6;
+    --chip2: rgba(233, 233, 230, 0.7);
+    --hair: #e2e2de;
+    --hair2: #cfcfca;
+    --ink: #18181b;
+    --soft: #3f3f46;
+    --dim: #52525b;
+    --faint: #71717a;
+    --accent: #2563eb;
+    --accent-ink: #ffffff;
+    color-scheme: light;
+  }
+}
+:root[data-theme="light"] {
+  --bg: #f6f6f4;
+  --panel: rgba(255, 255, 255, 0.86);
+  --panel-solid: rgba(255, 255, 255, 0.97);
+  --scrim: rgba(244, 244, 242, 0.7);
+  --field: #ffffff;
+  --card: #ffffff;
+  --chip: #e9e9e6;
+  --chip2: rgba(233, 233, 230, 0.7);
+  --hair: #e2e2de;
+  --hair2: #cfcfca;
+  --ink: #18181b;
+  --soft: #3f3f46;
+  --dim: #52525b;
+  --faint: #71717a;
+  --accent: #2563eb;
+  --accent-ink: #ffffff;
+  color-scheme: light;
+}
+:root[data-theme="dark"] { color-scheme: dark; }
+
+html, body { margin: 0; height: 100%; overscroll-behavior: none; background: var(--bg); }
 #app { height: 100%; }
 
 /* a11y: a visible keyboard-focus ring on every interactive control (canvas map aside — the deck/list
    view is the accessible parallel). Mouse users don't see it thanks to :focus-visible. */
 button:focus-visible, select:focus-visible, input:focus-visible, a:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible {
-  outline: 2px solid #60a5fa;
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
   border-radius: 4px;
 }
