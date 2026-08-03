@@ -80,7 +80,10 @@
   let lastColorForFacet = color;
   $effect(() => { const c = color; if (c !== lastColorForFacet) { lastColorForFacet = c; if (facetPin !== null) { facetPin = null; handle?.setHighlightSet(null, null); } } });
 
-  const axl = (a: any) => (a.weak ? "~ " : "") + a.name;
+  const pct = (a: any) => (a?.variance != null ? Math.round(a.variance * 100) : null);
+  // axis label with its STRENGTH up front (variance %, ~ for weak) — the % stays visible even when the
+  // long name truncates in a narrow dropdown, so you can tell a strong dimension from a thin one (eid-4vm2).
+  const axl = (a: any) => (pct(a) != null ? (a.weak ? "~" : "") + pct(a) + "% " : a.weak ? "~ " : "") + a.name;
   const rgb = (c: [number, number, number]) => `rgb(${c[0]},${c[1]},${c[2]})`;
   const trunc = (s: string, m = 44) => (s && s.length > m ? s.slice(0, m - 1) + "…" : s);
   const regionOf = (i: number) => curClusters[assignment[i]]?.label ?? "";
@@ -223,10 +226,10 @@
   {#if data}
     {#if layout === "axes" && xAxis && yAxis}
       <div class="pointer-events-none absolute inset-0 font-mono text-xs text-[var(--dim)]">
-        <div class="absolute left-3 top-1/2 -translate-y-1/2">← {trunc(xAxis.low)}</div>
-        <div class="absolute right-3 top-1/2 -translate-y-1/2 text-right">{trunc(xAxis.high)} →</div>
-        <div class="absolute left-1/2 top-3 -translate-x-1/2">↑ {trunc(yAxis.high)}</div>
-        <div class="absolute bottom-9 left-1/2 -translate-x-1/2">↓ {trunc(yAxis.low)}</div>
+        <div class="absolute left-3 top-1/2 max-w-[42%] -translate-y-1/2" title={xAxis.low}>← {trunc(xAxis.low)}</div>
+        <div class="absolute right-3 top-1/2 max-w-[42%] -translate-y-1/2 text-right" title={xAxis.high}>{trunc(xAxis.high)} →</div>
+        <div class="absolute left-1/2 top-3 max-w-[60%] -translate-x-1/2 truncate" title={yAxis.high}>↑ {trunc(yAxis.high)}</div>
+        <div class="absolute bottom-9 left-1/2 max-w-[60%] -translate-x-1/2 truncate" title={yAxis.low}>↓ {trunc(yAxis.low)}</div>
       </div>
     {/if}
 
@@ -247,13 +250,13 @@
         </select></label>
       {#if layout === "axes"}
         <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">x-axis</span>
-          <select bind:value={xKey} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">{#each data.axes as a}<option value={a.key}>{axl(a)}</option>{/each}</select></label>
+          <select bind:value={xKey} title={xAxis?.name ?? ""} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">{#each data.axes as a}<option value={a.key}>{axl(a)}</option>{/each}</select></label>
         <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">y-axis</span>
-          <select bind:value={yKey} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">{#each data.axes as a}<option value={a.key}>{axl(a)}</option>{/each}</select></label>
+          <select bind:value={yKey} title={yAxis?.name ?? ""} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">{#each data.axes as a}<option value={a.key}>{axl(a)}</option>{/each}</select></label>
         {#if weakAxes}<div class="mb-1.5 rounded-md bg-[var(--chip2)] px-2 py-1 text-[10px] leading-snug text-[var(--dim)]">~ {weakAxes > 1 ? "both are minor axes" : "a minor axis"} (under 2% variance) — position is thin, read it loosely</div>{/if}
       {/if}
       <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">color</span>
-        <select bind:value={color} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">
+        <select bind:value={color} title={legendAxis?.name ?? ""} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">
           <option value="cluster">region</option>{#each fac as f}<option value={"meta:" + f.key}>{f.label}</option>{/each}{#each data.axes as a}<option value={a.key}>axis: {axl(a)}</option>{/each}
         </select></label>
       <label class="flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">size</span>
@@ -285,7 +288,7 @@
     <div class="absolute bottom-3 right-3 flex max-h-[44vh] w-[min(13rem,62vw)] flex-col overflow-hidden rounded-xl border border-[var(--hair)] bg-[var(--panel)] p-2.5 text-xs backdrop-blur">
       <button class="flex w-full flex-none items-center gap-1 font-mono text-[10px] uppercase text-[var(--faint)] hover:text-[var(--ink)] {legendOpen ? 'mb-1.5' : ''}" onclick={() => (legendOpen = !legendOpen)} aria-expanded={legendOpen} aria-label="{legendOpen ? 'collapse' : 'expand'} legend">
         <span class="text-[9px]">{legendOpen ? "▾" : "▸"}</span>
-        <span class="truncate">{#if color === "cluster"}{curCount} regions{#if legendOpen}<span class="normal-case text-[var(--faint)]"> · click to isolate</span>{/if}{:else if curFacet}{curFacet.label} · {curFacet.ord.length}{#if legendOpen}<span class="normal-case text-[var(--faint)]"> · click to isolate</span>{/if}{:else if legendAxis}{legendAxis.name}{:else}legend{/if}</span>
+        <span class="truncate">{#if color === "cluster"}{curCount} regions{#if legendOpen}<span class="normal-case text-[var(--faint)]"> · click to isolate</span>{/if}{:else if curFacet}{curFacet.label} · {curFacet.ord.length}{#if legendOpen}<span class="normal-case text-[var(--faint)]"> · click to isolate</span>{/if}{:else if legendAxis}{legendAxis.name}{#if pct(legendAxis) != null}<span class="normal-case text-[var(--faint)]"> · {pct(legendAxis)}% variance{legendAxis.weak ? " (thin)" : ""}</span>{/if}{:else}legend{/if}</span>
       </button>
       {#if legendOpen}
         <div class="min-h-0 overflow-auto">
