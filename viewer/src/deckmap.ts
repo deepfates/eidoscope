@@ -101,6 +101,9 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     const lineH = 30;                                             // vertical clearance in px (row spacing; long region names stack otherwise)
     const placed: typeof cand = [];
     for (const d of cand) if (placed.every((q) => Math.abs((q.p[0] - d.p[0]) * scale) > hw(q.label.length) + hw(d.label.length) || Math.abs((q.p[1] - d.p[1]) * scale) > lineH)) placed.push(d);
+    // nudge labels whose centroid sits near a screen edge back on-screen (long region names were clipping on mobile)
+    const W = typeof window !== "undefined" ? window.innerWidth : 1200, tx = viewState?.target?.[0] ?? 0;
+    for (const d of placed as any[]) { const sx = W / 2 + (d.p[0] - tx) * scale, vw = (d.label.length * charPx) / 2 + 4; d.dx = sx - vw < 6 ? 6 - (sx - vw) : sx + vw > W - 6 ? (W - 6) - (sx + vw) : 0; }
     return placed;
   };
   const dimSet = () => (focus != null ? fSet : highlight != null ? new Set(members[highlight]) : null);
@@ -136,10 +139,11 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     id: "labels",
     data: decluttered(),
     getPosition: (d: any) => d.p, getText: (d: any) => d.label,
-    getColor: (d: any) => [...col(d.c), 240] as any, getSize: 13, sizeUnits: "pixels",
+    getColor: (d: any) => [...col(d.c), highlight != null && d.c !== highlight ? 40 : 240] as any, getSize: 13, sizeUnits: "pixels",  // dim other regions' labels when one is isolated
     fontFamily: "ui-monospace, monospace", fontWeight: 700, getTextAnchor: "middle", getAlignmentBaseline: "center",
+    getPixelOffset: (d: any) => [d.dx || 0, 0],  // keep edge labels on-screen
     getBackgroundColor: labelBg(), background: true, backgroundPadding: [4, 2],
-    updateTriggers: { getPosition: [posVer], data: [posVer], getBackgroundColor: themeVer },
+    updateTriggers: { getPosition: [posVer], data: [posVer], getColor: [highlight], getPixelOffset: [posVer], getBackgroundColor: themeVer },
   });
   // frontier telescope (only for --frontier arxiv corpora; absent otherwise): intra-corpus citation edges
   // + "ghost" papers cited-but-not-in-corpus, placed near the work that cites them, sized by citation count.
