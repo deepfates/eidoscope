@@ -121,6 +121,24 @@
   }
   $effect(() => { void [layout, color, size, grain, xKey, yKey, pinned, selected]; if (urlReady) { try { history.replaceState(history.state, "", serializeUrl()); } catch {} } });
 
+  // focus-trap action (eid-vxm2): on open, move focus into the modal + keep Tab inside it (so keyboard
+  // focus can't wander to the background controls behind the overlay); on close, return focus to the opener.
+  function trapFocus(node: HTMLElement) {
+    const opener = document.activeElement as HTMLElement | null;
+    const sel = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    const items = () => [...node.querySelectorAll<HTMLElement>(sel)].filter((e) => e.offsetParent !== null);
+    queueMicrotask(() => { const f = items(); (f[0] ?? node).focus(); });
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Tab") return;
+      const f = items(); if (!f.length) { e.preventDefault(); return; }
+      const first = f[0], last = f[f.length - 1], a = document.activeElement;
+      if (e.shiftKey && (a === first || !node.contains(a))) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && a === last) { e.preventDefault(); first.focus(); }
+    };
+    node.addEventListener("keydown", onKey);
+    return { destroy() { node.removeEventListener("keydown", onKey); try { opener?.focus(); } catch {} } };
+  }
+
   onMount(() => {
     try {
       const saved = localStorage.getItem("eido-theme");
@@ -290,7 +308,7 @@
 
   <!-- detail panel -->
   {#if selected !== null && data}
-    <div class="absolute bottom-3 left-3 right-3 max-h-[64vh] overflow-auto rounded-xl border border-[var(--hair)] bg-[var(--panel)] p-4 text-sm backdrop-blur sm:right-auto sm:w-80">
+    <div use:trapFocus tabindex="-1" role="dialog" aria-label="card detail" class="absolute bottom-3 left-3 right-3 max-h-[64vh] overflow-auto rounded-xl border border-[var(--hair)] bg-[var(--panel)] p-4 text-sm backdrop-blur sm:right-auto sm:w-80">
       <button class="absolute right-2 top-2 grid h-9 w-9 place-items-center rounded-md font-mono text-base text-[var(--faint)] hover:bg-[var(--chip)] hover:text-[var(--soft)]" onclick={() => requestClose()} aria-label="close">✕</button>
       <div class="mb-1 pr-6 font-bold">{data.titles[selected]}</div>
       <div class="mb-2 font-mono text-[10px] text-[var(--faint)]">{[data.authors?.[selected], dateOf(selected), regionOf(selected)].filter(Boolean).join(" · ")}</div>
@@ -317,7 +335,7 @@
 
   <!-- deck / list view — the accessible, sortable/filterable reader (real DOM, keyboard-navigable) -->
   {#if deckOpen && data}
-    <div class="absolute inset-x-2 top-2 bottom-2 z-30 mx-auto flex max-w-4xl flex-col rounded-xl border border-[var(--hair)] bg-[var(--panel-solid)] p-3 backdrop-blur">
+    <div use:trapFocus tabindex="-1" role="dialog" aria-label="deck reader" class="absolute inset-x-2 top-2 bottom-2 z-30 mx-auto flex max-w-4xl flex-col rounded-xl border border-[var(--hair)] bg-[var(--panel-solid)] p-3 backdrop-blur">
       <div class="mb-2 flex flex-wrap items-center gap-2">
         <b class="text-sm">Deck</b>
         <span class="font-mono text-[10px] text-[var(--faint)]">{deckList.length} cards</span>
@@ -351,7 +369,7 @@
   <!-- first-run intro (remembered in localStorage) -->
   {#if showIntro && data}
     <div class="absolute inset-0 z-40 grid place-items-center bg-[var(--scrim)] p-4 backdrop-blur-sm">
-      <div class="max-w-md rounded-2xl border border-[var(--hair)] bg-[var(--panel-solid)] p-6 shadow-2xl">
+      <div use:trapFocus tabindex="-1" role="dialog" aria-modal="true" aria-label="welcome" class="max-w-md rounded-2xl border border-[var(--hair)] bg-[var(--panel-solid)] p-6 shadow-2xl">
         <div class="text-lg font-bold">the forms of the corpus 🔭</div>
         <div class="mt-1 font-mono text-[11px] text-[var(--faint)]">{data.ids.length} documents · {data.axes.length} discovered axes · {data.k} regions</div>
         <ul class="mt-3 space-y-2 text-sm text-[var(--dim)]">

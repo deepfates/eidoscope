@@ -210,6 +210,15 @@ try {
   ok(s.layout === "axes", `?layout=axes restores the layout — got ${s.layout}`);
   ok(s.detail === true && s.focus === 5, `?card=d5 deep-links straight to that card — detail=${s.detail} focus=${s.focus}`);
 
+  // 11d. FOCUS TRAP: opening the deck moves focus inside it and Tab stays trapped (eid-vxm2)
+  await p.goto(`${base}/index.html`); await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
+  await btn(/explore/i).click().catch(() => {}); await p.waitForTimeout(150);
+  await btn(/^deck$/).click(); await p.waitForTimeout(300);
+  const inDeck = () => p.evaluate(() => { const d = document.querySelector('[role="dialog"][aria-label="deck reader"]'); return !!d && d.contains(document.activeElement); });
+  ok(await inDeck(), "opening the deck moves focus inside the modal");
+  await p.keyboard.press("Tab"); await p.keyboard.press("Tab"); await p.keyboard.press("Tab"); await p.waitForTimeout(100);
+  ok(await inDeck(), "Tab keeps focus trapped inside the deck (eid-vxm2)");
+
   // 12. ?map= loads a DIFFERENT corpus from the SAME built viewer (the dual-deploy path)
   await p.goto(base + "/index.html?map=alt.eido");
   await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
