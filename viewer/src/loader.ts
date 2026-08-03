@@ -40,7 +40,7 @@ export function decodeContainer(buf: Uint8Array): MapContract {
     levelLabels: meta.levelLabels, levelBlurbs: meta.levelBlurbs, clusters: meta.clusters,
     hub: Array.from(get("hub")), nbr: unragged(get("nbr_v"), get("nbr_o")),
     cite: meta.hasCite ? unragged(get("cite_v"), get("cite_o")) : undefined, citec: meta.citec,
-    urls: sparse(meta.urls), authors: sparse(meta.authors), tags: sparse(meta.tags), dates: sparse(meta.dates), read: sparse(meta.read), ghosts: meta.ghosts,
+    urls: sparse(meta.urls), sources: sparse(meta.sources), siteNames: sparse(meta.siteNames), authors: sparse(meta.authors), tags: sparse(meta.tags), dates: sparse(meta.dates), read: sparse(meta.read), ghosts: meta.ghosts,
   };
 }
 

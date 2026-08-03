@@ -56,7 +56,9 @@ export type MapContract = {
   citec?: number[];                        // per node: external citation impact
 
   // optional per-node metadata (columnar on the wire); any may be absent/sparse
-  urls?: (string | undefined)[];
+  urls?: (string | undefined)[];           // the canonical link (e.g. the Readwise reader link)
+  sources?: (string | undefined)[];        // the ORIGINAL source url the doc was saved from (arxiv/blog/…) — lets a shared map link out even for viewers who can't open the reader link
+  siteNames?: (string | undefined)[];      // a human label for the source link ("arXiv.org", the blog name)
   authors?: (string | undefined)[];
   tags?: (string[] | undefined)[];
   dates?: (number | undefined)[];

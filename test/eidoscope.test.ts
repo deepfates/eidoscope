@@ -199,7 +199,7 @@ test("mapbin: binary codec round-trips the contract losslessly and is much small
     levels: [[0, 0, 0], [0, 0, 1]], counts: [1, 2], levelLabels: [["all"], ["p", "q"]],
     clusters: [{ c: 0, n: 2, label: "p" }, { c: 1, n: 1, label: "q" }],
     hub: [3, 1, 2], nbr: [[1, 2], [0], [0, 1]],
-    urls: ["u", undefined, "w"], dates: [1, 2, 3],
+    urls: ["u", undefined, "w"], sources: ["arxiv.org/abs/1", undefined, "blog/3"], siteNames: ["arXiv.org", undefined, "Blog"], dates: [1, 2, 3],
   };
   const bin = encodeMap(D);
   const back = decodeMap(bin);
@@ -210,6 +210,8 @@ test("mapbin: binary codec round-trips the contract losslessly and is much small
   expect(back.scores.x.map((v) => Math.round(v))).toEqual(D.scores.x); // f32 scores
   expect(back.xy[2][0]).toBeCloseTo(0.9, 4);                        // f32 coords
   expect(back.urls).toEqual(D.urls);                                // sparse metadata (undefined preserved)
+  expect(back.sources).toEqual(D.sources);                          // original source links survive round-trip
+  expect(back.siteNames).toEqual(D.siteNames);                      // and their labels
   expect(bin.byteLength).toBeLessThan(JSON.stringify(D).length);    // smaller than the JSON form
 });
 

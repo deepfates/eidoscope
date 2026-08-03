@@ -61,7 +61,7 @@ export function encodeMap(D: MapContract): Uint8Array {
     version: CONTRACT_VERSION, n,
     ids: D.ids, titles: D.titles, cores: D.cores, notes: D.notes,
     axes: D.axes, k: D.k, di: D.di, counts: D.counts, levelLabels: D.levelLabels, levelBlurbs: D.levelBlurbs, clusters: D.clusters,
-    urls: D.urls, authors: D.authors, tags: D.tags, dates: D.dates, read: D.read, citec: D.citec, ghosts: D.ghosts,
+    urls: D.urls, sources: D.sources, siteNames: D.siteNames, authors: D.authors, tags: D.tags, dates: D.dates, read: D.read, citec: D.citec, ghosts: D.ghosts,
     hasLevels: !!D.levels, hasCite: !!D.cite,
     buffers: manifest,
   };
@@ -112,6 +112,6 @@ export function decodeMap(gz: Uint8Array): MapContract {
     cluster: Array.from(get("cluster")), k: meta.k, di: meta.di, levels, counts: meta.counts,
     levelLabels: meta.levelLabels, levelBlurbs: meta.levelBlurbs, clusters: meta.clusters,
     hub: Array.from(get("hub")), nbr, cite, citec: meta.citec,
-    urls: sparse(meta.urls), authors: sparse(meta.authors), tags: sparse(meta.tags), dates: sparse(meta.dates), read: sparse(meta.read), ghosts: meta.ghosts,
+    urls: sparse(meta.urls), sources: sparse(meta.sources), siteNames: sparse(meta.siteNames), authors: sparse(meta.authors), tags: sparse(meta.tags), dates: sparse(meta.dates), read: sparse(meta.read), ghosts: meta.ghosts,
   };
 }

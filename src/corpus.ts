@@ -3,7 +3,7 @@ import { join, basename, resolve } from "node:path";
 
 // The INPUT seam. Anything that yields { id, title, body } can drive the pipeline: a folder of
 // files (loadFolder), the readwise fixture (loadFixture), or a splice/Reader adapter later.
-export type Doc = { id: string; title: string; body: string; cat?: string; date?: number; url?: string; author?: string; tags?: string[]; path?: string; readProgress?: number };
+export type Doc = { id: string; title: string; body: string; cat?: string; date?: number; url?: string; source?: string; siteName?: string; arxiv?: string; author?: string; tags?: string[]; path?: string; readProgress?: number };
 const parseNum = (front: string, key: string) => { const m = front.match(new RegExp("^" + key + ":\\s*([\\d.]+)", "m")); return m ? Number(m[1]) : undefined; };
 const parseDate = (front: string) => { const m = front.match(/^(?:created_at|date|published_date):\s*"?([^"\n]+)/m); const t = m ? Date.parse(m[1].trim()) : NaN; return isNaN(t) ? undefined : t; };
 
@@ -30,14 +30,24 @@ export function loadFolder(dir: string, opts: { limit?: number; minChars?: numbe
         || (rest.match(/^#\s+(.+)$/m) || [])[1]?.trim()
         || basename(f).replace(/\.(md|markdown|txt)$/i, "");
       // capture whatever metadata the frontmatter carries; the file path is always a valid source.
-      // URL: frontmatter first, else the raw text (stripMd deletes urls, so read them from `rest`).
-      const url = (front.match(/^(?:url|source_url|source):\s*"?([^"\n]+)/m) || [])[1]?.trim()
+      // Two links, kept distinct: `url` is the canonical/reader link (Readwise's `url:`), `source` is the
+      // ORIGINAL the doc was saved from (`source_url:`/`source:` — arxiv, a blog, whoever). Keeping both
+      // means a shared map can link out to the open original even for someone who can't open the reader.
+      const clean = (s?: string) => s?.trim().replace(/[).,"']+$/, "");
+      const frontUrl = clean((front.match(/^url:\s*"?([^"\n]+)/m) || [])[1]);
+      const frontSrc = clean((front.match(/^(?:source_url|source):\s*"?([^"\n]+)/m) || [])[1]);
+      const url = frontUrl || frontSrc
         || (rest.match(/https?:\/\/(?:arxiv\.org|doi\.org|dx\.doi\.org)\/\S+/i) || [])[0]?.replace(/[).,"']+$/, "")
         || (rest.slice(0, 600).match(/https?:\/\/[^\s)>"']+/) || [])[0]?.replace(/[).,"']+$/, "");
+      const source = frontSrc && frontSrc !== url ? frontSrc : undefined;   // only when distinct from url
+      const siteName = clean((front.match(/^site_name:\s*"?([^"\n]+)/m) || [])[1]);
+      // arxiv id for the frontier telescope: the doc's OWN paper id, from the source_url / any arxiv
+      // link in the frontmatter or the head of the body (stripMd removes urls, so read the raw `rest`).
+      const arxiv = ((front + "\n" + rest.slice(0, 3000)).match(/arxiv\.org\/(?:abs|pdf)\/(\d{4}\.\d{4,5})|arxiv:\s*(\d{4}\.\d{4,5})/i) || []).slice(1).find(Boolean);
       const author = (front.match(/^author:\s*"?([^"\n]+)/m) || [])[1]?.trim();
       const tagsRaw = (front.match(/^tags:\s*(.+)$/m) || [])[1]?.trim();
       const tags = tagsRaw ? tagsRaw.replace(/[[\]"']/g, "").split(/,\s*/).map((t) => t.trim()).filter(Boolean) : undefined;
-      docs.push({ id, title, body, date: parseDate(front), url: url || undefined, author: author || undefined, tags: tags?.length ? tags : undefined, path: resolve(p), readProgress: parseNum(front, "reading_progress") });
+      docs.push({ id, title, body, date: parseDate(front), url: url || undefined, source: source || undefined, siteName: siteName || undefined, arxiv: arxiv || undefined, author: author || undefined, tags: tags?.length ? tags : undefined, path: resolve(p), readProgress: parseNum(front, "reading_progress") });
     }
   };
   walk(dir);

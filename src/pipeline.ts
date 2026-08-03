@@ -8,6 +8,8 @@ import { renderHTML, type MapData } from "./render.ts";
 import { trajectory } from "./trajectory.ts";
 import { buildReport } from "./report.ts";
 import { fetchFrontier, buildGhosts } from "./frontier.ts";
+import { encodeMap } from "./mapbin.ts";
+import { type MapContract } from "./schema.ts";
 import { loadFixture, type Doc } from "./corpus.ts";
 
 // The full instrument, end to end: docs (+embeddings) -> discover axes -> card -> embed cards ->
@@ -57,6 +59,7 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
     scores,
     xy, xyz, cluster, k, di, hub, nbr, clusters, levels, counts, levelLabels, levelBlurbs,
     urls: deck.map((c) => c.url || (c.path ? "file://" + c.path : undefined)),
+    sources: deck.map((c) => c.source), siteNames: deck.map((c) => c.siteName),
     authors: deck.map((c) => c.author), tags: deck.map((c) => c.tags), dates: deck.map((c) => c.date),
     read: deck.map((c) => (c.readProgress != null ? c.readProgress > 0.05 : undefined)),
   };
@@ -78,6 +81,7 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
     } else console.error(`  no arxiv ids in corpus — frontier skipped (clean no-op)`);
   }
   writeFileSync("map-data.json", JSON.stringify(D));
+  writeFileSync("map.eido", encodeMap(D as unknown as MapContract));   // binary wire format for the deck.gl viewer (~5× smaller)
   writeFileSync("eidoscope.html", renderHTML(D));
   const state = trajectory({ dates: deck.map((c) => c.date), cluster: D.cluster, scores: D.scores, axes: D.axes, clusters });
   if (state) writeFileSync("STATE.md", state);

@@ -66,6 +66,8 @@
   const rgb = (c: [number, number, number]) => `rgb(${c[0]},${c[1]},${c[2]})`;
   const trunc = (s: string, m = 44) => (s && s.length > m ? s.slice(0, m - 1) + "…" : s);
   const regionOf = (i: number) => curClusters[assignment[i]]?.label ?? "";
+  const readerLabel = (u?: string) => (u && /readwise\.io/.test(u) ? "Readwise" : "open");
+  const sourceLabel = (i: number) => data?.siteNames?.[i] || "original";
   const dateOf = (i: number) => { const d = data?.dates?.[i]; return d ? new Date(d).toISOString().slice(0, 10) : ""; };
   const placements = (i: number) =>
     data ? data.axes.map((a) => ({ a, s: Math.round(data!.scores[a.key]?.[i] ?? 50), note: data!.notes[i]?.[a.key] || "" }))
@@ -222,7 +224,10 @@
       <button class="absolute right-3 top-3 font-mono text-[var(--faint)] hover:text-[var(--soft)]" onclick={() => focusCard(null)} aria-label="close">✕</button>
       <div class="mb-1 pr-6 font-bold">{data.titles[selected]}</div>
       <div class="mb-2 font-mono text-[10px] text-[var(--faint)]">{[data.authors?.[selected], dateOf(selected), regionOf(selected)].filter(Boolean).join(" · ")}</div>
-      {#if data.urls?.[selected]}<a class="mb-2 inline-block font-mono text-xs font-bold text-[var(--accent)] hover:underline" href={data.urls[selected]} target="_blank" rel="noopener">open source →</a>{/if}
+      <div class="mb-2 flex flex-wrap gap-3">
+        {#if data.urls?.[selected]}<a class="inline-block font-mono text-xs font-bold text-[var(--accent)] hover:underline" href={data.urls[selected]} target="_blank" rel="noopener">{readerLabel(data.urls[selected])} →</a>{/if}
+        {#if data.sources?.[selected]}<a class="inline-block font-mono text-xs font-bold text-[var(--accent)] hover:underline" href={data.sources[selected]} target="_blank" rel="noopener">{sourceLabel(selected)} →</a>{/if}
+      </div>
       <div class="mb-1 text-xs leading-relaxed text-[var(--soft)]">{data.cores[selected].slice(0, 420)}{data.cores[selected].length > 420 ? "…" : ""}</div>
 
       <div class="mt-3 mb-1 font-mono text-[10px] uppercase tracking-wide text-[var(--faint)]">where it sits</div>
@@ -259,7 +264,7 @@
           <button class="rounded-lg border border-[var(--hair)] bg-[var(--card)] p-2.5 text-left hover:border-[var(--hair2)] {data.read?.[i] === true ? 'opacity-60' : ''}" onclick={() => { focusCard(i); deckOpen = false; }}>
             <div class="flex items-start justify-between gap-2">
               <div class="truncate text-[13px] font-bold">{data.titles[i]}</div>
-              {#if data.urls?.[i]}<a href={data.urls[i]} target="_blank" rel="noopener" class="flex-none font-mono text-[10px] font-bold text-[var(--accent)] hover:underline" onclick={(e) => e.stopPropagation()}>open →</a>{/if}
+              {#if data.sources?.[i] || data.urls?.[i]}<a href={data.sources?.[i] || data.urls?.[i]} target="_blank" rel="noopener" class="flex-none font-mono text-[10px] font-bold text-[var(--accent)] hover:underline" onclick={(e) => e.stopPropagation()}>open →</a>{/if}
             </div>
             <div class="my-1 line-clamp-2 text-[11px] text-[var(--dim)]">{data.cores[i].slice(0, 160)}</div>
             <div class="flex flex-wrap gap-1">

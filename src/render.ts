@@ -13,7 +13,7 @@ export type MapData = {
   clusters: { c: number; n: number; label: string; cx: number; cy: number }[];
   levels?: number[][]; counts?: number[];   // nested grain ladder for the region-granularity slider
   levelLabels?: string[][]; levelBlurbs?: string[][]; di?: number;  // a name per region per grain level; di = default level
-  urls?: (string | undefined)[]; authors?: (string | undefined)[]; tags?: (string[] | undefined)[]; dates?: (number | undefined)[]; read?: (boolean | undefined)[];
+  urls?: (string | undefined)[]; sources?: (string | undefined)[]; siteNames?: (string | undefined)[]; authors?: (string | undefined)[]; tags?: (string[] | undefined)[]; dates?: (number | undefined)[]; read?: (boolean | undefined)[];
   cite?: number[][]; citec?: number[];  // intra-corpus citation edges + impact (frontier telescope)
   ghosts?: { title: string; arxiv: string; url: string; n: number; core: string; xy: [number, number]; sim: number }[];
 };

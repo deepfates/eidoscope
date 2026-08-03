@@ -10,7 +10,7 @@ import type { Doc } from "./corpus.ts";
 // document content + the DETERMINISTIC axis geometry (PC index + variance). PCA is deterministic, so the
 // same corpus yields the same axes every run; the LLM only relabels them, and those names are cosmetic
 // and never touch the key — so re-running the same corpus reloads every card instead of re-carding.
-export type Card = { id: string; title: string; cat?: string; date?: number; url?: string; author?: string; tags?: string[]; path?: string; readProgress?: number; core: string; axes: Record<string, { note: string }> };
+export type Card = { id: string; title: string; cat?: string; date?: number; url?: string; source?: string; siteName?: string; author?: string; tags?: string[]; path?: string; readProgress?: number; core: string; axes: Record<string, { note: string }> };
 
 export const axesPrompt = (axes: Axis[]) =>
   axes.map((a, i) => `${i + 1}. ${a.name}: low="${a.pole_low}" high="${a.pole_high}"`).join("\n");
@@ -42,7 +42,7 @@ export async function cardCorpus(docs: Doc[], axes: Axis[], opts: { llm?: any; s
     const c = cache.get(key(d)); if (!c) continue;
     const ax: Record<string, { note: string }> = {};
     axes.forEach((a, i) => { ax[a.key] = { note: String(c.placements?.[i] ?? "") }; });
-    out.push({ id: d.id, title: d.title, cat: d.cat, date: d.date, url: d.url, author: d.author, tags: d.tags, path: d.path, readProgress: d.readProgress, core: c.core, axes: ax });
+    out.push({ id: d.id, title: d.title, cat: d.cat, date: d.date, url: d.url, source: d.source, siteName: d.siteName, author: d.author, tags: d.tags, path: d.path, readProgress: d.readProgress, core: c.core, axes: ax });
   }
   return out;
 }
