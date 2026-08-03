@@ -86,6 +86,9 @@ if (hasPf) shots.push(
   { name: "34-readwise-core-zoom", caption: "Readwise — zoomed deep into the densest cluster", map: "map.eido", vp: DESKTOP, setup: async (p) => { await p.mouse.move(720, 450); for (let i = 0; i < 22; i++) { await p.mouse.wheel(0, -150); await p.waitForTimeout(25); } await settle(p, 600); } },
   { name: "35-tldr-core-zoom", caption: "tldr — zoomed deep into the densest cluster", map: "tldr.eido", vp: DESKTOP, setup: async (p) => { await p.mouse.move(720, 450); for (let i = 0; i < 22; i++) { await p.mouse.wheel(0, -150); await p.waitForTimeout(25); } await settle(p, 600); } },
   { name: "36-pf-region-zoom", caption: "Pathfinder — isolate one region, THEN zoom in: does isolate make the core legible?", map: "pathfinder.eido", vp: DESKTOP, setup: async (p) => { await btn(p, /^isolate region/).click(); await settle(p, 400); await p.mouse.move(700, 460); for (let i = 0; i < 16; i++) { await p.mouse.wheel(0, -150); await p.waitForTimeout(25); } await settle(p, 600); } },
+  // smoosh feel (eid-quf8): same mde→axes switch caught at two moments — if the cloud differs between them, it's animating, not hard-cutting
+  { name: "37-smoosh-early", caption: "Layout switch mde→axes, caught ~60ms in — if animating, points are still near the neighbor-blob, not the grid", map: "pathfinder.eido", vp: DESKTOP, setup: async (p) => { await setControl(p, "layout", "axes"); await p.waitForTimeout(60); } },
+  { name: "38-smoosh-late", caption: "Same switch caught ~450ms in — points should be further along toward the axis positions", map: "pathfinder.eido", vp: DESKTOP, setup: async (p) => { await setControl(p, "layout", "axes"); await p.waitForTimeout(450); } },
 );
 
 // ── run ────────────────────────────────────────────────────────────────────────────────────
@@ -94,7 +97,7 @@ const results: { name: string; caption: string; ok: boolean; errs: string[] }[] 
 console.log(`gallery: ${shots.length} shots → story/  (Pathfinder ${hasPf ? "included" : "MISSING — pf shots skipped"})\n`);
 for (const s of shots) {
   const vp = s.vp || DESKTOP;
-  const page = await browser.newPage({ viewport: vp, hasTouch: true });
+  const page = await browser.newPage({ viewport: vp, hasTouch: true, reducedMotion: "no-preference" });
   const errs: string[] = [];
   page.on("pageerror", (e) => errs.push(String(e)));
   page.on("console", (m) => { if (m.type() === "error") errs.push(m.text()); });
