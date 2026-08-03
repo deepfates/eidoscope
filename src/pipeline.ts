@@ -33,7 +33,11 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
   // layout+clusters are built on changes, a clean A/B on whether the card transformation helps this corpus.
   const useRaw = opts.embed === "raw";
   console.error(`[3/5] embedding ${useRaw ? "raw full text (no card bottleneck)" : "cards (restatement + placements)"} + projecting…`);
-  const embs = useRaw ? embeddings : await embedCards(deck, axes);
+  // Geometry must be built over the SAME set as identity (the deck). cardCorpus drops docs whose card
+  // failed, so `deck` can be shorter than `docs`/`embeddings` — align the raw embeddings to the deck by
+  // id (else xy/cluster get the dropped doc's row and every node-indexed array is off by one).
+  const embOfId = useRaw ? new Map(docs.map((d, i) => [d.id, embeddings[i]])) : null;
+  const embs = useRaw ? deck.map((c) => embOfId!.get(c.id)!) : await embedCards(deck, axes);
   const { xy, xyz, cluster, k, di, levels, counts, hub, nbr } = await projectAndCluster(embs);
 
   // Name EVERY grain level contrastively — the deterministic layer computes what makes each region
@@ -80,6 +84,11 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
       console.error(`  ${fr.corpusArxiv} arxiv docs · ${nEdges} citation edges · ${fr.ranked.length} frontier papers · ${D.ghosts.length} ghosts placed`);
     } else console.error(`  no arxiv ids in corpus — frontier skipped (clean no-op)`);
   }
+  // every node-indexed array must have exactly one entry per card — fail loud, never emit a broken map
+  const nNodes = D.ids.length;
+  for (const [name, arr] of ([["titles", D.titles], ["cores", D.cores], ["notes", D.notes], ["xy", D.xy], ["xyz", D.xyz], ["cluster", D.cluster], ["hub", D.hub], ["nbr", D.nbr]] as [string, unknown[]][]))
+    if (arr.length !== nNodes) throw new Error(`emit invariant violated: ${name}.length=${arr.length} != ids.length=${nNodes} (a node-indexed array is misaligned)`);
+  for (const key of Object.keys(D.scores)) if (D.scores[key].length !== nNodes) throw new Error(`emit invariant violated: scores.${key}.length=${D.scores[key].length} != ids.length=${nNodes}`);
   // provenance — so a passed-around file introduces itself (what corpus, from where, when, how big)
   (D as any).provenance = { title: opts.name || "Corpus", source: opts.source, generated: Date.now(), count: D.ids.length };
   writeFileSync("map-data.json", JSON.stringify(D));
