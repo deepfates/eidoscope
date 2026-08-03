@@ -190,6 +190,7 @@
   const xAxis = $derived(data?.axes.find((a) => a.key === xKey));
   const yAxis = $derived(data?.axes.find((a) => a.key === yKey));
   const hint = $derived(layout === "axes" ? "positioned by where each card projects on the two axes" : layout === "orbit" ? "drag to rotate · pinch to zoom" : "proximity = similarity · tap a card");
+  const weakAxes = $derived(layout === "axes" ? (xAxis?.weak ? 1 : 0) + (yAxis?.weak ? 1 : 0) : 0);
 </script>
 
 <div class="relative h-screen w-screen overflow-hidden bg-[var(--bg)] text-[var(--ink)] touch-none">
@@ -234,6 +235,7 @@
           <select bind:value={xKey} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">{#each data.axes as a}<option value={a.key}>{axl(a)}</option>{/each}</select></label>
         <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">y-axis</span>
           <select bind:value={yKey} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">{#each data.axes as a}<option value={a.key}>{axl(a)}</option>{/each}</select></label>
+        {#if weakAxes}<div class="mb-1.5 rounded-md bg-[var(--chip2)] px-2 py-1 text-[10px] leading-snug text-[var(--dim)]">~ {weakAxes > 1 ? "both are minor axes" : "a minor axis"} (under 2% variance) — position is thin, read it loosely</div>{/if}
       {/if}
       <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">color</span>
         <select bind:value={color} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">
