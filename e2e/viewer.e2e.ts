@@ -96,6 +96,7 @@ const st = () => p.evaluate(() => (window as any).__eido());
 const proj = (xy: number[]) => p.evaluate((xy) => (window as any).__eidoProject(xy) as number[], xy);
 const setGrain = (v: number) => p.evaluate((v) => { const s = document.querySelector('input[type=range]') as HTMLInputElement; const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!; set.call(s, String(v)); s.dispatchEvent(new Event("input", { bubbles: true })); }, v);
 const btn = (re: RegExp) => p.locator("button", { hasText: re }).first();
+const setControl = (label: string, value: string) => p.evaluate(([label, value]) => { const l = [...document.querySelectorAll("label")].find((l) => l.querySelector("span")?.textContent?.trim() === label); const s = l?.querySelector("select") as HTMLSelectElement | undefined; if (!s) return; const set = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!; set.call(s, value); s.dispatchEvent(new Event("change", { bubbles: true })); }, [label, value] as [string, string]);
 // deck's onClick fires the SAME way for a desktop mouse click and a touch tap; Playwright can't cleanly
 // drive deck's mouse-gesture recognizer (a harness limit), but touchscreen.tap reaches it reliably — so a
 // tap is the honest proxy for "click/tap a card". Single-click card-open is debounced 220ms behind a
@@ -195,6 +196,19 @@ try {
   ok((await st()).deckOpen === true, "deck opens (pushes history)");
   await p.goBack(); await p.waitForTimeout(300);
   ok((await st()).deckOpen === false, "browser Back closes the deck — mobile back gesture escapes the modal (eid-fktf)");
+
+  // 11c. DEEP-LINK: view state mirrors to the URL, and a link restores it (incl. a specific card) — eid-yxqu
+  await btn(/^reset$/).click(); await p.waitForTimeout(150);
+  await setControl("layout", "axes"); await setGrain(0); await p.waitForTimeout(250);
+  let url = new URL(p.url());
+  ok(url.searchParams.get("layout") === "axes" && url.searchParams.get("grain") === "0", `view state mirrors to URL — ${url.search}`);
+  // a shared link with a layout + a specific card restores both
+  await p.goto(`${base}/index.html?layout=axes&card=d5`);
+  await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
+  await p.waitForTimeout(500);
+  s = await st();
+  ok(s.layout === "axes", `?layout=axes restores the layout — got ${s.layout}`);
+  ok(s.detail === true && s.focus === 5, `?card=d5 deep-links straight to that card — detail=${s.detail} focus=${s.focus}`);
 
   // 12. ?map= loads a DIFFERENT corpus from the SAME built viewer (the dual-deploy path)
   await p.goto(base + "/index.html?map=alt.eido");

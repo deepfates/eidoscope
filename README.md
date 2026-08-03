@@ -111,6 +111,11 @@ python3 -m http.server --directory dist 8000 # open http://localhost:8000
 One build serves several corpora: **`?map=<name>.eido`** loads any sibling `.eido` next to `index.html`
 (defaults to `./map.eido`) — e.g. drop `pathfinder.eido` in and open `?map=pathfinder.eido`.
 
+**Every view is a link.** The URL mirrors the current state — layout, colour, size, grain, chosen
+axes, isolated region, and the open card — so any view is shareable and a reload restores it. Deep-link
+straight to a card with **`?card=<id>`** (e.g. `?map=pathfinder.eido&card=<id>`); the browser Back button
+(and the mobile back gesture) steps out of the deck/detail and undoes navigation.
+
 ### The `.eido` seam
 
 The pipeline emits `map.eido`: a gzipped binary of the **`MapContract`** (`src/schema.ts`). Numeric

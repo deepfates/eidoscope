@@ -87,6 +87,39 @@
   function focusCard(i: number | null) { selected = i; handle?.setFocus(i); }
   function reset() { focusCard(null); pinned = null; handle?.setHighlight(null); grain = data?.di ?? 0; handle?.resetView(); }
 
+  // deep-linkable view state (eid-yxqu): the URL always mirrors the current view, so any view — or a
+  // specific card — is a shareable link and a reload restores it. replaceState (not push) so it doesn't
+  // fight the overlay history (fktf); the ?map= param is preserved.
+  let urlReady = false;
+  function serializeUrl(): string {
+    const p = new URLSearchParams();
+    const m = new URLSearchParams(location.search).get("map"); if (m) p.set("map", m);
+    if (layout !== "mde") p.set("layout", layout);
+    if (color !== "cluster") p.set("color", color);
+    if (size !== "hub") p.set("size", size);
+    if (data && grain !== (data.di ?? 0)) p.set("grain", String(grain));
+    if (layout === "axes") { if (xKey) p.set("x", xKey); if (yKey) p.set("y", yKey); }
+    if (pinned !== null) p.set("region", String(pinned));
+    if (selected !== null && data) p.set("card", data.ids[selected]);
+    const q = p.toString();
+    return location.pathname + (q ? "?" + q : "");
+  }
+  function applyUrlState() {
+    const p = new URLSearchParams(location.search);
+    const L = p.get("layout"); if (L === "mde" || L === "axes" || L === "orbit") layout = L;
+    const c = p.get("color"); if (c) color = c;
+    const s = p.get("size"); if (s) size = s;
+    const x = p.get("x"); if (x) xKey = x;
+    const y = p.get("y"); if (y) yKey = y;
+    const g = p.get("grain"); if (g && !Number.isNaN(+g)) grain = Math.max(0, Math.min((data?.counts?.length ?? 1) - 1, Math.round(+g)));
+    // region + card depend on grain-derived state, so apply once the reactive graph has settled
+    queueMicrotask(() => {
+      const r = p.get("region"); if (r && !Number.isNaN(+r) && +r >= 0 && +r < curCount) togglePin(+r);
+      const card = p.get("card"); if (card && data) { const i = data.ids.indexOf(card); if (i >= 0) focusCard(i); }
+    });
+  }
+  $effect(() => { void [layout, color, size, grain, xKey, yKey, pinned, selected]; if (urlReady) { try { history.replaceState(history.state, "", serializeUrl()); } catch {} } });
+
   onMount(() => {
     try {
       const saved = localStorage.getItem("eido-theme");
@@ -114,6 +147,7 @@
         (window as any).__eido = () => { const d = handle?.debug(); return { grain, k: curCount, layout, color, pin: pinned, focus: selected, detail: selected !== null, deckOpen, cite: citeOn, ghosts: ghostsOn, theme, hover: hovered ? hovered.kind : null, zoom: d?.zoom ?? 0, labels: d?.labels ?? 0, regions: d?.regions ?? 0 }; };
         (window as any).__eidoProject = (xy: number[]) => handle?.project(xy);
         (window as any).__eidoPick = (x: number, y: number) => handle?.pickAt(x, y);
+        applyUrlState(); urlReady = true;  // restore any deep-linked view/card, then start mirroring state → URL
       } catch (e: any) {
         status = "couldn't load map: " + (e?.message ?? e);
       }
