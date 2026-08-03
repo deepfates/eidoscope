@@ -205,7 +205,7 @@
       {#if legendOpen}
         <div class="min-h-0 overflow-auto">
         {#if color === "cluster"}
-          {#each curClusters as c}<div class="flex cursor-pointer items-center gap-2 py-0.5 hover:text-[var(--ink)] {pinned === c.c ? 'text-white' : ''}" role="button" tabindex="0" aria-label="isolate region {c.label}" aria-pressed={pinned === c.c} onmouseenter={() => { if (pinned === null) handle?.setHighlight(c.c); }} onmouseleave={() => { if (pinned === null) handle?.setHighlight(null); }} onclick={() => togglePin(c.c)} onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); togglePin(c.c); } }}><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(col(c.c))}"></span><span class="truncate">{c.label} <span class="text-[var(--faint)]">{c.n}</span></span></div>{/each}
+          {#each curClusters as c}<div class="flex cursor-pointer items-center gap-2 py-0.5 hover:text-[var(--ink)] {pinned === c.c ? 'text-[var(--ink)] font-semibold' : ''}" role="button" tabindex="0" aria-label="isolate region {c.label}" aria-pressed={pinned === c.c} onmouseenter={() => { if (pinned === null) handle?.setHighlight(c.c); }} onmouseleave={() => { if (pinned === null) handle?.setHighlight(null); }} onclick={() => togglePin(c.c)} onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); togglePin(c.c); } }}><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(col(c.c))}"></span><span class="truncate">{c.label} <span class="text-[var(--faint)]">{c.n}</span></span></div>{/each}
         {:else if curFacet}
           {#each curFacet.ord.slice(0, 16) as v}<div class="flex items-center gap-2 py-0.5"><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(col(curFacet.idx[v]))}"></span><span class="truncate">{v} <span class="text-[var(--faint)]">{curFacet.cnt[v]}</span></span></div>{/each}
           {#if curFacet.ord.length > 16}<div class="text-[var(--faint)]">+{curFacet.ord.length - 16} more</div>{/if}
@@ -219,7 +219,7 @@
 
     <div class="pointer-events-none absolute bottom-3 left-1/2 hidden -translate-x-1/2 whitespace-nowrap font-mono text-[11px] text-[var(--faint)] sm:block">{hint}</div>
     {#if selected === null && !deckOpen}
-      <div class="pointer-events-none absolute bottom-3 right-56 hidden font-mono text-[10px] text-[var(--faint)] sm:block">{data.ids.length} cards · {layout} · {sizeLabel}</div>
+      <div class="pointer-events-none absolute bottom-3 right-56 hidden font-mono text-[10px] text-[var(--faint)] min-[980px]:block">{data.ids.length} cards · {layout} · {sizeLabel}</div>
     {/if}
   {/if}
 
@@ -280,6 +280,7 @@
         <button class="font-mono text-[var(--faint)] hover:text-[var(--soft)]" onclick={() => (deckOpen = false)} aria-label="close deck">✕</button>
       </div>
       <div class="grid grid-cols-1 gap-2 overflow-auto sm:grid-cols-2">
+        {#if deckList.length === 0}<div class="col-span-full py-16 text-center font-mono text-xs text-[var(--faint)]">no cards match “{deckQ}”{deckUnread ? " (unread only)" : ""}</div>{/if}
         {#each deckList as i (i)}
           <button class="rounded-lg border border-[var(--hair)] bg-[var(--card)] p-2.5 text-left hover:border-[var(--hair2)] {data.read?.[i] === true ? 'opacity-60' : ''}" onclick={() => { focusCard(i); deckOpen = false; }}>
             <div class="flex items-start justify-between gap-2">
