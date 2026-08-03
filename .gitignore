@@ -19,3 +19,14 @@ s2-abs-cache.json
 .env
 REPORT.md
 story/*.png
+
+# generated maps, caches, deploy scratch (artifacts, not source)
+/map.eido
+/map-data.json
+/map*.bak.json
+/map-data.*.json
+/map.readwise-frontier.eido
+/pathfinder.eido
+/card-cache.jsonl
+/region-cache.jsonl
+/viewer/dist-pathfinder/
