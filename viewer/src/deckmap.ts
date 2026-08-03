@@ -72,7 +72,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   const bb = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
   for (const [x, y] of D.xy) { if (x < bb.minX) bb.minX = x; if (x > bb.maxX) bb.maxX = x; if (y < bb.minY) bb.minY = y; if (y > bb.maxY) bb.maxY = y; }
   const span = Math.max(bb.maxX - bb.minX, bb.maxY - bb.minY) || 2;
-  const fitZoom = Math.log2((Math.min(window.innerWidth, window.innerHeight) * 0.85) / span);
+  const fitZoom = Math.log2((Math.min(window.innerWidth, window.innerHeight) * 0.92) / span);  // fill more of the canvas (a square-ish cloud can't fill a wide screen without cropping data, which we won't do)
   const home = (l: Layout): any => l === "orbit"
     ? { target: [0, 0, 0], zoom: fitZoom - 0.5, rotationOrbit: 20, rotationX: 25, minZoom: fitZoom - 3, maxZoom: fitZoom + 9 }
     : l === "axes"
