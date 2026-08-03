@@ -36,7 +36,13 @@
   const hasCite = $derived(!!data?.cite?.some((e) => e.length));
   const hasGhosts = $derived(!!data?.ghosts?.length);
   const sizeLabel = $derived(size === "hub" ? "influence" : size === "uniform" ? "uniform" : "axis");
-  function dismissIntro() { showIntro = false; try { localStorage.setItem("eido-seen", "1"); } catch {} }
+  // history-synced overlays (eid-fktf): opening an overlay pushes a history entry, so Back — and the
+  // mobile back gesture — closes the topmost one (the only intuitive way to escape deck/detail on a phone).
+  let overlayPushed = false;
+  function doCloseOverlays() { if (showIntro) { try { localStorage.setItem("eido-seen", "1"); } catch {} } showIntro = false; deckOpen = false; if (selected !== null) focusCard(null); }
+  function requestClose() { if (overlayPushed) { try { history.back(); return; } catch {} } doCloseOverlays(); }
+  function dismissIntro() { requestClose(); }
+  $effect(() => { const anyOpen = showIntro || deckOpen || selected !== null; if (anyOpen && !overlayPushed) { try { history.pushState({ eido: 1 }, ""); } catch {} overlayPushed = true; } });
   const hasRead = $derived(!!data?.read?.some((r) => r === true || r === false));
   const axShort = (name: string) => name.split(/ vs\.? | and /i)[0].slice(0, 15);
   const deckList = $derived.by(() => {
@@ -112,14 +118,11 @@
         status = "couldn't load map: " + (e?.message ?? e);
       }
     })();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape") return;
-      if (showIntro) dismissIntro();
-      else if (deckOpen) deckOpen = false;
-      else if (selected !== null) focusCard(null);
-    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") requestClose(); };
+    const onPop = () => { overlayPushed = false; doCloseOverlays(); };  // Back / mobile back gesture closes the overlay
     window.addEventListener("keydown", onKey);
-    return () => { handle?.destroy(); window.removeEventListener("keydown", onKey); };
+    window.addEventListener("popstate", onPop);
+    return () => { handle?.destroy(); window.removeEventListener("keydown", onKey); window.removeEventListener("popstate", onPop); };
   });
 
   $effect(() => {
@@ -244,7 +247,7 @@
   <!-- detail panel -->
   {#if selected !== null && data}
     <div class="absolute bottom-3 left-3 right-3 max-h-[64vh] overflow-auto rounded-xl border border-[var(--hair)] bg-[var(--panel)] p-4 text-sm backdrop-blur sm:right-auto sm:w-80">
-      <button class="absolute right-3 top-3 font-mono text-[var(--faint)] hover:text-[var(--soft)]" onclick={() => focusCard(null)} aria-label="close">✕</button>
+      <button class="absolute right-3 top-3 font-mono text-[var(--faint)] hover:text-[var(--soft)]" onclick={() => requestClose()} aria-label="close">✕</button>
       <div class="mb-1 pr-6 font-bold">{data.titles[selected]}</div>
       <div class="mb-2 font-mono text-[10px] text-[var(--faint)]">{[data.authors?.[selected], dateOf(selected), regionOf(selected)].filter(Boolean).join(" · ")}</div>
       <div class="mb-2 flex flex-wrap gap-3">
@@ -280,7 +283,7 @@
           </select></label>
         {#if hasRead}<button class="rounded-md border border-[var(--hair2)] px-2 py-1 font-mono text-[11px] {deckUnread ? 'bg-[var(--chip)] text-[var(--ink)]' : 'text-[var(--faint)]'}" onclick={() => (deckUnread = !deckUnread)}>unread only</button>{/if}
         <input bind:value={deckQ} placeholder="filter…" class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--card)] px-2 py-1 text-xs" />
-        <button class="font-mono text-[var(--faint)] hover:text-[var(--soft)]" onclick={() => (deckOpen = false)} aria-label="close deck">✕</button>
+        <button class="font-mono text-[var(--faint)] hover:text-[var(--soft)]" onclick={() => requestClose()} aria-label="close deck">✕</button>
       </div>
       <div class="grid grid-cols-1 gap-2 overflow-auto sm:grid-cols-2">
         {#if deckList.length === 0}<div class="col-span-full py-16 text-center font-mono text-xs text-[var(--faint)]">no cards match “{deckQ}”{deckUnread ? " (unread only)" : ""}</div>{/if}

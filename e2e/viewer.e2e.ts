@@ -189,6 +189,13 @@ try {
   await btn(/^reset$/).click(); await p.waitForTimeout(250); s = await st();
   ok(s.grain === 2 && s.pin === null && s.focus === null && s.detail === false, `reset restores default grain + clears pin/focus/detail — ${JSON.stringify({ grain: s.grain, pin: s.pin, focus: s.focus, detail: s.detail })}`);
 
+  // 11b. HISTORY: browser Back closes an open overlay (the mobile-escape fix, eid-fktf)
+  await btn(/^reset$/).click(); await p.waitForTimeout(150);
+  await btn(/^deck$/).click(); await p.waitForTimeout(200);
+  ok((await st()).deckOpen === true, "deck opens (pushes history)");
+  await p.goBack(); await p.waitForTimeout(300);
+  ok((await st()).deckOpen === false, "browser Back closes the deck — mobile back gesture escapes the modal (eid-fktf)");
+
   // 12. ?map= loads a DIFFERENT corpus from the SAME built viewer (the dual-deploy path)
   await p.goto(base + "/index.html?map=alt.eido");
   await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
