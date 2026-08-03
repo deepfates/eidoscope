@@ -76,7 +76,7 @@ nothing here may be silently dropped. `[ ]` = not yet ported, `[x]` = ported + v
 ## Touch / mobile (must feel good — the reason for the rewrite)
 - [~] One-finger **pan** (rotate in orbit), two-finger **pinch-zoom** with inertia (deck controller). _(deck.gl controller provides it; pan measured, pinch needs a real touch device.)_
 - [x] **Tap** opens a card; finger-sized targets.
-- [ ] **Responsive layout** — a dedicated mobile pass for the new viewer is still TODO (folded into the design pass eid-imbx).
+- [x] **Responsive layout** — control panel + legend collapse to a small bar on ≤640px (default collapsed so the map is the hero; tap to expand), panel width clamps to the viewport, the decorative hint hides on mobile, detail panel is a full-width bottom sheet. Verified by measurement at 375px (collapsed default, toggle works, 198px fits) and 713px (expanded default).
 
 ## Accessibility
 - [x] Keyboard operable end-to-end; ARIA on all controls (accessible dropdowns/slider/dialog).

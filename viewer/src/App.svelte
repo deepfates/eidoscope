@@ -29,6 +29,8 @@
   let citeOn = $state(false);
   let ghostsOn = $state(false);
   let theme = $state<"dark" | "light">("dark");
+  let panelOpen = $state(true);   // control panel + legend collapse on small screens so the map is the hero
+  let legendOpen = $state(true);
   function setTheme(t: "dark" | "light", persist = true) { theme = t; document.documentElement.dataset.theme = t; if (persist) try { localStorage.setItem("eido-theme", t); } catch {} }
   function toggleTheme() { setTheme(theme === "dark" ? "light" : "dark"); }
   const hasCite = $derived(!!data?.cite?.some((e) => e.length));
@@ -85,6 +87,7 @@
       if (saved === "light" || saved === "dark") setTheme(saved, false);
       else theme = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
     } catch {}
+    try { if (matchMedia("(max-width: 640px)").matches) { panelOpen = false; legendOpen = false; } } catch {}
     (async () => {
       try {
         const D = await loadMap("./map.eido");
@@ -122,6 +125,7 @@
   $effect(() => { const q = query, h = handle; if (h) h.setQuery(q); }); // search dims non-matching map points
 
   const curFacet = $derived(fac.find((f) => "meta:" + f.key === color));
+  const legendAxis = $derived(data?.axes.find((x) => x.key === color));
   const xAxis = $derived(data?.axes.find((a) => a.key === xKey));
   const yAxis = $derived(data?.axes.find((a) => a.key === yKey));
   const hint = $derived(layout === "axes" ? "positioned by where each card projects on the two axes" : layout === "orbit" ? "drag to rotate · pinch to zoom" : "proximity = similarity · tap a card");
@@ -142,11 +146,12 @@
       </div>
     {/if}
 
-    <div class="absolute left-3 top-3 w-56 rounded-xl border border-[var(--hair)] bg-[var(--panel)] p-3 backdrop-blur">
-      <div class="mb-2 flex items-center justify-between">
-        <span class="font-mono text-[10px] uppercase tracking-widest text-[var(--faint)]">eidoscope 🔭</span>
+    <div class="absolute left-3 top-3 w-[min(14rem,calc(100vw-1.5rem))] rounded-xl border border-[var(--hair)] bg-[var(--panel)] p-3 backdrop-blur">
+      <div class="flex items-center justify-between gap-2 {panelOpen ? 'mb-2' : ''}">
+        <button class="flex items-center gap-1 font-mono text-[10px] uppercase tracking-widest text-[var(--faint)] hover:text-[var(--ink)]" onclick={() => (panelOpen = !panelOpen)} aria-expanded={panelOpen} aria-label="{panelOpen ? 'collapse' : 'expand'} controls"><span class="text-[9px]">{panelOpen ? "▾" : "▸"}</span> eidoscope 🔭</button>
         <button class="rounded-md border border-[var(--hair)] px-1.5 py-0.5 text-[11px] leading-none hover:bg-[var(--chip)]" onclick={toggleTheme} aria-label="toggle light or dark theme" title="toggle theme">{theme === "dark" ? "☾" : "☀"}</button>
       </div>
+      {#if panelOpen}
       <div class="mb-2 text-xs text-[var(--dim)]">{data.ids.length} cards · {data.k} regions</div>
       <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">layout</span>
         <select bind:value={layout} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">
@@ -185,27 +190,32 @@
           {#if hasGhosts}<button class="flex-1 rounded-md border border-[var(--hair2)] px-2 py-1 font-mono text-[11px] {ghostsOn ? 'bg-[var(--chip)] text-[var(--ink)]' : 'text-[var(--faint)]'}" onclick={() => (ghostsOn = !ghostsOn)}>frontier</button>{/if}
         </div>
       {/if}
-    </div>
-
-    <div class="absolute bottom-3 right-3 max-h-[48vh] w-52 overflow-auto rounded-xl border border-[var(--hair)] bg-[var(--panel)] p-2.5 text-xs backdrop-blur">
-      {#if color === "cluster"}
-        <div class="mb-1.5 font-mono text-[10px] uppercase text-[var(--faint)]">{curCount} regions · click to isolate</div>
-        {#each curClusters as c}<div class="flex cursor-pointer items-center gap-2 py-0.5 hover:text-[var(--ink)] {pinned === c.c ? 'text-white' : ''}" role="button" tabindex="0" aria-label="isolate region {c.label}" aria-pressed={pinned === c.c} onmouseenter={() => { if (pinned === null) handle?.setHighlight(c.c); }} onmouseleave={() => { if (pinned === null) handle?.setHighlight(null); }} onclick={() => togglePin(c.c)} onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); togglePin(c.c); } }}><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(col(c.c))}"></span><span class="truncate">{c.label} <span class="text-[var(--faint)]">{c.n}</span></span></div>{/each}
-      {:else if curFacet}
-        <div class="mb-1.5 font-mono text-[10px] uppercase text-[var(--faint)]">{curFacet.label} · {curFacet.ord.length}</div>
-        {#each curFacet.ord.slice(0, 16) as v}<div class="flex items-center gap-2 py-0.5"><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(col(curFacet.idx[v]))}"></span><span class="truncate">{v} <span class="text-[var(--faint)]">{curFacet.cnt[v]}</span></span></div>{/each}
-        {#if curFacet.ord.length > 16}<div class="text-[var(--faint)]">+{curFacet.ord.length - 16} more</div>{/if}
-      {:else}
-        {@const a = data.axes.find((x) => x.key === color)}
-        {#if a}<div class="mb-1.5 font-mono text-[10px] uppercase text-[var(--faint)]">{a.name}</div>
-          <div class="flex items-center gap-2 py-0.5"><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(axisColor(0))}"></span>{a.low}</div>
-          <div class="flex items-center gap-2 py-0.5"><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(axisColor(1))}"></span>{a.high}</div>{/if}
       {/if}
     </div>
 
-    <div class="pointer-events-none absolute bottom-3 left-1/2 -translate-x-1/2 font-mono text-[11px] text-[var(--faint)]">{hint}</div>
+    <div class="absolute bottom-3 right-3 flex max-h-[44vh] w-[min(13rem,62vw)] flex-col overflow-hidden rounded-xl border border-[var(--hair)] bg-[var(--panel)] p-2.5 text-xs backdrop-blur">
+      <button class="flex w-full flex-none items-center gap-1 font-mono text-[10px] uppercase text-[var(--faint)] hover:text-[var(--ink)] {legendOpen ? 'mb-1.5' : ''}" onclick={() => (legendOpen = !legendOpen)} aria-expanded={legendOpen} aria-label="{legendOpen ? 'collapse' : 'expand'} legend">
+        <span class="text-[9px]">{legendOpen ? "▾" : "▸"}</span>
+        <span class="truncate">{#if color === "cluster"}{curCount} regions{#if legendOpen}<span class="normal-case text-[var(--faint)]"> · click to isolate</span>{/if}{:else if curFacet}{curFacet.label} · {curFacet.ord.length}{:else if legendAxis}{legendAxis.name}{:else}legend{/if}</span>
+      </button>
+      {#if legendOpen}
+        <div class="min-h-0 overflow-auto">
+        {#if color === "cluster"}
+          {#each curClusters as c}<div class="flex cursor-pointer items-center gap-2 py-0.5 hover:text-[var(--ink)] {pinned === c.c ? 'text-white' : ''}" role="button" tabindex="0" aria-label="isolate region {c.label}" aria-pressed={pinned === c.c} onmouseenter={() => { if (pinned === null) handle?.setHighlight(c.c); }} onmouseleave={() => { if (pinned === null) handle?.setHighlight(null); }} onclick={() => togglePin(c.c)} onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); togglePin(c.c); } }}><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(col(c.c))}"></span><span class="truncate">{c.label} <span class="text-[var(--faint)]">{c.n}</span></span></div>{/each}
+        {:else if curFacet}
+          {#each curFacet.ord.slice(0, 16) as v}<div class="flex items-center gap-2 py-0.5"><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(col(curFacet.idx[v]))}"></span><span class="truncate">{v} <span class="text-[var(--faint)]">{curFacet.cnt[v]}</span></span></div>{/each}
+          {#if curFacet.ord.length > 16}<div class="text-[var(--faint)]">+{curFacet.ord.length - 16} more</div>{/if}
+        {:else if legendAxis}
+          <div class="flex items-center gap-2 py-0.5"><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(axisColor(0))}"></span>{legendAxis.low}</div>
+          <div class="flex items-center gap-2 py-0.5"><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(axisColor(1))}"></span>{legendAxis.high}</div>
+        {/if}
+        </div>
+      {/if}
+    </div>
+
+    <div class="pointer-events-none absolute bottom-3 left-1/2 hidden -translate-x-1/2 whitespace-nowrap font-mono text-[11px] text-[var(--faint)] sm:block">{hint}</div>
     {#if selected === null && !deckOpen}
-      <div class="pointer-events-none absolute bottom-3 right-56 font-mono text-[10px] text-[var(--faint)]">{data.ids.length} cards · {layout} · {sizeLabel}</div>
+      <div class="pointer-events-none absolute bottom-3 right-56 hidden font-mono text-[10px] text-[var(--faint)] sm:block">{data.ids.length} cards · {layout} · {sizeLabel}</div>
     {/if}
   {/if}
 
