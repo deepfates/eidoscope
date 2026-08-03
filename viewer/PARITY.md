@@ -38,7 +38,7 @@ nothing here may be silently dropped. `[ ]` = not yet ported, `[x]` = ported + v
 
 ## Regions
 - [x] **Convex-hull** highlight around an isolated region.
-- [x] **On-map labels** at region centroids, collision-decluttered (deck TextLayer collision filter), **toggle on/off**.
+- [x] **On-map labels** at region centroids, **width-aware** collision-declutter (each label modeled as an AABB sized by character count, so long region names at fine grain no longer overlap; on-map text truncated to ~26 chars with the full name in the legend/detail), **toggle on/off**.
 - [x] **Legend**: region list with counts + colors + blurb on hover; header states the interaction ("click to isolate + zoom").
 - [x] Colourblind-safe palette; identity carried by position + labels + isolate (colours cycle past ~8 — that's accepted, not a bug).
 

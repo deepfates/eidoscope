@@ -78,10 +78,18 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   const centroid = (idx: number[]): [number, number] => { let x = 0, y = 0; for (const i of idx) { const p = pos(i); x += p[0]; y += p[1]; } return [x / (idx.length || 1), y / (idx.length || 1)]; };
   // greedy declutter: biggest regions first, skip any whose centroid is too close to one already placed
   // (world-space — deck's CollisionFilterExtension culled everything). Recomputed per layout via posVer.
+  // Greedy world-space declutter, WIDTH-AWARE: model each label as an axis-aligned box whose width grows
+  // with its character count (the old circle-distance test ignored text width, so long region names at
+  // fine grain overlapped and clipped off-screen). On-map labels are truncated so a wide name near the
+  // edge can't run past the viewport — the full name lives in the legend + detail panel.
+  const dispLabel = (s: string) => (s.length > 26 ? s.slice(0, 25) + "…" : s);
   const decluttered = () => {
-    const cand = members.map((idx, c) => ({ c, label: labelOf(c), n: idx.length, p: centroid(idx) })).filter((d) => d.n > 0 && d.label).sort((a, b) => b.n - a.n);
-    const placed: typeof cand = []; const minD = span * 0.13;
-    for (const d of cand) if (placed.every((q) => Math.hypot(q.p[0] - d.p[0], q.p[1] - d.p[1]) > minD)) placed.push(d);
+    const cand = members.map((idx, c) => ({ c, label: dispLabel(labelOf(c)), n: idx.length, p: centroid(idx) })).filter((d) => d.n > 0 && d.label).sort((a, b) => b.n - a.n);
+    const charW = span / 90;                                  // ~ world units per character at the fit view
+    const hw = (len: number) => (len * charW) / 2 + charW;    // label half-width (+1 char of padding)
+    const hh = charW * 1.5;                                   // label half-height (line box)
+    const placed: typeof cand = [];
+    for (const d of cand) if (placed.every((q) => Math.abs(q.p[0] - d.p[0]) > hw(q.label.length) + hw(d.label.length) || Math.abs(q.p[1] - d.p[1]) > 2 * hh)) placed.push(d);
     return placed;
   };
   const dimSet = () => (focus != null ? fSet : highlight != null ? new Set(members[highlight]) : null);
