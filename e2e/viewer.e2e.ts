@@ -219,6 +219,18 @@ try {
   await p.keyboard.press("Tab"); await p.keyboard.press("Tab"); await p.keyboard.press("Tab"); await p.waitForTimeout(100);
   ok(await inDeck(), "Tab keeps focus trapped inside the deck (eid-vxm2)");
 
+  // 11e. FACET ISOLATE: colour by a facet, click a facet legend row → isolates just that value (eid-zvh9)
+  await p.goto(`${base}/index.html`); await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
+  await btn(/explore/i).click().catch(() => {}); await p.waitForTimeout(150);
+  await setControl("color", "meta:author"); await p.waitForTimeout(250);
+  const facetRow = p.locator('[role="button"][aria-label^="isolate source"]').first();
+  await facetRow.click(); await p.waitForTimeout(250);
+  let fs = await st();
+  ok(fs.facetPin != null, `clicking a facet legend row isolates that value — facetPin=${JSON.stringify(fs.facetPin)}`);
+  await facetRow.click(); await p.waitForTimeout(250);
+  fs = await st();
+  ok(fs.facetPin == null, `re-clicking releases the facet isolate — facetPin=${JSON.stringify(fs.facetPin)}`);
+
   // 12. ?map= loads a DIFFERENT corpus from the SAME built viewer (the dual-deploy path)
   await p.goto(base + "/index.html?map=alt.eido");
   await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });

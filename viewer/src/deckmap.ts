@@ -14,6 +14,7 @@ export type MapHandle = {
   update: (o: Partial<Opts>) => void;
   setFocus: (i: number | null) => void;
   setHighlight: (c: number | null) => void;
+  setHighlightSet: (idx: number[] | null, color: RGB | null) => void;
   setQuery: (q: string) => void;
   fitToIndices: (idx: number[]) => void;
   resetView: () => void;
@@ -41,6 +42,8 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   let colorVer = 0, sizeVer = 0, posVer = 0;
   let focus: number | null = null, fSet: Set<number> | null = null;
   let highlight: number | null = null;
+  let highlightSet: Set<number> | null = null;   // isolate an arbitrary set (a facet value, e.g. a folder), not just a cluster
+  let highlightSetColor: RGB = [255, 255, 255];
   let queryMatch: Set<number> | null = null;
   let citeOn = init.citeOn ?? false, ghostsOn = init.ghostsOn ?? false;
   let clickTimer: ReturnType<typeof setTimeout> | null = null;  // single-click card-open, cancelled by a double-click (drill)
@@ -107,7 +110,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     for (const d of placed as any[]) { const sx = W / 2 + (d.p[0] - tx) * scale, vw = (d.label.length * charPx) / 2 + 4; d.dx = sx - vw < 6 ? 6 - (sx - vw) : sx + vw > W - 6 ? (W - 6) - (sx + vw) : 0; }
     return placed;
   };
-  const dimSet = () => (focus != null ? fSet : highlight != null ? new Set(members[highlight]) : null);
+  const dimSet = () => (focus != null ? fSet : highlightSet ? highlightSet : highlight != null ? new Set(members[highlight]) : null);
   // a point dims if excluded by the active focus/highlight isolate OR by the search query
   const isDim = (index: number) => { const ds = dimSet(); if (ds && !ds.has(index)) return true; if (queryMatch && !queryMatch.has(index)) return true; return false; };
 
@@ -129,13 +132,19 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     getColor: spokeCol(), getWidth: 1,
     updateTriggers: { getSourcePosition: [posVer], getTargetPosition: [posVer], getColor: themeVer },
   });
-  const hullLayer = () => new PolygonLayer({
+  const hullPts = (): number[][] | null => {
+    if (layout === "orbit") return null;
+    const idx = highlightSet ? [...highlightSet] : highlight != null ? members[highlight] : null;
+    return idx && idx.length >= 3 ? hull2d(idx.map((i) => pos(i))) : null;
+  };
+  const hullColor = (): RGB => (highlightSet ? highlightSetColor : col(highlight ?? 0));
+  const hullLayer = () => { const h = hullPts(); return new PolygonLayer({
     id: "hull",
-    data: highlight == null || layout === "orbit" ? [] : [hull2d(members[highlight].map((i) => pos(i)))],
+    data: h ? [h] : [],
     getPolygon: (d: any) => d, stroked: true, filled: true,
-    getFillColor: [...col(highlight ?? 0), 22] as any, getLineColor: [...col(highlight ?? 0), 150] as any, getLineWidth: 1.5, lineWidthUnits: "pixels",
-    updateTriggers: { data: [highlight, posVer], getFillColor: highlight, getLineColor: highlight },
-  });
+    getFillColor: [...hullColor(), 22] as any, getLineColor: [...hullColor(), 150] as any, getLineWidth: 1.5, lineWidthUnits: "pixels",
+    updateTriggers: { data: [highlight, highlightSet, posVer], getFillColor: [highlight, highlightSet], getLineColor: [highlight, highlightSet] },
+  }); };
   const labelLayer = () => new TextLayer({
     id: "labels",
     data: decluttered(),
@@ -166,7 +175,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     updateTriggers: { getLineColor: themeVer },
   });
   const layers = () => [
-    ...(highlight != null ? [hullLayer()] : []),
+    ...(highlight != null || highlightSet ? [hullLayer()] : []),
     ...(citeOn && D.cite ? [citeLayer()] : []),
     ...(focus != null ? [spokesLayer()] : []),
     pointsLayer(),
@@ -246,7 +255,8 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
       deck.setProps({ layers: layers() });
     },
     setFocus: (i) => { focus = i; fSet = i == null ? null : new Set<number>([i, ...(D.nbr[i] || [])]); colorVer++; deck.setProps({ layers: layers() }); },
-    setHighlight: (c) => { highlight = c; colorVer++; deck.setProps({ layers: layers() }); },
+    setHighlight: (c) => { highlight = c; highlightSet = null; colorVer++; deck.setProps({ layers: layers() }); },
+    setHighlightSet: (idx, color) => { highlightSet = idx && idx.length ? new Set(idx) : null; if (color) highlightSetColor = color; highlight = null; colorVer++; deck.setProps({ layers: layers() }); },
     setQuery: (q) => {
       const s = q.trim().toLowerCase();
       queryMatch = !s ? null : new Set<number>(D.ids.map((_, i) => i).filter((i) => D.titles[i].toLowerCase().includes(s) || D.cores[i].toLowerCase().includes(s)));

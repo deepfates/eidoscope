@@ -78,6 +78,7 @@ if (hasPf) shots.push(
   { name: "21-pf-folder", caption: "Pathfinder · color by FOLDER — the geometry recovers the SRD taxonomy (Equipment/Feats/Spells…)", map: "pathfinder.eido", vp: DESKTOP, setup: async (p) => { await setControl(p, "color", "meta:folder"); } },
   { name: "22-pf-grain-fine", caption: "Pathfinder · finest grain (11-level ladder)", map: "pathfinder.eido", vp: DESKTOP, setup: async (p) => { await setGrain(p, await grainMax(p)); } },
   { name: "23-pf-dark", caption: "Pathfinder · dark", map: "pathfinder.eido", theme: "dark", vp: DESKTOP },
+  { name: "30-pf-folder-isolate", caption: "Pathfinder · colour by folder, then click 'Equipment' in the legend → isolates just that folder (dims the rest + hull). The real answer to 34-folders-8-colours.", map: "pathfinder.eido", vp: DESKTOP, setup: async (p) => { await setControl(p, "color", "meta:folder"); await settle(p, 600); await p.locator('[role="button"][aria-label="isolate folder Equipment"]').click(); await settle(p, 600); } },
 );
 
 // ── run ────────────────────────────────────────────────────────────────────────────────────

@@ -21,6 +21,7 @@
   let showLabels = $state(true);
   let grain = $state(0);
   let pinned = $state<number | null>(null);
+  let facetPin = $state<string | null>(null);   // isolated facet value (e.g. a folder) — study one lens at a time
   let deckOpen = $state(false);
   let deckSort = $state("hub");
   let deckQ = $state("");
@@ -68,8 +69,16 @@
   const membersOf = (c: number) => { const out: number[] = []; assignment.forEach((v, i) => { if (v === c) out.push(i); }); return out; };
   function togglePin(c: number) {
     if (pinned === c) { pinned = null; handle?.setHighlight(null); handle?.resetView(); }
-    else { pinned = c; handle?.setHighlight(c); handle?.fitToIndices(membersOf(c)); }
+    else { pinned = c; facetPin = null; handle?.setHighlight(c); handle?.fitToIndices(membersOf(c)); }
   }
+  const facetMembers = (v: string) => { const out: number[] = []; if (!curFacet || !data) return out; for (let i = 0; i < data.ids.length; i++) if (curFacet.get(i) === v) out.push(i); return out; };
+  function toggleFacetPin(v: string) {
+    if (facetPin === v) { facetPin = null; handle?.setHighlightSet(null, null); handle?.resetView(); }
+    else { facetPin = v; pinned = null; const idx = facetMembers(v); handle?.setHighlightSet(idx, col(curFacet!.idx[v])); handle?.fitToIndices(idx); }
+  }
+  // switching the colour lens clears a stale facet isolate (a folder value means nothing under a different lens)
+  let lastColorForFacet = color;
+  $effect(() => { const c = color; if (c !== lastColorForFacet) { lastColorForFacet = c; if (facetPin !== null) { facetPin = null; handle?.setHighlightSet(null, null); } } });
 
   const axl = (a: any) => (a.weak ? "~ " : "") + a.name;
   const rgb = (c: [number, number, number]) => `rgb(${c[0]},${c[1]},${c[2]})`;
@@ -86,7 +95,7 @@
       .sort((x, y) => Math.abs(y.s - 50) - Math.abs(x.s - 50)).slice(0, 3) : [];
 
   function focusCard(i: number | null) { selected = i; handle?.setFocus(i); }
-  function reset() { focusCard(null); pinned = null; handle?.setHighlight(null); grain = data?.di ?? 0; handle?.resetView(); }
+  function reset() { focusCard(null); pinned = null; facetPin = null; handle?.setHighlight(null); handle?.setHighlightSet(null, null); grain = data?.di ?? 0; handle?.resetView(); }
 
   // deep-linkable view state (eid-yxqu): the URL always mirrors the current view, so any view — or a
   // specific card — is a shareable link and a reload restores it. replaceState (not push) so it doesn't
@@ -101,6 +110,7 @@
     if (data && grain !== (data.di ?? 0)) p.set("grain", String(grain));
     if (layout === "axes") { if (xKey) p.set("x", xKey); if (yKey) p.set("y", yKey); }
     if (pinned !== null) p.set("region", String(pinned));
+    if (facetPin !== null) p.set("facet", facetPin);
     if (selected !== null && data) p.set("card", data.ids[selected]);
     const q = p.toString();
     return location.pathname + (q ? "?" + q : "");
@@ -108,7 +118,7 @@
   function applyUrlState() {
     const p = new URLSearchParams(location.search);
     const L = p.get("layout"); if (L === "mde" || L === "axes" || L === "orbit") layout = L;
-    const c = p.get("color"); if (c) color = c;
+    const c = p.get("color"); if (c) { color = c; lastColorForFacet = c; }  // keep the facet-clear effect from firing on this restore
     const s = p.get("size"); if (s) size = s;
     const x = p.get("x"); if (x) xKey = x;
     const y = p.get("y"); if (y) yKey = y;
@@ -116,6 +126,7 @@
     // region + card depend on grain-derived state, so apply once the reactive graph has settled
     queueMicrotask(() => {
       const r = p.get("region"); if (r && !Number.isNaN(+r) && +r >= 0 && +r < curCount) togglePin(+r);
+      const fp = p.get("facet"); if (fp && curFacet && curFacet.ord.includes(fp)) toggleFacetPin(fp);
       const card = p.get("card"); if (card && data) { const i = data.ids.indexOf(card); if (i >= 0) focusCard(i); }
     });
   }
@@ -163,7 +174,7 @@
           onGrainChange: (g) => { grain = g; pinned = null; },
         });
         // read-only introspection seam for the integration suite (drives the REAL built app, asserts real state)
-        (window as any).__eido = () => { const d = handle?.debug(); return { grain, k: curCount, layout, color, pin: pinned, focus: selected, detail: selected !== null, deckOpen, cite: citeOn, ghosts: ghostsOn, theme, hover: hovered ? hovered.kind : null, zoom: d?.zoom ?? 0, labels: d?.labels ?? 0, regions: d?.regions ?? 0, rot: d?.rot ?? null, rotX: d?.rotX ?? null }; };
+        (window as any).__eido = () => { const d = handle?.debug(); return { grain, k: curCount, layout, color, pin: pinned, facetPin, focus: selected, detail: selected !== null, deckOpen, cite: citeOn, ghosts: ghostsOn, theme, hover: hovered ? hovered.kind : null, zoom: d?.zoom ?? 0, labels: d?.labels ?? 0, regions: d?.regions ?? 0, rot: d?.rot ?? null, rotX: d?.rotX ?? null }; };
         (window as any).__eidoProject = (xy: number[]) => handle?.project(xy);
         (window as any).__eidoPick = (x: number, y: number) => handle?.pickAt(x, y);
         applyUrlState(); urlReady = true;  // restore any deep-linked view/card, then start mirroring state → URL
@@ -270,14 +281,14 @@
     <div class="absolute bottom-3 right-3 flex max-h-[44vh] w-[min(13rem,62vw)] flex-col overflow-hidden rounded-xl border border-[var(--hair)] bg-[var(--panel)] p-2.5 text-xs backdrop-blur">
       <button class="flex w-full flex-none items-center gap-1 font-mono text-[10px] uppercase text-[var(--faint)] hover:text-[var(--ink)] {legendOpen ? 'mb-1.5' : ''}" onclick={() => (legendOpen = !legendOpen)} aria-expanded={legendOpen} aria-label="{legendOpen ? 'collapse' : 'expand'} legend">
         <span class="text-[9px]">{legendOpen ? "▾" : "▸"}</span>
-        <span class="truncate">{#if color === "cluster"}{curCount} regions{#if legendOpen}<span class="normal-case text-[var(--faint)]"> · click to isolate</span>{/if}{:else if curFacet}{curFacet.label} · {curFacet.ord.length}{:else if legendAxis}{legendAxis.name}{:else}legend{/if}</span>
+        <span class="truncate">{#if color === "cluster"}{curCount} regions{#if legendOpen}<span class="normal-case text-[var(--faint)]"> · click to isolate</span>{/if}{:else if curFacet}{curFacet.label} · {curFacet.ord.length}{#if legendOpen}<span class="normal-case text-[var(--faint)]"> · click to isolate</span>{/if}{:else if legendAxis}{legendAxis.name}{:else}legend{/if}</span>
       </button>
       {#if legendOpen}
         <div class="min-h-0 overflow-auto">
         {#if color === "cluster"}
           {#each curClusters as c}<div class="flex cursor-pointer items-center gap-2 py-1.5 hover:text-[var(--ink)] {pinned === c.c ? 'text-[var(--ink)] font-semibold' : ''}" role="button" tabindex="0" aria-label="isolate region {c.label}" aria-pressed={pinned === c.c} onmouseenter={() => { if (pinned === null) handle?.setHighlight(c.c); }} onmouseleave={() => { if (pinned === null) handle?.setHighlight(null); }} onclick={() => togglePin(c.c)} onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); togglePin(c.c); } }}><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(col(c.c))}"></span><span class="truncate">{c.label} <span class="text-[var(--faint)]">{c.n}</span></span></div>{/each}
         {:else if curFacet}
-          {#each curFacet.ord.slice(0, 16) as v}<div class="flex items-center gap-2 py-0.5"><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(col(curFacet.idx[v]))}"></span><span class="truncate">{v} <span class="text-[var(--faint)]">{curFacet.cnt[v]}</span></span></div>{/each}
+          {#each curFacet.ord.slice(0, 16) as v}<div class="flex cursor-pointer items-center gap-2 py-1.5 hover:text-[var(--ink)] {facetPin === v ? 'text-[var(--ink)] font-semibold' : ''}" role="button" tabindex="0" aria-label="isolate {curFacet.label} {v}" aria-pressed={facetPin === v} onclick={() => toggleFacetPin(v)} onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleFacetPin(v); } }}><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(col(curFacet.idx[v]))}"></span><span class="truncate">{v} <span class="text-[var(--faint)]">{curFacet.cnt[v]}</span></span></div>{/each}
           {#if curFacet.ord.length > 16}<div class="text-[var(--faint)]">+{curFacet.ord.length - 16} more</div>{/if}
         {:else if legendAxis}
           <div class="flex items-center gap-2 py-0.5"><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(axisColor(0))}"></span>{legendAxis.low}</div>
