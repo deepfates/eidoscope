@@ -18,7 +18,7 @@ export type MapHandle = {
   fitToIndices: (idx: number[]) => void;
   resetView: () => void;
   destroy: () => void;
-  debug: () => { zoom: number; labels: number; regions: number; grain: number };  // read-only seam for integration tests
+  debug: () => { zoom: number; labels: number; regions: number; grain: number; rot: number | null; rotX: number | null };  // read-only seam for integration tests
   project: (worldXY: number[]) => number[];  // world → screen px, so tests can click exact nodes/ghosts
   pickAt: (x: number, y: number) => { layer: string | null; url: string | null; index: number } | null;  // what deck picks at a screen px
 };
@@ -253,7 +253,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
       colorVer++; deck.setProps({ layers: layers() });
     },
     fitToIndices: (idx) => fit(idx),
-    debug: () => ({ zoom: viewState?.zoom ?? 0, labels: decluttered().length, regions: members.filter((m) => m.length).length, grain }),
+    debug: () => ({ zoom: viewState?.zoom ?? 0, labels: decluttered().length, regions: members.filter((m) => m.length).length, grain, rot: viewState?.rotationOrbit ?? null, rotX: viewState?.rotationX ?? null }),
     project: (worldXY) => { const vp = (deck as any).getViewports?.()[0]; return vp ? vp.project([worldXY[0], worldXY[1], 0]).slice(0, 2) : [0, 0]; },
     pickAt: (x, y) => { const o = (deck as any).pickObject?.({ x, y, radius: 8 }); return o ? { layer: o.layer?.id ?? null, url: o.object?.url ?? null, index: o.index ?? -1 } : null; },
     resetView: () => { viewState = home(layout); deck.setProps({ viewState }); },
