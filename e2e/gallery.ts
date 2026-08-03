@@ -63,7 +63,8 @@ const shots: Shot[] = [
   { name: "16-narrow-overlap", caption: "Narrow width (860px) — BUG eid-rnsc: bottom hint/readout collide", vp: NARROW },
   { name: "17-mobile-collapsed", caption: "Mobile fresh load — controls + legend collapsed, map is the hero", vp: MOBILE },
   { name: "18-mobile-controls", caption: "Mobile — controls expanded (tap the bar)", vp: MOBILE, setup: async (p) => { await btn(p, /expand controls/i).click(); } },
-  { name: "19-mobile-detail", caption: "Mobile — card detail as a full-width bottom sheet", vp: MOBILE, setup: async (p) => { await btn(p, /^deck$/).click(); await settle(p, 300); await p.locator(".grid button").first().click(); } },
+  { name: "19-mobile-deck", caption: "Mobile — deck reader open (close ✕ is a 40px tap target; back gesture also closes it)", vp: MOBILE, setup: async (p) => { await btn(p, /^deck$/).click(); } },
+  { name: "19b-mobile-detail", caption: "Mobile — card detail as a full-width bottom sheet", vp: MOBILE, setup: async (p) => { await btn(p, /^deck$/).click(); await settle(p, 300); await p.locator(".grid button").first().click(); } },
 ];
 if (hasPf) shots.push(
   { name: "20-pf-region", caption: "Pathfinder SRD (13,830 cards) · color by region", map: "pathfinder.eido", vp: DESKTOP },
