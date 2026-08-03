@@ -59,9 +59,9 @@ nothing here may be silently dropped. `[ ]` = not yet ported, `[x]` = ported + v
 - [x] **Keyboard-navigable + screen-reader labeled** — this view is the accessible parallel to the canvas.
 
 ## Frontier telescope (arxiv corpora, `--frontier`)
-- [~] **Ghost points**  _(implemented; needs a --frontier arxiv corpus to verify — this .eido has none)_ — cited-but-not-in-corpus papers placed near the work that cites them; sized by citation count.
-- [~] **Citation edges** toggle  _(implemented; needs a --frontier arxiv corpus to verify — this .eido has none)_.
-- [~] Hover ghost → tooltip; click → arxiv  _(implemented; needs a --frontier arxiv corpus to verify — this .eido has none)_.
+- [x] **Ghost points** — verified on the REAL Readwise frontier (`--frontier`, Semantic Scholar): 80 ghosts placed, sized by citation count (top = InstructGPT, cited 133× in-corpus); render as hollow rings.
+- [x] **Citation edges** toggle — verified: 2355 real intra-corpus citation edges across 446 nodes draw as a faint web.
+- [x] Hover ghost → tooltip (its own content: "frontier paper · cited N× · arXiv:…", distinct from cards — the mislabel bug is fixed); click → arXiv (guarded by layer id).
 - [x] Clean no-op when the corpus has no arxiv ids (controls simply absent).
 
 ## Search & global
