@@ -9,7 +9,7 @@
   let status = $state("loading your map…");
   let data = $state<MapContract | null>(null);
   let selected = $state<number | null>(null);
-  let hovered = $state<{ i: number; x: number; y: number } | null>(null);
+  let hovered = $state<{ kind: "point"; i: number; x: number; y: number } | { kind: "ghost"; g: any; x: number; y: number } | null>(null);
   let color = $state("cluster");
   let size = $state("hub");
   let layout = $state<Layout>("mde");
@@ -46,7 +46,7 @@
     if (q) list = list.filter((i) => data!.titles[i].toLowerCase().includes(q) || data!.cores[i].toLowerCase().includes(q));
     if (deckUnread && hasRead) list = list.filter((i) => data!.read![i] !== true);
     list.sort((a, b) => (deckSort === "hub" ? data!.hub[b] - data!.hub[a] : (data!.scores[deckSort]?.[b] ?? 0) - (data!.scores[deckSort]?.[a] ?? 0)));
-    return list.slice(0, 300);
+    return list.slice(0, 2000);  // show the whole corpus (was 300 — which hid most cards + masked "unread only")
   });
   const labelsOn = $derived(showLabels && color === "cluster" && layout !== "orbit");
   const nLevels = $derived(data?.counts?.length ?? 1);
@@ -101,7 +101,7 @@
         handle = createMap(canvas, D, {
           getColor: colorFor(D, color, fac, D.levels?.[grain] ?? D.cluster), getRadius: sizeFor(D, size), layout, xKey, yKey, showLabels: labelsOn, grain, theme,
           onClick: (i) => focusCard(i < 0 ? null : i),
-          onHover: (i, x, y) => (hovered = i == null ? null : { i, x, y }),
+          onHover: (h, x, y) => (hovered = h == null ? null : { ...h, x, y }),
           onGrainChange: (g) => { grain = g; pinned = null; },
         });
       } catch (e: any) {
@@ -219,12 +219,18 @@
     {/if}
   {/if}
 
-  <!-- hover tooltip -->
+  <!-- hover tooltip: a corpus card, or a frontier ghost paper (distinct content, not a mislabeled card) -->
   {#if hovered && data && selected === null}
-    <div class="pointer-events-none absolute z-10 max-w-xs rounded-lg border border-[var(--hair)] bg-[var(--panel)] p-2.5 text-xs shadow-xl" style="left:{Math.min(hovered.x + 14, window.innerWidth - 280)}px; top:{Math.min(hovered.y + 14, window.innerHeight - 120)}px">
-      <div class="mb-1 font-bold">{data.titles[hovered.i]}</div>
-      <div class="mb-1 line-clamp-2 text-[var(--dim)]">{data.cores[hovered.i].slice(0, 140)}</div>
-      <div class="font-mono text-[10px] text-[var(--faint)]">hub {data.hub[hovered.i]} · {topAxes(hovered.i).map((t) => t.n + " " + t.s).join(" · ")}</div>
+    <div class="pointer-events-none absolute z-10 max-w-xs rounded-lg border border-[var(--hair)] bg-[var(--panel)] p-2.5 text-xs shadow-xl backdrop-blur" style="left:{Math.min(hovered.x + 14, window.innerWidth - 280)}px; top:{Math.min(hovered.y + 14, window.innerHeight - 120)}px">
+      {#if hovered.kind === "point"}
+        <div class="mb-1 font-bold">{data.titles[hovered.i]}</div>
+        <div class="mb-1 line-clamp-2 text-[var(--dim)]">{data.cores[hovered.i].slice(0, 140)}</div>
+        <div class="font-mono text-[10px] text-[var(--faint)]">hub {data.hub[hovered.i]} · {topAxes(hovered.i).map((t) => t.n + " " + t.s).join(" · ")}</div>
+      {:else}
+        <div class="mb-1 font-bold">{hovered.g.title}</div>
+        <div class="font-mono text-[10px] text-[var(--faint)]">frontier paper · cited {hovered.g.n}× in this corpus{hovered.g.arxiv ? " · arXiv:" + hovered.g.arxiv : ""}</div>
+        <div class="mt-1 font-mono text-[10px] text-[var(--accent)]">click → open on arXiv ↗</div>
+      {/if}
     </div>
   {/if}
 

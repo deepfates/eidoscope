@@ -30,7 +30,8 @@ const hull2d = (pts: number[][]): number[][] => {
   return lo.slice(0, -1).concat(up.slice(0, -1));
 };
 
-export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts & { onClick?: (i: number) => void; onHover?: (i: number | null, x: number, y: number) => void; onGrainChange?: (g: number) => void }): MapHandle {
+export type HoverPayload = { kind: "point"; i: number } | { kind: "ghost"; g: any };
+export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts & { onClick?: (i: number) => void; onHover?: (h: HoverPayload | null, x: number, y: number) => void; onGrainChange?: (g: number) => void }): MapHandle {
   const n = D.ids.length;
   const reduce = typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;  // a11y: no motion
   let { getColor, getRadius, layout, xKey, yKey, showLabels, grain } = init;
@@ -83,13 +84,19 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   // fine grain overlapped and clipped off-screen). On-map labels are truncated so a wide name near the
   // edge can't run past the viewport — the full name lives in the legend + detail panel.
   const dispLabel = (s: string) => (s.length > 26 ? s.slice(0, 25) + "…" : s);
+  // Zoom-aware greedy declutter, in PIXEL space: biggest regions first, keep a label only if its pixel box
+  // clears every already-placed one. The overlap test uses the CURRENT zoom (pixels = world · 2^zoom), so
+  // zooming into a dense area spreads centroids apart and progressively reveals finer labels — the map-like
+  // behavior the grain slider implies. The old test was world-space at a single fixed scale, so zooming
+  // revealed nothing and fine grain dropped most labels even when the screen had room.
   const decluttered = () => {
+    const scale = Math.pow(2, viewState?.zoom ?? 0);          // deck ortho: pixels per world unit at this zoom
     const cand = members.map((idx, c) => ({ c, label: dispLabel(labelOf(c)), n: idx.length, p: centroid(idx) })).filter((d) => d.n > 0 && d.label).sort((a, b) => b.n - a.n);
-    const charW = span / 90;                                  // ~ world units per character at the fit view
-    const hw = (len: number) => (len * charW) / 2 + charW;    // label half-width (+1 char of padding)
-    const hh = charW * 1.5;                                   // label half-height (line box)
+    const charPx = 8;                                         // ~monospace advance at 13px bold
+    const hw = (len: number) => (len * charPx) / 2 + charPx;  // label half-width in px (+1 char padding)
+    const lineH = 22;                                         // vertical clearance in px
     const placed: typeof cand = [];
-    for (const d of cand) if (placed.every((q) => Math.abs(q.p[0] - d.p[0]) > hw(q.label.length) + hw(d.label.length) || Math.abs(q.p[1] - d.p[1]) > 2 * hh)) placed.push(d);
+    for (const d of cand) if (placed.every((q) => Math.abs((q.p[0] - d.p[0]) * scale) > hw(q.label.length) + hw(d.label.length) || Math.abs((q.p[1] - d.p[1]) * scale) > lineH)) placed.push(d);
     return placed;
   };
   const dimSet = () => (focus != null ? fSet : highlight != null ? new Set(members[highlight]) : null);
@@ -161,10 +168,19 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   const deck = new Deck({
     canvas, views: [view()], viewState,
     controller: { doubleClickZoom: false, inertia: true }, pickingRadius: 8,
-    onViewStateChange: ({ viewState: vs }: any) => { viewState = vs; deck.setProps({ viewState }); },
+    onViewStateChange: ({ viewState: vs }: any) => {
+      const zoomed = Math.abs((vs?.zoom ?? 0) - (viewState?.zoom ?? 0)) > 0.08;
+      viewState = vs; deck.setProps({ viewState });
+      if (zoomed && showLabels) deck.setProps({ layers: layers() });  // reveal/hide labels as zoom changes
+    },
     layers: layers(),
-    onClick: (info: any) => { if (info?.layer?.id === "ghosts" && info.object?.url) { window.open(info.object.url, "_blank"); return; } if (init.onClick) init.onClick(info && info.index >= 0 ? info.index : -1); },
-    onHover: (info: any) => { if (init.onHover) init.onHover(info && info.index >= 0 ? info.index : null, info?.x ?? 0, info?.y ?? 0); },
+    onClick: (info: any) => { if (info?.layer?.id === "ghosts" && info.object?.url) { window.open(info.object.url, "_blank"); return; } if (init.onClick) init.onClick(info?.layer?.id === "points" && info.index >= 0 ? info.index : -1); },
+    onHover: (info: any) => {
+      if (!init.onHover) return;
+      if (info?.layer?.id === "ghosts" && info.object) init.onHover({ kind: "ghost", g: info.object }, info.x ?? 0, info.y ?? 0);
+      else if (info?.layer?.id === "points" && info.index >= 0) init.onHover({ kind: "point", i: info.index }, info.x ?? 0, info.y ?? 0);
+      else init.onHover(null, info?.x ?? 0, info?.y ?? 0);
+    },
     getCursor: ({ isDragging, isHovering }: any) => (isDragging ? "grabbing" : isHovering ? "pointer" : "grab"),
   });
 
