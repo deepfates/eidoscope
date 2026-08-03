@@ -9,9 +9,20 @@ export const PAL: [number, number, number][] = [
   [57, 135, 229], [217, 89, 38], [25, 158, 112], [201, 133, 0],
   [213, 81, 129], [0, 131, 0], [144, 133, 233], [230, 103, 103],
 ];
-export const col = (c: number): [number, number, number] => PAL[((c % PAL.length) + PAL.length) % PAL.length];
-
 export type RGB = [number, number, number];
+// Extend the 8 curated colourblind-safe base with evenly-spread generated hues (golden-angle, three
+// lightness/saturation tiers) so high-cardinality category sets (21 regions, 34 folders) get many more
+// DISTINGUISHABLE colours before cycling. The curated 8 still colour the most common small-category case;
+// identity for the long tail is carried by position + isolate (facet/region isolate-on-click ships).
+export const PALX: RGB[] = (() => {
+  const out: RGB[] = PAL.map((c) => [...c] as RGB);
+  for (let i = 0; out.length < 24; i++) {
+    const h = (40 + i * 137.508) % 360, tier = i % 3;
+    out.push(hsl(h, tier === 1 ? 0.55 : tier === 2 ? 0.8 : 0.68, tier === 1 ? 0.42 : tier === 2 ? 0.5 : 0.62));
+  }
+  return out;
+})();
+export const col = (c: number): RGB => PALX[((c % PALX.length) + PALX.length) % PALX.length];
 function hsl(h: number, s: number, l: number): RGB {
   const a = s * Math.min(l, 1 - l);
   const f = (n: number) => { const k = (n + h / 30) % 12; return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); };
