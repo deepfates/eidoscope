@@ -106,6 +106,8 @@
         });
         // read-only introspection seam for the integration suite (drives the REAL built app, asserts real state)
         (window as any).__eido = () => { const d = handle?.debug(); return { grain, k: curCount, layout, color, pin: pinned, focus: selected, detail: selected !== null, deckOpen, cite: citeOn, ghosts: ghostsOn, theme, hover: hovered ? hovered.kind : null, zoom: d?.zoom ?? 0, labels: d?.labels ?? 0, regions: d?.regions ?? 0 }; };
+        (window as any).__eidoProject = (xy: number[]) => handle?.project(xy);
+        (window as any).__eidoPick = (x: number, y: number) => handle?.pickAt(x, y);
       } catch (e: any) {
         status = "couldn't load map: " + (e?.message ?? e);
       }

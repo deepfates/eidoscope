@@ -19,6 +19,8 @@ export type MapHandle = {
   resetView: () => void;
   destroy: () => void;
   debug: () => { zoom: number; labels: number; regions: number; grain: number };  // read-only seam for integration tests
+  project: (worldXY: number[]) => number[];  // world → screen px, so tests can click exact nodes/ghosts
+  pickAt: (x: number, y: number) => { layer: string | null; url: string | null; index: number } | null;  // what deck picks at a screen px
 };
 type Opts = { getColor: (i: number) => RGB; getRadius: (i: number) => number; layout: Layout; xKey: string; yKey: string; showLabels: boolean; grain: number; citeOn?: boolean; ghostsOn?: boolean; theme?: "dark" | "light" };
 
@@ -41,6 +43,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   let highlight: number | null = null;
   let queryMatch: Set<number> | null = null;
   let citeOn = init.citeOn ?? false, ghostsOn = init.ghostsOn ?? false;
+  let clickTimer: ReturnType<typeof setTimeout> | null = null;  // single-click card-open, cancelled by a double-click (drill)
   let theme: "dark" | "light" = init.theme ?? "dark", themeVer = 0;
   const dark = () => theme !== "light";
   // theme-aware map ink: on a light ground, white spokes/ghost strokes and the dark label pill invert.
@@ -151,7 +154,8 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   const ghostLayer = () => new ScatterplotLayer({
     id: "ghosts", data: D.ghosts || [],
     getPosition: (g: any) => g.xy as any, getRadius: (g: any) => 2 + 3 * Math.sqrt(g.n / gmax),
-    radiusUnits: "pixels", radiusMinPixels: 2, stroked: true, filled: false,
+    radiusUnits: "pixels", radiusMinPixels: 3, stroked: true, filled: true,
+    getFillColor: [0, 0, 0, 0],  // transparent fill: keeps the ring look but makes the whole disc a solid tap target
     getLineColor: ghostCol(), lineWidthUnits: "pixels", getLineWidth: 1.2,
     pickable: true, autoHighlight: true, highlightColor: [255, 255, 255, 200],
     updateTriggers: { getLineColor: themeVer },
@@ -175,7 +179,12 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
       if (zoomed && showLabels) deck.setProps({ layers: layers() });  // reveal/hide labels as zoom changes
     },
     layers: layers(),
-    onClick: (info: any) => { if (info?.layer?.id === "ghosts" && info.object?.url) { window.open(info.object.url, "_blank"); return; } if (init.onClick) init.onClick(info?.layer?.id === "points" && info.index >= 0 ? info.index : -1); },
+    onClick: (info: any) => {
+      if (info?.layer?.id === "ghosts" && info.object?.url) { window.open(info.object.url, "_blank"); return; }  // ghosts open immediately
+      const idx = info?.layer?.id === "points" && info.index >= 0 ? info.index : -1;
+      if (clickTimer) clearTimeout(clickTimer);
+      clickTimer = setTimeout(() => { clickTimer = null; init.onClick?.(idx); }, 220);  // wait out a possible double-click (drill)
+    },
     onHover: (info: any) => {
       if (!init.onHover) return;
       if (info?.layer?.id === "ghosts" && info.object) init.onHover({ kind: "ghost", g: info.object }, info.x ?? 0, info.y ?? 0);
@@ -207,7 +216,11 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     fit(members[levels[newGrain][nodeIdx]] || []);
     init.onGrainChange?.(newGrain);
   };
-  canvas.addEventListener("dblclick", (e) => { const info = (deck as any).pickObject({ x: (e as MouseEvent).offsetX, y: (e as MouseEvent).offsetY, radius: 8 }); if (info && info.index >= 0) drill(info.index); });
+  canvas.addEventListener("dblclick", (e) => {
+    if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; }  // a double-click drills; cancel the pending card-open
+    const info = (deck as any).pickObject({ x: (e as MouseEvent).offsetX, y: (e as MouseEvent).offsetY, radius: 8 });
+    if (info && info.layer?.id === "points" && info.index >= 0) drill(info.index);
+  });
 
   return {
     update: (o) => {
@@ -234,6 +247,8 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     },
     fitToIndices: (idx) => fit(idx),
     debug: () => ({ zoom: viewState?.zoom ?? 0, labels: decluttered().length, regions: members.filter((m) => m.length).length, grain }),
+    project: (worldXY) => { const vp = (deck as any).getViewports?.()[0]; return vp ? vp.project([worldXY[0], worldXY[1], 0]).slice(0, 2) : [0, 0]; },
+    pickAt: (x, y) => { const o = (deck as any).pickObject?.({ x, y, radius: 8 }); return o ? { layer: o.layer?.id ?? null, url: o.object?.url ?? null, index: o.index ?? -1 } : null; },
     resetView: () => { viewState = home(layout); deck.setProps({ viewState }); },
     destroy: () => deck.finalize(),
   };
