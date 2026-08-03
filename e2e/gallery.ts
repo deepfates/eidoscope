@@ -79,8 +79,13 @@ if (hasPf) shots.push(
   { name: "22-pf-grain-fine", caption: "Pathfinder · finest grain (11-level ladder)", map: "pathfinder.eido", vp: DESKTOP, setup: async (p) => { await setGrain(p, await grainMax(p)); } },
   { name: "23-pf-dark", caption: "Pathfinder · dark", map: "pathfinder.eido", theme: "dark", vp: DESKTOP },
   { name: "30-pf-folder-isolate", caption: "Pathfinder · colour by folder, then click 'Equipment' in the legend → isolates just that folder (dims the rest + hull). The real answer to 34-folders-8-colours.", map: "pathfinder.eido", vp: DESKTOP, setup: async (p) => { await setControl(p, "color", "meta:folder"); await settle(p, 600); await p.locator('[role="button"][aria-label="isolate folder Equipment"]').click(); await settle(p, 600); } },
-  { name: "31-provenance-header", caption: "A received file introduces itself — corpus title + date in the panel header (Pathfinder map)", map: "pf-prov.eido", vp: DESKTOP },
-  { name: "32-provenance-intro", caption: "…and in the intro modal: what corpus, from where, when", map: "pf-prov.eido", intro: true, vp: DESKTOP },
+  { name: "31-provenance-header", caption: "A received file introduces itself — corpus title + date in the panel header (Pathfinder map)", map: "pathfinder.eido", vp: DESKTOP },
+  { name: "32-provenance-intro", caption: "…and in the intro modal: what corpus, from where, when", map: "pathfinder.eido", intro: true, vp: DESKTOP },
+  // the honest reckoning (eid-ypbe): zoom DEEP into the dense core of each corpus — do piled points separate into readable structure, or stay mud?
+  { name: "33-pf-core-zoom", caption: "Pathfinder — zoomed deep into the dense center: do the piled points separate?", map: "pathfinder.eido", vp: DESKTOP, setup: async (p) => { await p.mouse.move(700, 460); for (let i = 0; i < 22; i++) { await p.mouse.wheel(0, -150); await p.waitForTimeout(25); } await settle(p, 600); } },
+  { name: "34-readwise-core-zoom", caption: "Readwise — zoomed deep into the densest cluster", map: "map.eido", vp: DESKTOP, setup: async (p) => { await p.mouse.move(720, 450); for (let i = 0; i < 22; i++) { await p.mouse.wheel(0, -150); await p.waitForTimeout(25); } await settle(p, 600); } },
+  { name: "35-tldr-core-zoom", caption: "tldr — zoomed deep into the densest cluster", map: "tldr.eido", vp: DESKTOP, setup: async (p) => { await p.mouse.move(720, 450); for (let i = 0; i < 22; i++) { await p.mouse.wheel(0, -150); await p.waitForTimeout(25); } await settle(p, 600); } },
+  { name: "36-pf-region-zoom", caption: "Pathfinder — isolate one region, THEN zoom in: does isolate make the core legible?", map: "pathfinder.eido", vp: DESKTOP, setup: async (p) => { await btn(p, /^isolate region/).click(); await settle(p, 400); await p.mouse.move(700, 460); for (let i = 0; i < 16; i++) { await p.mouse.wheel(0, -150); await p.waitForTimeout(25); } await settle(p, 600); } },
 );
 
 // ── run ────────────────────────────────────────────────────────────────────────────────────
