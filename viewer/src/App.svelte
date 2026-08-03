@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { loadMap } from "./loader";
+  import { loadMap, mapUrl } from "./loader";
   import { createMap, type MapHandle, type Layout } from "./deckmap";
   import { facets, colorFor, sizeFor, col, axisColor, type Facet } from "./encode";
   import type { MapContract } from "../../src/schema";
@@ -90,7 +90,7 @@
     try { if (matchMedia("(max-width: 640px)").matches) { panelOpen = false; legendOpen = false; } } catch {}
     (async () => {
       try {
-        const D = await loadMap("./map.eido");
+        const D = await loadMap(mapUrl());
         fac = facets(D);
         xKey = D.axes[0]?.key ?? "";
         yKey = D.axes[1]?.key ?? D.axes[0]?.key ?? "";

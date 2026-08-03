@@ -54,10 +54,23 @@ function synth(): MapContract {
   };
 }
 
+// a deliberately DIFFERENT map (2 regions vs 12) so ?map= loading it is distinguishable from the default
+function altSynth(): MapContract {
+  const N = 6, ids: string[] = [], titles: string[] = [], cores: string[] = [], xy: number[][] = [], xyz: number[][] = [], cluster: number[] = [], hub: number[] = [], nbr: number[][] = [], sa: number[] = [];
+  for (let i = 0; i < N; i++) { const b = i < 3 ? 0 : 1; ids.push("a" + i); titles.push("Alt " + i); cores.push("alt doc " + i); xy.push([b ? 1 : -1, (i % 3) * 0.2]); xyz.push([b ? 1 : -1, 0, 0]); cluster.push(b); hub.push(1); nbr.push([(i + 1) % N]); sa.push(Math.round((i / N) * 100)); }
+  return {
+    version: 1, ids, titles, cores, notes: ids.map(() => ({ a: "n" })), axes: [{ key: "a", name: "AxisA", low: "Lo", high: "Hi", variance: 0.5 }],
+    scores: { a: sa }, xy, xyz, cluster, k: 2, di: 0, hub, nbr,
+    clusters: [{ c: 0, n: 3, label: "Alt-A" }, { c: 1, n: 3, label: "Alt-B" }],
+    levels: [cluster], counts: [2], levelLabels: [["Alt-A", "Alt-B"]], levelBlurbs: [["x", "x"]],
+  };
+}
+
 const distIndex = join(import.meta.dir, "..", "viewer", "dist", "index.html");
 if (!existsSync(distIndex)) { console.error("✗ viewer/dist/index.html missing — run `cd viewer && bun run build` first"); process.exit(2); }
 const indexHtml = readFileSync(distIndex);
 const eido = encodeMap(synth());
+const altEido = encodeMap(altSynth());
 
 // serve the built index + synthetic .eido on an ephemeral port (production path: the app fetch()es ./map.eido)
 const server = Bun.serve({
@@ -65,6 +78,7 @@ const server = Bun.serve({
   fetch(req) {
     const path = new URL(req.url).pathname;
     if (path === "/map.eido") return new Response(eido, { headers: { "content-type": "application/octet-stream" } });
+    if (path === "/alt.eido") return new Response(altEido, { headers: { "content-type": "application/octet-stream" } });
     return new Response(indexHtml, { headers: { "content-type": "text/html" } });
   },
 });
@@ -174,6 +188,13 @@ try {
   // 11. reset clears everything back to defaults
   await btn(/^reset$/).click(); await p.waitForTimeout(250); s = await st();
   ok(s.grain === 2 && s.pin === null && s.focus === null && s.detail === false, `reset restores default grain + clears pin/focus/detail — ${JSON.stringify({ grain: s.grain, pin: s.pin, focus: s.focus, detail: s.detail })}`);
+
+  // 12. ?map= loads a DIFFERENT corpus from the SAME built viewer (the dual-deploy path)
+  await p.goto(base + "/index.html?map=alt.eido");
+  await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
+  await p.waitForTimeout(250);
+  const alt = await st();
+  ok(alt.k === 2 && alt.regions === 2, `?map=alt.eido loads the alternate 2-region map (not the default 12) — k=${alt.k} regions=${alt.regions}`);
 
   ok(consoleErrs.length === 0, "no console errors during the run" + (consoleErrs.length ? " — " + consoleErrs[0] : ""));
 } finally {

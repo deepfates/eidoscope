@@ -44,6 +44,17 @@ export function decodeContainer(buf: Uint8Array): MapContract {
   };
 }
 
+// Which map to load: honor a `?map=<name>.eido` query so ONE built viewer can serve several corpora
+// (Readwise, Pathfinder, …) from the same host. Restricted to a bare same-origin `.eido` filename —
+// no scheme, no `//`, no path segments — so the param can't turn into a cross-origin or traversal fetch.
+export function mapUrl(defaultUrl = "./map.eido"): string {
+  try {
+    const q = new URLSearchParams(location.search).get("map");
+    if (q && /^[A-Za-z0-9._-]+\.eido$/.test(q) && !q.includes("..")) return "./" + q;
+  } catch {}
+  return defaultUrl;
+}
+
 // Load the map: embedded payload if present (self-contained build), else fetch the url (hosted/dev).
 export async function loadMap(url = "./map.eido"): Promise<MapContract> {
   const embedded = (globalThis as any).__EIDO_DATA__;
