@@ -87,7 +87,7 @@
       if (saved === "light" || saved === "dark") setTheme(saved, false);
       else theme = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
     } catch {}
-    try { if (matchMedia("(max-width: 640px)").matches) { panelOpen = false; legendOpen = false; } } catch {}
+    try { const mq = matchMedia("(max-width: 640px)"); if (mq.matches) { panelOpen = false; legendOpen = false; } mq.addEventListener("change", (e) => { if (e.matches) { panelOpen = false; legendOpen = false; } }); } catch {}
     (async () => {
       try {
         const D = await loadMap(mapUrl());
@@ -153,7 +153,10 @@
     <div class="absolute left-3 top-3 w-[min(14rem,calc(100vw-1.5rem))] rounded-xl border border-[var(--hair)] bg-[var(--panel)] p-3 backdrop-blur">
       <div class="flex items-center justify-between gap-2 {panelOpen ? 'mb-2' : ''}">
         <button class="flex items-center gap-1 font-mono text-[10px] uppercase tracking-widest text-[var(--faint)] hover:text-[var(--ink)]" onclick={() => (panelOpen = !panelOpen)} aria-expanded={panelOpen} aria-label="{panelOpen ? 'collapse' : 'expand'} controls"><span class="text-[9px]">{panelOpen ? "▾" : "▸"}</span> eidoscope 🔭</button>
-        <button class="rounded-md border border-[var(--hair)] px-1.5 py-0.5 text-[11px] leading-none hover:bg-[var(--chip)]" onclick={toggleTheme} aria-label="toggle light or dark theme" title="toggle theme">{theme === "dark" ? "☾" : "☀"}</button>
+        <div class="flex items-center gap-1.5">
+          {#if !panelOpen}<button class="rounded-md border border-[var(--hair)] px-2 py-0.5 font-mono text-[10px] uppercase text-[var(--soft)] hover:bg-[var(--chip)]" onclick={() => (deckOpen = true)}>deck</button>{/if}
+          <button class="rounded-md border border-[var(--hair)] px-1.5 py-0.5 text-[11px] leading-none hover:bg-[var(--chip)]" onclick={toggleTheme} aria-label="toggle light or dark theme" title="toggle theme">{theme === "dark" ? "☾" : "☀"}</button>
+        </div>
       </div>
       {#if panelOpen}
       <div class="mb-2 text-xs text-[var(--dim)]">{data.ids.length} cards · {data.k} regions</div>
