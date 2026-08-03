@@ -44,7 +44,7 @@ nothing here may be silently dropped. `[ ]` = not yet ported, `[x]` = ported + v
 
 ## Card interaction
 - [x] **Tap/click a card → detail panel**: title, meta (author · date · region), **restatement** (core), **"where it sits"** = axis placements ranked by extremity with ▲/▼ + score, **nearest-N** neighbors (clickable → focus that card), **open source →** link (opens the reader).
-- [ ] **Hover → tooltip** (desktop): title, core, hub, top axes. _(implemented + wired; deck.gl onHover doesn't fire under browser automation, so NOT machine-verified — needs a real-device check.)_
+- [x] **Hover → tooltip** (desktop): title, core, hub, top axes. Verified by measurement — a real cursor hover fires deck `onHover` and the tooltip DOM renders with title/body/hub/top-3-axis-scores at the cursor. (Synthetic dispatched PointerEvents don't reach deck's event manager, which is why automation looked like it "didn't fire" — the real pipeline works.)
 - [x] **Focus → neighbor spokes** drawn from the card to its nearest neighbors; dim non-neighbors.
 - [x] Click empty space clears focus.
 - [x] **Finger-sized picking** (pickingRadius) — tiny dots are still tappable.
@@ -53,7 +53,7 @@ nothing here may be silently dropped. `[ ]` = not yet ported, `[x]` = ported + v
 - [x] Cards as a **sortable, filterable list** (real DOM).
 - [x] **Sort by influence or any axis** (axis sort = a readable spectrum from one pole to the other).
 - [x] **Text filter**.
-- [x] **"Unread only"** toggle (when read-progress metadata is present). _(renders + same verified filter path; effect masked by the 300-card cap on this corpus.)_
+- [x] **"Unread only"** toggle (when read-progress metadata is present). Verified by content: before toggle 300 shown with 101 marked read; after toggle 0 read (list refills from the unread surplus, so the count stays at the 300 cap — the earlier "masked" flag was that surplus, not a broken filter).
 - [x] Per-card: region chip, read chip, the 3 strongest axis chips, **open →** link.
 - [x] Click a list card → focus it on the map + close the list.
 - [x] **Keyboard-navigable + screen-reader labeled** — this view is the accessible parallel to the canvas.
