@@ -34,7 +34,7 @@ const btn = (page: Page, re: RegExp) => page.getByRole("button", { name: re }).f
 const settle = (page: Page, ms = 550) => page.waitForTimeout(ms);
 const dismissIntro = (page: Page) => page.evaluate(() => { try { localStorage.setItem("eido-seen", "1"); } catch {} });
 
-type Shot = { name: string; caption: string; map?: string; theme?: "light" | "dark"; vp?: { width: number; height: number }; intro?: boolean; noReady?: boolean; setup?: (p: Page) => Promise<void> };
+type Shot = { name: string; caption: string; map?: string; theme?: "light" | "dark"; vp?: { width: number; height: number }; intro?: boolean; noReady?: boolean; settleMs?: number; setup?: (p: Page) => Promise<void> };
 const DESKTOP = { width: 1440, height: 900 }, NARROW = { width: 860, height: 720 }, MOBILE = { width: 390, height: 844 }, LANDSCAPE = { width: 812, height: 375 };
 
 const shots: Shot[] = [
@@ -87,8 +87,6 @@ if (hasPf) shots.push(
   { name: "35-tldr-core-zoom", caption: "tldr — zoomed deep into the densest cluster", map: "tldr.eido", vp: DESKTOP, setup: async (p) => { await p.mouse.move(720, 450); for (let i = 0; i < 22; i++) { await p.mouse.wheel(0, -150); await p.waitForTimeout(25); } await settle(p, 600); } },
   { name: "36-pf-region-zoom", caption: "Pathfinder — isolate one region, THEN zoom in: does isolate make the core legible?", map: "pathfinder.eido", vp: DESKTOP, setup: async (p) => { await btn(p, /^isolate region/).click(); await settle(p, 400); await p.mouse.move(700, 460); for (let i = 0; i < 16; i++) { await p.mouse.wheel(0, -150); await p.waitForTimeout(25); } await settle(p, 600); } },
   // smoosh feel (eid-quf8): same mde→axes switch caught at two moments — if the cloud differs between them, it's animating, not hard-cutting
-  { name: "37-smoosh-early", caption: "Layout switch mde→axes, caught ~60ms in — if animating, points are still near the neighbor-blob, not the grid", map: "pathfinder.eido", vp: DESKTOP, setup: async (p) => { await setControl(p, "layout", "axes"); await p.waitForTimeout(60); } },
-  { name: "38-smoosh-late", caption: "Same switch caught ~450ms in — points should be further along toward the axis positions", map: "pathfinder.eido", vp: DESKTOP, setup: async (p) => { await setControl(p, "layout", "axes"); await p.waitForTimeout(450); } },
 );
 
 // ── run ────────────────────────────────────────────────────────────────────────────────────
@@ -107,7 +105,7 @@ for (const s of shots) {
     if (s.noReady) await page.waitForSelector('[role="status"]', { timeout: 15000 });
     else await page.waitForFunction(() => !!(window as any).__eido, null, { timeout: 20000 });
     await settle(page, 700);
-    if (s.setup) { await s.setup(page); await settle(page, 700); }
+    if (s.setup) { await s.setup(page); await settle(page, s.settleMs ?? 700); }
     await page.screenshot({ path: join(out, s.name + ".png") });
     results.push({ name: s.name, caption: s.caption, ok: errs.length === 0, errs });
     console.log(`  ${errs.length ? "✗" : "✓"} ${s.name}${errs.length ? "  — " + errs[0] : ""}`);

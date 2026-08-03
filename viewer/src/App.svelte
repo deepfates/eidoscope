@@ -174,7 +174,7 @@
           onGrainChange: (g) => { grain = g; pinned = null; },
         });
         // read-only introspection seam for the integration suite (drives the REAL built app, asserts real state)
-        (window as any).__eido = () => { const d = handle?.debug(); return { grain, k: curCount, layout, color, pin: pinned, facetPin, focus: selected, detail: selected !== null, deckOpen, cite: citeOn, ghosts: ghostsOn, theme, hover: hovered ? hovered.kind : null, zoom: d?.zoom ?? 0, labels: d?.labels ?? 0, regions: d?.regions ?? 0, rot: d?.rot ?? null, rotX: d?.rotX ?? null }; };
+        (window as any).__eido = () => { const d = handle?.debug(); return { grain, k: curCount, layout, color, pin: pinned, facetPin, focus: selected, detail: selected !== null, deckOpen, cite: citeOn, ghosts: ghostsOn, theme, hover: hovered ? hovered.kind : null, zoom: d?.zoom ?? 0, labels: d?.labels ?? 0, regions: d?.regions ?? 0, rot: d?.rot ?? null, rotX: d?.rotX ?? null, tweening: !!d?.tweening }; };
         (window as any).__eidoProject = (xy: number[]) => handle?.project(xy);
         (window as any).__eidoPick = (x: number, y: number) => handle?.pickAt(x, y);
         applyUrlState(); urlReady = true;  // restore any deep-linked view/card, then start mirroring state → URL
