@@ -54,7 +54,7 @@ OpenAI-compatible provider incl. local servers like LM Studio, so cloud or local
 ```sh
 bun install
 bun run src/cli.ts example           # try it: a bundled 24-doc demo corpus across domains
-bun run src/cli.ts <folder>          # any folder of .md/.txt -> deck.jsonl + map-data.json + eidoscope.html (+ STATE.md if dated)
+bun run src/cli.ts <folder>          # any folder of .md/.txt -> deck.jsonl + map-data.json + map.eido + eidoscope.html (+ STATE.md if dated)
 bun run src/cli.ts <folder> --limit 200
 bun run src/cli.ts <folder> --min-chars 100  # include short entries (default: skip bodies < 200 chars, and it says how many)
 bun run src/cli.ts <folder> --frontier   # also pull the citation frontier (arxiv corpora)
@@ -85,21 +85,54 @@ card is one LLM call, and on local hardware that's tens of seconds each, so a la
 docs) is an overnight run. Reach for a cloud endpoint, or a batching server (vLLM), when you want it
 fast: LM Studio serializes on a single model, so raising `EIDOSCOPE_CONCURRENCY` barely helps there.
 
-## In the viewer
+## The viewer
 
-- **layout**: neighbor map (MDE) · **axis scatter** (position by any two discovered axes) · **3D orbit**
-- **color** by region, **source folder / author** (your corpus's own organization as a lens), or any axis · **size** by influence (hub-degree) · click a card → its neighbors
-- **deck**: the cards as a reader — title, core, region, and the 3 axes each most commits to;
-  sort by an axis to read the corpus as a spectrum
-- **trajectory** (`STATE.md`): where the corpus's attention moved over time (needs dated docs)
+Two readers ship. `eidoscope.html` is the self-contained legacy render — one file, just open it.
+The maintained one is **`viewer/`** (Svelte 5 + deck.gl + Vite): GPU-rendered, touch-first, and it
+reads the compact binary `map.eido`.
+
+- **layout**: neighbor map (MDE) · **axis scatter** (position by any two discovered axes) · **3D orbit** (drag to rotate)
+- **color** by region, **source folder / author** (your corpus's own organization as a lens), or any axis · **size** by influence (hub-degree)
+- **grain** slider — the nested region ladder from continents to towns; on-map labels declutter and *reveal as you zoom*, like a real map
+- **tap a card** → its restatement, where it sits on each axis (ranked by extremity), nearest neighbors, and links to **both** the reader and the **original source** (so a shared map opens even without the reader login)
+- **deck** — the whole corpus as a sortable/filterable list: the accessible, screen-reader parallel to the canvas
+- **frontier** (`--frontier` corpora) — intra-corpus **citation edges** + **ghost** papers (cited but not in the corpus), placed near the work citing them, sized by citation count, click → arXiv
+- **theme** light/dark, keyboard-operable throughout, `prefers-reduced-motion` honored
+- **trajectory** (`STATE.md`) — where the corpus's attention moved over time (needs dated docs)
+
+Build + serve it:
+
+```sh
+cp map.eido viewer/public/map.eido          # the pipeline's binary map (copied into the build)
+cd viewer && bun install && bun run build    # -> viewer/dist/index.html (self-contained) + dist/map.eido
+python3 -m http.server --directory dist 8000 # open http://localhost:8000
+```
+
+One build serves several corpora: **`?map=<name>.eido`** loads any sibling `.eido` next to `index.html`
+(defaults to `./map.eido`) — e.g. drop `pathfinder.eido` in and open `?map=pathfinder.eido`.
+
+### The `.eido` seam
+
+The pipeline emits `map.eido`: a gzipped binary of the **`MapContract`** (`src/schema.ts`). Numeric
+arrays — coordinates, per-axis scores, the grain ladder, neighbor and citation lists — ride as
+Float32/Int32 buffers (parsed straight into GPU attributes); strings and sparse metadata ride in a
+JSON header. ~5× smaller than the JSON. `MapContract` is the **only** coupling between pipeline and
+viewer: either side can change freely as long as both honor that (versioned) shape. `map-data.json`
+is the same data, human-readable, for debugging.
 
 ## Develop / verify
 
 ```sh
-bun test          # deterministic contract tests (loadFolder, trajectory, deck, cardText)
+bun run qa        # the gate: tsc --noEmit + bun test (contract) + the viewer integration e2e
+bun test          # deterministic contract tests (loadFolder, trajectory, deck, cardText, mapbin round-trip)
 bun run typecheck # tsc --noEmit
-bun run storybook.ts   # drive the viewer in headless Chromium -> story/*.png + a shareable gallery.html
+bun run e2e/viewer.e2e.ts   # builds a synthetic .eido, serves the REAL viewer bundle, drives it in Chromium
 ```
+
+The e2e is the parity net for the new viewer: it encodes a synthetic map to `.eido`, serves the
+actual `dist/index.html`, and asserts interaction invariants (grain ladder, label-reveal-on-zoom,
+legend isolate, drill, tap-to-open, frontier, theme, `?map=`) through a read-only `window.__eido()`
+seam — real bundle, real browser, no mocks. Requires `cd viewer && bun run build` first.
 
 ## Status
 
