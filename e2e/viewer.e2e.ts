@@ -153,7 +153,7 @@ try {
   // 6. tap/click a card → detail panel (exact node-0 pixel via project; desktop click shares this onClick path)
   await btn(/^reset$/).click(); await p.waitForTimeout(200);
   const [nx, ny] = await proj([0, 0]);
-  await p.touchscreen.tap(nx, ny); await p.waitForTimeout(350); s = await st();
+  await p.touchscreen.tap(nx, ny); await p.waitForTimeout(1200); s = await st();  // long: the 220ms card-open timer is throttled to ~1s in a headless tab
   ok(s.detail === true && s.focus === 0, `tapping a card opens its detail panel — detail=${s.detail} focus=${s.focus}`);
 
   // 8. FRONTIER: cite + ghost toggles flip; hovering a ghost reports 'ghost' (not a wrong card); click → arXiv

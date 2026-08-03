@@ -44,6 +44,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   let queryMatch: Set<number> | null = null;
   let citeOn = init.citeOn ?? false, ghostsOn = init.ghostsOn ?? false;
   let clickTimer: ReturnType<typeof setTimeout> | null = null;  // single-click card-open, cancelled by a double-click (drill)
+  let suppressClickUntil = 0;  // wall-clock deadline set by dblclick so a trailing deck onClick can't open a card (timestamp, not a timer — Date.now() isn't throttled like setTimeout in a hidden tab)
   let theme: "dark" | "light" = init.theme ?? "dark", themeVer = 0;
   const dark = () => theme !== "light";
   // theme-aware map ink: on a light ground, white spokes/ghost strokes and the dark label pill invert.
@@ -184,6 +185,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     },
     layers: layers(),
     onClick: (info: any) => {
+      if (Date.now() < suppressClickUntil) return;  // ignore the click deck fires right after a double-click
       if (info?.layer?.id === "ghosts" && info.object?.url) { window.open(info.object.url, "_blank"); return; }  // ghosts open immediately
       const idx = info?.layer?.id === "points" && info.index >= 0 ? info.index : -1;
       if (clickTimer) clearTimeout(clickTimer);
@@ -222,6 +224,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   };
   canvas.addEventListener("dblclick", (e) => {
     if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; }  // a double-click drills; cancel the pending card-open
+    suppressClickUntil = Date.now() + 350;  // …and swallow the trailing onClick deck fires right after this
     const info = (deck as any).pickObject({ x: (e as MouseEvent).offsetX, y: (e as MouseEvent).offsetY, radius: 8 });
     if (info && info.layer?.id === "points" && info.index >= 0) drill(info.index);
   });
