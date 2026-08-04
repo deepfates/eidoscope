@@ -73,6 +73,10 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   for (const [x, y] of D.xy) { if (x < bb.minX) bb.minX = x; if (x > bb.maxX) bb.maxX = x; if (y < bb.minY) bb.minY = y; if (y > bb.maxY) bb.maxY = y; }
   const span = Math.max(bb.maxX - bb.minX, bb.maxY - bb.minY) || 2;
   const fitZoom = Math.log2((Math.min(window.innerWidth, window.innerHeight) * 0.92) / span);  // fill more of the canvas (eid-rc20)
+  // orbit dots use world (common) units; this maps a pixel radius to a common radius that renders the SAME
+  // at the orbit home zoom (fitZoom-0.5) and then grows proportionally as you zoom in. (common radius R →
+  // R·2^zoom px, so pick R = px / 2^homeZoom.)
+  const orbitRadiusScale = 1 / Math.pow(2, fitZoom - 0.5);
   const home = (l: Layout): any => l === "orbit"
     ? { target: [0, 0, 0], zoom: fitZoom - 0.5, rotationOrbit: 20, rotationX: 25, minZoom: fitZoom - 3, maxZoom: fitZoom + 9 }
     : l === "axes"
@@ -123,11 +127,14 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     id: "points", data: { length: n },
     getPosition: (_: any, { index }: any) => pos(index) as any,
     getFillColor: (_: any, { index }: any) => { const c = getColor(index); return (isDim(index) ? [c[0], c[1], c[2], 28] : [c[0], c[1], c[2], 255]) as any; },
-    getRadius: (_: any, { index }: any) => getRadius(index),
-    radiusUnits: "pixels", radiusMinPixels: 1.2, billboard: true,
+    // 2D map: pixel radius (dots a constant screen size as you pan). 3D orbit: WORLD (common) radius so dots
+    // scale WITH the zoom — approaching the cloud makes points grow, so zoom reads as moving INTO the object
+    // instead of the structure inflating around a fixed-size dot (radiusMinPixels keeps far points visible).
+    getRadius: (_: any, { index }: any) => (layout === "orbit" ? getRadius(index) * orbitRadiusScale : getRadius(index)),
+    radiusUnits: layout === "orbit" ? "common" : "pixels", radiusMinPixels: 1.2, billboard: true,
     pickable: true, autoHighlight: true, highlightColor: [255, 255, 255, 180],
     transitions: reduce ? undefined : { getPosition: { duration: 700 } },
-    updateTriggers: { getFillColor: colorVer, getRadius: sizeVer, getPosition: posVer },
+    updateTriggers: { getFillColor: colorVer, getRadius: [sizeVer, posVer], getPosition: posVer },
   });
   const spokesLayer = () => new LineLayer({
     id: "spokes", data: focus == null ? [] : (D.nbr[focus] || []).map((j) => ({ j })),

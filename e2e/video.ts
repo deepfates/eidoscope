@@ -38,15 +38,24 @@ await p.waitForFunction(() => ((window as any).__eido?.()?.regions ?? 0) > 0, nu
 await wait(p, 2500); // let the initial mde layout fully settle before we touch anything
 if (MOBILE) { await p.locator('[aria-label="expand controls"]').click().catch(() => {}); await wait(p, 400); } // panel is collapsed under 640px
 
-// Each transition gets a clean 2.5s window so its ~700ms animation plays with settled frames either side.
-console.log("→ mde→axes");   await setControl(p, "layout", "axes");  await wait(p, 2500);
-console.log("→ axes→orbit"); await setControl(p, "layout", "orbit"); await wait(p, 2500);
-console.log("→ orbit→mde");  await setControl(p, "layout", "mde");   await wait(p, 2500);
-// reveal-on-zoom: wheel into the dense core slowly so labels should progressively appear
-console.log("→ zoom-in");
-await p.mouse.move(VP.width / 2, VP.height / 2);
-for (let i = 0; i < 20; i++) { await p.mouse.wheel(0, -150); await wait(p, 90); }
-await wait(p, 1000);
+if (process.env.MODE === "orbitzoom") {
+  // ISOLATE the reported bug: switch to 3D orbit, then wheel-zoom IN — do the points shrink? (they shouldn't)
+  console.log("→ orbit"); await setControl(p, "layout", "orbit"); await wait(p, 2500);
+  console.log("→ zoom-IN in orbit");
+  await p.mouse.move(VP.width / 2, VP.height / 2);
+  for (let i = 0; i < 16; i++) { await p.mouse.wheel(0, -140); await wait(p, 160); } // slow so each step lands on a frame
+  await wait(p, 1000);
+} else {
+  // Each transition gets a clean 2.5s window so its ~700ms animation plays with settled frames either side.
+  console.log("→ mde→axes");   await setControl(p, "layout", "axes");  await wait(p, 2500);
+  console.log("→ axes→orbit"); await setControl(p, "layout", "orbit"); await wait(p, 2500);
+  console.log("→ orbit→mde");  await setControl(p, "layout", "mde");   await wait(p, 2500);
+  // reveal-on-zoom: wheel into the dense core slowly so labels should progressively appear
+  console.log("→ zoom-in");
+  await p.mouse.move(VP.width / 2, VP.height / 2);
+  for (let i = 0; i < 20; i++) { await p.mouse.wheel(0, -150); await wait(p, 90); }
+  await wait(p, 1000);
+}
 
 await p.close(); await ctx.close(); // finalizes the webm
 await browser.close(); server.stop();
