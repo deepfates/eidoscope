@@ -1,33 +1,24 @@
 import type { MapContract } from "../../src/schema";
+import { schemeTableau10, interpolateSinebow } from "d3-scale-chromatic";
+import { rgb } from "d3-color";
 
 // Encodings: how a card's region/metadata/axis-position becomes colour and size. Kept out of the render
 // core so the control panel + legend and the deck layers share ONE source of truth for what a colour means.
 
-// colourblind-safe categorical palette (matches the old viewer); cycles past its length — identity is
-// carried by position + labels + isolate, not colour alone.
-export const PAL: [number, number, number][] = [
-  [57, 135, 229], [217, 89, 38], [25, 158, 112], [201, 133, 0],
-  [213, 81, 129], [0, 131, 0], [144, 133, 233], [230, 103, 103],
-];
 export type RGB = [number, number, number];
-// Extend the 8 curated colourblind-safe base with evenly-spread generated hues (golden-angle, three
-// lightness/saturation tiers) so high-cardinality category sets (21 regions, 34 folders) get many more
-// DISTINGUISHABLE colours before cycling. The curated 8 still colour the most common small-category case;
-// identity for the long tail is carried by position + isolate (facet/region isolate-on-click ships).
+// Categorical palette from the ecosystem instead of a hand-rolled one: Tableau 10 (the widely-used,
+// colourblind-conscious default) colours the common small-category case; for high-cardinality sets
+// (21 regions, 34 folders) we extend by sampling Sinebow — d3's evenly-spaced cyclic hue interpolator —
+// so the long tail stays DISTINGUISHABLE before cycling. Identity is also carried by position + isolate.
+const toRGB = (s: string): RGB => { const c = rgb(s); return [Math.round(c.r), Math.round(c.g), Math.round(c.b)]; };
+export const PAL: RGB[] = schemeTableau10.map(toRGB);
 export const PALX: RGB[] = (() => {
   const out: RGB[] = PAL.map((c) => [...c] as RGB);
-  for (let i = 0; out.length < 24; i++) {
-    const h = (40 + i * 137.508) % 360, tier = i % 3;
-    out.push(hsl(h, tier === 1 ? 0.55 : tier === 2 ? 0.8 : 0.68, tier === 1 ? 0.42 : tier === 2 ? 0.5 : 0.62));
-  }
+  const tail = 24 - out.length;
+  for (let i = 0; i < tail; i++) out.push(toRGB(interpolateSinebow((i + 0.5) / tail)));
   return out;
 })();
 export const col = (c: number): RGB => PALX[((c % PALX.length) + PALX.length) % PALX.length];
-function hsl(h: number, s: number, l: number): RGB {
-  const a = s * Math.min(l, 1 - l);
-  const f = (n: number) => { const k = (n + h / 30) % 12; return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)); };
-  return [Math.round(f(0) * 255), Math.round(f(8) * 255), Math.round(f(4) * 255)];
-}
 // continuous axis gradient (low → high): the old viewer's hsl(250→0, 74%, 40→62%).
 export const axisColor = (t: number): RGB => hsl(250 - Math.max(0, Math.min(1, t)) * 250, 0.74, 0.4 + Math.max(0, Math.min(1, t)) * 0.22);
 
