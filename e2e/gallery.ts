@@ -94,7 +94,8 @@ if (hasPf) shots.push(
 const browser = await chromium.launch();
 const results: { name: string; caption: string; ok: boolean; errs: string[] }[] = [];
 console.log(`gallery: ${shots.length} shots → story/  (Pathfinder ${hasPf ? "included" : "MISSING — pf shots skipped"})\n`);
-for (const s of shots) {
+const only = process.env.SHOTS ? process.env.SHOTS.split(",") : null;  // dev filter: SHOTS=20,36 bun run gallery
+for (const s of (only ? shots.filter((s) => only.some((o) => s.name.startsWith(o))) : shots)) {
   const vp = s.vp || DESKTOP;
   const page = await browser.newPage({ viewport: vp, hasTouch: true, reducedMotion: "no-preference" });
   const errs: string[] = [];

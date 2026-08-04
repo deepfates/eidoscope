@@ -101,10 +101,13 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     const scale = Math.pow(2, viewState?.zoom ?? 0);          // deck ortho: pixels per world unit at this zoom
     const cand = members.map((idx, c) => ({ c, label: dispLabel(labelOf(c)), n: idx.length, p: centroid(idx) })).filter((d) => d.n > 0 && d.label).sort((a, b) => b.n - a.n);
     const charPx = 8;                                             // ~monospace advance at 13px bold
-    const hw = (len: number) => (len * charPx) / 2 + charPx * 1.5; // half-width + ~1.5-char gap between neighbours
+    const hw = (len: number) => (len * charPx) / 2 + charPx * 1.0; // half-width + ~1-char gap between neighbours
     const lineH = 30;                                             // vertical clearance in px (row spacing; long region names stack otherwise)
-    const placed: typeof cand = [];
-    for (const d of cand) if (placed.every((q) => Math.abs((q.p[0] - d.p[0]) * scale) > hw(q.label.length) + hw(d.label.length) || Math.abs((q.p[1] - d.p[1]) * scale) > lineH)) placed.push(d);
+    const fits = (d: any, into: typeof cand) => into.every((q) => Math.abs((q.p[0] - d.p[0]) * scale) > hw(q.label.length) + hw(d.label.length) || Math.abs((q.p[1] - d.p[1]) * scale) > lineH);
+    // Seed with the isolated region so clicking a legend entry ALWAYS surfaces its label (landmark you asked for),
+    // even if a bigger neighbour would otherwise crowd it out; then greedy-place the rest biggest-first.
+    const placed: typeof cand = highlight != null ? cand.filter((d) => d.c === highlight) : [];
+    for (const d of cand) if (!placed.includes(d) && fits(d, placed)) placed.push(d);
     // nudge labels whose centroid sits near a screen edge back on-screen (long region names were clipping on mobile)
     const W = typeof window !== "undefined" ? window.innerWidth : 1200, tx = viewState?.target?.[0] ?? 0;
     for (const d of placed as any[]) { const sx = W / 2 + (d.p[0] - tx) * scale, vw = (d.label.length * charPx) / 2 + 4; d.dx = sx - vw < 6 ? 6 - (sx - vw) : sx + vw > W - 6 ? (W - 6) - (sx + vw) : 0; }
