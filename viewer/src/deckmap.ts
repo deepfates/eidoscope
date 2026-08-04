@@ -1,4 +1,4 @@
-import { Deck, OrthographicView, OrbitView, LinearInterpolator } from "@deck.gl/core";
+import { Deck, OrthographicView, OrbitView } from "@deck.gl/core";
 import { ScatterplotLayer, LineLayer, PolygonLayer, TextLayer } from "@deck.gl/layers";
 import type { MapContract } from "../../src/schema";
 import { col, type RGB } from "./encode";
@@ -19,7 +19,7 @@ export type MapHandle = {
   fitToIndices: (idx: number[]) => void;
   resetView: () => void;
   destroy: () => void;
-  debug: () => { zoom: number; labels: number; regions: number; grain: number; rot: number | null; rotX: number | null; tweening: boolean };  // read-only seam for integration tests
+  debug: () => { zoom: number; labels: number; regions: number; grain: number; rot: number | null; rotX: number | null };  // read-only seam for integration tests
   project: (worldXY: number[]) => number[];  // world → screen px, so tests can click exact nodes/ghosts
   pickAt: (x: number, y: number) => { layer: string | null; url: string | null; index: number } | null;  // what deck picks at a screen px
 };
@@ -72,27 +72,17 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   const bb = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
   for (const [x, y] of D.xy) { if (x < bb.minX) bb.minX = x; if (x > bb.maxX) bb.maxX = x; if (y < bb.minY) bb.minY = y; if (y > bb.maxY) bb.maxY = y; }
   const span = Math.max(bb.maxX - bb.minX, bb.maxY - bb.minY) || 2;
-  const fitZoom = Math.log2((Math.min(window.innerWidth, window.innerHeight) * 0.92) / span);  // fill more of the canvas (a square-ish cloud can't fill a wide screen without cropping data, which we won't do)
+  const fitZoom = Math.log2((Math.min(window.innerWidth, window.innerHeight) * 0.92) / span);  // fill more of the canvas (eid-rc20)
   const home = (l: Layout): any => l === "orbit"
     ? { target: [0, 0, 0], zoom: fitZoom - 0.5, rotationOrbit: 20, rotationX: 25, minZoom: fitZoom - 3, maxZoom: fitZoom + 9 }
     : l === "axes"
       ? { target: [0, 0, 0], zoom: Math.log2(Math.min(window.innerWidth, window.innerHeight) * 0.4), minZoom: fitZoom - 3, maxZoom: fitZoom + 9 }
       : { target: [(bb.minX + bb.maxX) / 2, (bb.minY + bb.maxY) / 2, 0], zoom: fitZoom, minZoom: fitZoom - 2, maxZoom: fitZoom + 9 };
 
-  const posFor = (l: Layout, index: number): number[] => {
-    if (l === "axes") return [((D.scores[xKey]?.[index] ?? 50) - 50) / 50, ((D.scores[yKey]?.[index] ?? 50) - 50) / 50];
-    if (l === "orbit") return [D.xyz[index][0], D.xyz[index][1], D.xyz[index][2]];
-    return [D.xy[index][0], D.xy[index][1]];
-  };
-  // manual position tween for the layout 'smoosh' — deck's getPosition attribute transition doesn't fire
-  // with data:{length}+a functional accessor, so we blend fromLayout→toLayout ourselves over ~650ms and
-  // drive frames with rAF. Only mde↔axes (both 2D); orbit↔ortho hard-cuts (can't lerp 2D↔3D).
-  let tween: { from: (i: number) => number[]; to: (i: number) => number[]; start: number; dur: number } | null = null;
-  let rafId = 0;
-  const easeInOut = (t: number) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
   const pos = (index: number): number[] => {
-    if (tween) { const f = tween.from(index), t = tween.to(index), e = easeInOut(Math.min(1, (performance.now() - tween.start) / tween.dur)); return [f[0] + (t[0] - f[0]) * e, f[1] + (t[1] - f[1]) * e]; }
-    return posFor(layout, index);
+    if (layout === "axes") return [((D.scores[xKey]?.[index] ?? 50) - 50) / 50, ((D.scores[yKey]?.[index] ?? 50) - 50) / 50];
+    if (layout === "orbit") return [D.xyz[index][0], D.xyz[index][1], D.xyz[index][2]];
+    return [D.xy[index][0], D.xy[index][1]];
   };
   const centroid = (idx: number[]): [number, number] => { let x = 0, y = 0; for (const i of idx) { const p = pos(i); x += p[0]; y += p[1]; } return [x / (idx.length || 1), y / (idx.length || 1)]; };
   // greedy declutter: biggest regions first, skip any whose centroid is too close to one already placed
@@ -133,7 +123,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     getRadius: (_: any, { index }: any) => getRadius(index),
     radiusUnits: "pixels", radiusMinPixels: 1.2, billboard: true,
     pickable: true, autoHighlight: true, highlightColor: [255, 255, 255, 180],
-    transitions: undefined,  // position motion is a manual rAF tween (see `tween`), not a deck attribute transition
+    transitions: reduce ? undefined : { getPosition: { duration: 700 } },
     updateTriggers: { getFillColor: colorVer, getRadius: sizeVer, getPosition: posVer },
   });
   const spokesLayer = () => new LineLayer({
@@ -225,7 +215,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     for (const i of idx) { const p = pos(i); if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0]; if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1]; }
     const b = Math.min(window.innerWidth, window.innerHeight), h = home(layout);
     const zoom = Math.max(h.minZoom, Math.min(h.maxZoom, Math.log2((b * 0.6) / Math.max(x1 - x0 || 0.1, y1 - y0 || 0.1))));
-    viewState = { ...viewState, target: [(x0 + x1) / 2, (y0 + y1) / 2, 0], zoom, transitionDuration: reduce ? 0 : 500, transitionInterpolator: null };  // null: don't inherit the layout-switch interpolator (would make the fit ease slowly instead of snap)
+    viewState = { ...viewState, target: [(x0 + x1) / 2, (y0 + y1) / 2, 0], zoom, transitionDuration: reduce ? 0 : 500 };
     deck.setProps({ viewState });
   };
   // drill: step grain finer so the clicked region resolves into sub-clumps (gentle, ≤3 levels), fit to it.
@@ -261,22 +251,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
       if (o.grain !== undefined && o.grain !== grain) { grain = o.grain; recomputeGrain(); highlight = null; colorVer++; }  // grain change clears stale highlight
       const prev = layout;
       if (o.layout) layout = o.layout;
-      if (layout !== prev) {
-        posVer++;
-        const dest = home(layout);
-        const crossProjection = (prev === "orbit") !== (layout === "orbit");  // ortho↔orbit can't tween; mde↔axes can
-        if (crossProjection || reduce) {
-          tween = null; viewState = dest; deck.setProps({ views: [view()], viewState });   // hard swap (different projection, or reduced-motion)
-        } else {
-          // same ortho projection (mde↔axes): points glide (manual tween) while the camera eases — the "smoosh".
-          const fromL = prev, toL = layout, dur = 650;
-          tween = { from: (i) => posFor(fromL, i), to: (i) => posFor(toL, i), start: performance.now(), dur };
-          viewState = { ...dest, transitionDuration: dur, transitionInterpolator: new LinearInterpolator(["target", "zoom"]) };
-          deck.setProps({ viewState });
-          const step = () => { const done = !tween || performance.now() - tween.start >= dur; posVer++; deck.setProps({ layers: layers() }); if (done) tween = null; else rafId = requestAnimationFrame(step); };
-          cancelAnimationFrame(rafId); rafId = requestAnimationFrame(step);
-        }
-      }
+      if (layout !== prev) { posVer++; viewState = home(layout); deck.setProps({ views: [view()], viewState }); }
       deck.setProps({ layers: layers() });
     },
     setFocus: (i) => { focus = i; fSet = i == null ? null : new Set<number>([i, ...(D.nbr[i] || [])]); colorVer++; deck.setProps({ layers: layers() }); },
@@ -288,10 +263,10 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
       colorVer++; deck.setProps({ layers: layers() });
     },
     fitToIndices: (idx) => fit(idx),
-    debug: () => ({ zoom: viewState?.zoom ?? 0, labels: decluttered().length, regions: members.filter((m) => m.length).length, grain, rot: viewState?.rotationOrbit ?? null, rotX: viewState?.rotationX ?? null, tweening: !!tween }),
+    debug: () => ({ zoom: viewState?.zoom ?? 0, labels: decluttered().length, regions: members.filter((m) => m.length).length, grain, rot: viewState?.rotationOrbit ?? null, rotX: viewState?.rotationX ?? null }),
     project: (worldXY) => { const vp = (deck as any).getViewports?.()[0]; return vp ? vp.project([worldXY[0], worldXY[1], 0]).slice(0, 2) : [0, 0]; },
     pickAt: (x, y) => { const o = (deck as any).pickObject?.({ x, y, radius: 8 }); return o ? { layer: o.layer?.id ?? null, url: o.object?.url ?? null, index: o.index ?? -1 } : null; },
     resetView: () => { viewState = home(layout); deck.setProps({ viewState }); },
-    destroy: () => { cancelAnimationFrame(rafId); deck.finalize(); },
+    destroy: () => deck.finalize(),
   };
 }

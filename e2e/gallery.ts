@@ -86,7 +86,8 @@ if (hasPf) shots.push(
   { name: "34-readwise-core-zoom", caption: "Readwise — zoomed deep into the densest cluster", map: "map.eido", vp: DESKTOP, setup: async (p) => { await p.mouse.move(720, 450); for (let i = 0; i < 22; i++) { await p.mouse.wheel(0, -150); await p.waitForTimeout(25); } await settle(p, 600); } },
   { name: "35-tldr-core-zoom", caption: "tldr — zoomed deep into the densest cluster", map: "tldr.eido", vp: DESKTOP, setup: async (p) => { await p.mouse.move(720, 450); for (let i = 0; i < 22; i++) { await p.mouse.wheel(0, -150); await p.waitForTimeout(25); } await settle(p, 600); } },
   { name: "36-pf-region-zoom", caption: "Pathfinder — isolate one region, THEN zoom in: does isolate make the core legible?", map: "pathfinder.eido", vp: DESKTOP, setup: async (p) => { await btn(p, /^isolate region/).click(); await settle(p, 400); await p.mouse.move(700, 460); for (let i = 0; i < 16; i++) { await p.mouse.wheel(0, -150); await p.waitForTimeout(25); } await settle(p, 600); } },
-  // smoosh feel (eid-quf8): same mde→axes switch caught at two moments — if the cloud differs between them, it's animating, not hard-cutting
+  // transition mid-flight (settleMs=150 → screenshot 150ms AFTER the switch, mid a ~700ms transition):
+  // if points are partway (a loose in-between cloud), it animates; if already the final layout, it hard-cuts/blips.
 );
 
 // ── run ────────────────────────────────────────────────────────────────────────────────────
