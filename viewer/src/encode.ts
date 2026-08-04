@@ -1,5 +1,5 @@
 import type { MapContract } from "../../src/schema";
-import { schemeTableau10, interpolateSinebow } from "d3-scale-chromatic";
+import { schemeTableau10, interpolateSinebow, interpolateViridis } from "d3-scale-chromatic";
 import { rgb } from "d3-color";
 
 // Encodings: how a card's region/metadata/axis-position becomes colour and size. Kept out of the render
@@ -19,8 +19,9 @@ export const PALX: RGB[] = (() => {
   return out;
 })();
 export const col = (c: number): RGB => PALX[((c % PALX.length) + PALX.length) % PALX.length];
-// continuous axis gradient (low → high): the old viewer's hsl(250→0, 74%, 40→62%).
-export const axisColor = (t: number): RGB => hsl(250 - Math.max(0, Math.min(1, t)) * 250, 0.74, 0.4 + Math.max(0, Math.min(1, t)) * 0.22);
+// continuous axis gradient (low → high) = Viridis, the ecosystem-standard perceptually-uniform,
+// colourblind-friendly sequential scale (replaces a hand-rolled blue→red HSL ramp that wasn't uniform).
+export const axisColor = (t: number): RGB => toRGB(interpolateViridis(Math.max(0, Math.min(1, t))));
 
 // A metadata facet — the corpus's OWN organization (source folder, author) surfaced as a colour lens.
 // Self-filtering: only offered if it covers most of the corpus and has a legible number of values.
