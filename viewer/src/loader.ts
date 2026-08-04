@@ -9,7 +9,7 @@ const MAGIC = "EIDOBIN1";
 type BufSpec = { key: string; type: "f32" | "i32"; length: number; offset: number };
 
 async function gunzip(bytes: Uint8Array): Promise<Uint8Array> {
-  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+  const stream = new Blob([bytes as BlobPart]).stream().pipeThrough(new DecompressionStream("gzip"));
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 

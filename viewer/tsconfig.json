@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "esnext",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "lib": ["esnext", "dom", "dom.iterable"],
+    "types": []
+  },
+  "//": "Type-checks the viewer's plain .ts logic (encode/deckmap/mapbin) — the layer that vite build (esbuild, no typecheck) and the root tsconfig (include=[src,test]) both skip. .svelte files need svelte-check (eid-adrx follow-up).",
+  "include": ["src/**/*.ts"]
+}

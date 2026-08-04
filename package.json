@@ -11,8 +11,9 @@
     "fixture": "bun run src/cli.ts --fixture",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
+    "typecheck:viewer": "cd viewer && tsc -p tsconfig.json",
     "e2e": "bun run e2e/viewer.e2e.ts",
-    "qa": "tsc --noEmit && bun test && bun run e2e/viewer.e2e.ts && bun run e2e/offline.ts",
+    "qa": "tsc --noEmit && bun run typecheck:viewer && bun test && bun run e2e/viewer.e2e.ts && bun run e2e/offline.ts",
     "check:redundancy": "bun run src/redundancy.ts",
     "gallery": "bun run e2e/gallery.ts",
     "singlefile": "bun bin/build-singlefile.ts"
