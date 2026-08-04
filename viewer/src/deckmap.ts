@@ -2,6 +2,7 @@ import { Deck, OrthographicView, OrbitView } from "@deck.gl/core";
 import { ScatterplotLayer, LineLayer, PolygonLayer, TextLayer } from "@deck.gl/layers";
 import type { MapContract } from "../../src/schema";
 import { col, type RGB } from "./encode";
+import { easeCubicInOut } from "d3-ease";
 
 // The map's rendering + interaction core. ONE Deck for its whole life (canvas pointer capture never lost);
 // layout switches swap the view + camera via setProps. deck.gl gives GPU rendering, a controller with
@@ -133,7 +134,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     getRadius: (_: any, { index }: any) => (layout === "orbit" ? getRadius(index) * orbitRadiusScale : getRadius(index)),
     radiusUnits: layout === "orbit" ? "common" : "pixels", radiusMinPixels: 1.2, billboard: true,
     pickable: true, autoHighlight: true, highlightColor: [255, 255, 255, 180],
-    transitions: reduce ? undefined : { getPosition: { duration: 700 } },
+    transitions: reduce ? undefined : { getPosition: { duration: 700, easing: easeCubicInOut } },
     updateTriggers: { getFillColor: colorVer, getRadius: [sizeVer, posVer], getPosition: posVer },
   });
   const spokesLayer = () => new LineLayer({
