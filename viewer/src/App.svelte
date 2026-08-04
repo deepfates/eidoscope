@@ -211,6 +211,8 @@
 </script>
 
 <div class="relative h-screen w-screen overflow-hidden bg-[var(--bg)] text-[var(--ink)] touch-none">
+  <!-- svelte-ignore a11y_no_interactive_element_to_noninteractive_role -->
+  <!-- role="img"+aria-label is the intended pattern: present the canvas as one labeled image and route AT users to the deck list (the real accessible surface) -->
   <canvas bind:this={canvas} class="absolute inset-0 h-full w-full" role="img" aria-label="Document similarity map (visual). Use the deck list for a screen-reader-accessible view of the same cards."></canvas>
 
   {#if status}

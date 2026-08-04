@@ -10,6 +10,6 @@
     "lib": ["esnext", "dom", "dom.iterable"],
     "types": []
   },
-  "//": "Type-checks the viewer's plain .ts logic (encode/deckmap/mapbin) — the layer that vite build (esbuild, no typecheck) and the root tsconfig (include=[src,test]) both skip. .svelte files need svelte-check (eid-adrx follow-up).",
+  "//": "Type-checks the viewer that vite build (esbuild, no typecheck) and the root tsconfig (include=[src,test]) both skip. tsc uses this include for the plain .ts logic; svelte-check reuses the same tsconfig but discovers .svelte files itself.",
   "include": ["src/**/*.ts"]
 }
