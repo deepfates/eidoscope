@@ -20,7 +20,7 @@ export type MapHandle = {
   fitToIndices: (idx: number[]) => void;
   resetView: () => void;
   destroy: () => void;
-  debug: () => { zoom: number; labels: number; regions: number; grain: number; rot: number | null; rotX: number | null };  // read-only seam for integration tests
+  debug: () => { zoom: number; labels: number; regions: number; grain: number; rot: number | null; rotX: number | null; pos: number[] | null; span3: number };  // read-only seam for integration tests
   project: (worldXY: number[]) => number[];  // world → screen px, so tests can click exact nodes/ghosts
   pickAt: (x: number, y: number) => { layer: string | null; url: string | null; index: number } | null;  // what deck picks at a screen px
 };
@@ -73,19 +73,22 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   const bb = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
   for (const [x, y] of D.xy) { if (x < bb.minX) bb.minX = x; if (x > bb.maxX) bb.maxX = x; if (y < bb.minY) bb.minY = y; if (y > bb.maxY) bb.maxY = y; }
   const span = Math.max(bb.maxX - bb.minX, bb.maxY - bb.minY) || 2;
-  const fitZoom = Math.log2((Math.min(window.innerWidth, window.innerHeight) * 0.92) / span);  // fill more of the canvas (eid-rc20)
+  // Guard the viewport dimension: if the map mounts into a not-yet-laid-out canvas (embedded/iframe/late
+  // layout), innerWidth/Height can be 0 → log2(0) = -Infinity → a non-invertible projection and a blank map
+  // that never recovers. Fall back to a sane size so zoom stays finite; deck re-renders once the canvas sizes.
+  const vp = Math.min(window.innerWidth || 0, window.innerHeight || 0) || 800;
+  const fitZoom = Math.log2((vp * 0.92) / span);  // fill more of the canvas (eid-rc20)
   // 3D extent (the fly/orbit layout reads D.xyz) — for camera framing + world-unit point size.
   const bb3 = { minX: Infinity, minY: Infinity, minZ: Infinity, maxX: -Infinity, maxY: -Infinity, maxZ: -Infinity };
   for (const [x, y, z] of D.xyz) { if (x < bb3.minX) bb3.minX = x; if (x > bb3.maxX) bb3.maxX = x; if (y < bb3.minY) bb3.minY = y; if (y > bb3.maxY) bb3.maxY = y; if (z < bb3.minZ) bb3.minZ = z; if (z > bb3.maxZ) bb3.maxZ = z; }
   const c3 = [(bb3.minX + bb3.maxX) / 2, (bb3.minY + bb3.maxY) / 2, (bb3.minZ + bb3.maxZ) / 2];
   const span3 = Math.max(bb3.maxX - bb3.minX, bb3.maxY - bb3.minY, bb3.maxZ - bb3.minZ) || 2;
   // FirstPersonView flies THROUGH a fixed constellation: the camera translates among fixed 3D points, dots
-  // hold a constant screen size (like stars) — the "same size and distance, zoom around among them" feel.
-  // (radiusUnits 'common' projects sub-pixel under the non-geo first-person camera, so pixels it is.)
+  // hold a constant screen size (like stars). (radiusUnits 'common' projects sub-pixel here, so pixels.)
   const home = (l: Layout): any => l === "orbit"
-    ? { position: [c3[0], c3[1] - span3 * 1.4, c3[2]], bearing: 0, pitch: 0 }  // camera set back from the cloud centroid, looking into it (+y)
+    ? { position: [c3[0], c3[1] - span3 * 1.4, c3[2]], bearing: 0, pitch: 0 }  // set back from the centroid, looking in (+y)
     : l === "axes"
-      ? { target: [0, 0, 0], zoom: Math.log2(Math.min(window.innerWidth, window.innerHeight) * 0.4), minZoom: fitZoom - 3, maxZoom: fitZoom + 9 }
+      ? { target: [0, 0, 0], zoom: Math.log2(vp * 0.4), minZoom: fitZoom - 3, maxZoom: fitZoom + 9 }
       : { target: [(bb.minX + bb.maxX) / 2, (bb.minY + bb.maxY) / 2, 0], zoom: fitZoom, minZoom: fitZoom - 2, maxZoom: fitZoom + 9 };
 
   const pos = (index: number): number[] => {
@@ -128,6 +131,17 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
 
   // PROBE (eid-6vgy): first-person fly-through instead of orbit. FirstPersonView is normally geospatial;
   // this tests whether it renders our CARTESIAN xyz cloud with a bare `position` viewState (no lng/lat).
+  // deck's FirstPersonController moves a hardcoded 20 world units per step (MOVEMENT_SPEED, from source) —
+  // built for geospatial scenes. Our umap cloud is only ~span3 units across, so the default overshoots ~5×.
+  // Calibrate the NATIVE controls to the cloud instead of scaling data or hand-rolling movement: arrow-key
+  // moveSpeed ≈ span3/12 (linear, predictable), and a gentle scrollZoom.speed so a wheel tick nudges, not leaps.
+  // The controller is set at the DECK level (per-view controller props are ignored when the Deck has one),
+  // so it must be layout-aware and updated on every switch. In fly mode, calibrate the NATIVE controls to
+  // the small cloud: arrow-key moveSpeed ≈ span3/12, gentle scrollZoom, no inertia (momentum flung the tiny
+  // cloud off-screen). 2D keeps pan/pinch-zoom.
+  const controllerFor = (l: Layout) => l === "orbit"
+    ? { doubleClickZoom: false, inertia: false, keyboard: { moveSpeed: span3 * 0.08 }, scrollZoom: { speed: 0.00025 } }
+    : { doubleClickZoom: false, inertia: true };
   const view = () => (layout === "orbit" ? new FirstPersonView({ id: "orbit", fovy: 60 }) : new OrthographicView({ id: "ortho", flipY: false }));
 
   const pointsLayer = () => new ScatterplotLayer({
@@ -209,7 +223,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   const paintLabels = () => { cur = cur.map((l: any) => (l && l.id === "labels" ? labelLayer() : l)); deck.setProps({ layers: cur }); };
   const deck = new Deck({
     canvas, views: [view()], viewState,
-    controller: { doubleClickZoom: false, inertia: true }, pickingRadius: 8,
+    controller: controllerFor(layout), pickingRadius: 8,
     onViewStateChange: ({ viewState: vs }: any) => {
       const zoomed = Math.abs((vs?.zoom ?? 0) - (viewState?.zoom ?? 0)) > 0.08;
       viewState = vs; deck.setProps({ viewState });
@@ -282,7 +296,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
         // (2^zoom px per world unit), so KEEP the current target+zoom and only swap the view + add/drop the
         // orbit rotation. The points still ease from the flat plane (z=0) up into xyz — that's the 3D reveal.
         const viewChanged = (layout === "orbit") !== (prev === "orbit");
-        if (viewChanged) { viewState = home(layout); deck.setProps({ views: [view()], viewState }); }  // ortho<->fly: view types differ, reset to the new view's home
+        if (viewChanged) { viewState = home(layout); deck.setProps({ views: [view()], viewState, controller: controllerFor(layout) }); }  // ortho<->fly: view + controller differ, reset to the new view's home
       }
       paint();
     },
@@ -295,7 +309,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
       colorVer++; paint();
     },
     fitToIndices: (idx) => fit(idx),
-    debug: () => ({ zoom: (deck.getViewports?.()?.[0] as any)?.zoom ?? viewState?.zoom ?? 0, labels: decluttered().length, regions: members.filter((m) => m.length).length, grain, rot: viewState?.rotationOrbit ?? null, rotX: viewState?.rotationX ?? null }),
+    debug: () => ({ zoom: (deck.getViewports?.()?.[0] as any)?.zoom ?? viewState?.zoom ?? 0, labels: decluttered().length, regions: members.filter((m) => m.length).length, grain, rot: viewState?.rotationOrbit ?? null, rotX: viewState?.rotationX ?? null, pos: viewState?.position ?? null, span3 }),
     project: (worldXY) => { const vp = (deck as any).getViewports?.()[0]; return vp ? vp.project([worldXY[0], worldXY[1], 0]).slice(0, 2) : [0, 0]; },
     pickAt: (x, y) => { const o = (deck as any).pickObject?.({ x, y, radius: 8 }); return o ? { layer: o.layer?.id ?? null, url: o.object?.url ?? null, index: o.index ?? -1 } : null; },
     resetView: () => { viewState = home(layout); deck.setProps({ viewState }); },
