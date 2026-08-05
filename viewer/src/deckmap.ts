@@ -264,14 +264,17 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
       if (o.layout) layout = o.layout;
       if (layout !== prev) {
         posVer++;
-        // ortho<->orbit changes the VIEW TYPE — swap the view and set its camera directly (can't tween types).
-        // mde<->axes share the OrthographicView, so LEAVE the camera exactly where the user has it and let only
-        // the point positions ease into the new layout. (Resetting to the layout's home snapped the zoom first
-        // — a jarring pre-jump the eased positions couldn't hide, worst on the 13k-pt map. deck's viewState
-        // transition can't smooth it here because the controlled onViewStateChange feeds the state back every
-        // frame and cancels it — so the right move is simply not to jump.)
+        // Never reset the camera on a layout switch — that snapped the zoom before the points eased (the
+        // jarring pre-jump). mde<->axes share the OrthographicView, so we change nothing but posVer and let
+        // the positions ease. ortho<->orbit changes the VIEW TYPE, but `zoom` means the same in both
+        // (2^zoom px per world unit), so KEEP the current target+zoom and only swap the view + add/drop the
+        // orbit rotation. The points still ease from the flat plane (z=0) up into xyz — that's the 3D reveal.
         const viewChanged = (layout === "orbit") !== (prev === "orbit");
-        if (viewChanged) { viewState = home(layout); deck.setProps({ views: [view()], viewState }); }
+        if (viewChanged) {
+          const h = home(layout), keep = { target: viewState?.target ?? [0, 0, 0], zoom: viewState?.zoom ?? h.zoom, minZoom: h.minZoom, maxZoom: h.maxZoom };
+          viewState = layout === "orbit" ? { ...keep, rotationOrbit: 20, rotationX: 25 } : keep;
+          deck.setProps({ views: [view()], viewState });
+        }
       }
       deck.setProps({ layers: layers() });
     },

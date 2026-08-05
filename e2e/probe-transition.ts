@@ -25,7 +25,7 @@ await p.waitForTimeout(2000);
 await p.evaluate(() => { (window as any).__samples = []; const tick = () => { const e = (window as any).__eido(); (window as any).__samples.push({ t: performance.now(), zoom: +e.zoom.toFixed(4), layout: e.layout }); (window as any).__raf = requestAnimationFrame(tick); }; tick(); });
 await p.waitForTimeout(150);
 const t0 = await p.evaluate(() => { (window as any).__switchT = performance.now(); return (window as any).__switchT; });
-await setControl(p, "layout", "axes");
+await setControl(p, "layout", process.env.TO || "axes");
 await p.waitForTimeout(1200);
 await p.evaluate(() => cancelAnimationFrame((window as any).__raf));
 const { samples, switchT } = await p.evaluate(() => ({ samples: (window as any).__samples, switchT: (window as any).__switchT }));
