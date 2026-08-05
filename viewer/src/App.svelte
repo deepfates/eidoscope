@@ -203,7 +203,7 @@
   const legendAxis = $derived(data?.axes.find((x) => x.key === color));
   const xAxis = $derived(data?.axes.find((a) => a.key === xKey));
   const yAxis = $derived(data?.axes.find((a) => a.key === yKey));
-  const hint = $derived(layout === "axes" ? "positioned by where each card projects on the two axes" : layout === "orbit" ? "drag to rotate · pinch to zoom" : "proximity = similarity · tap a card");
+  const hint = $derived(layout === "axes" ? "positioned by where each card projects on the two axes" : layout === "orbit" ? "drag to look · arrow keys / scroll to fly through" : "proximity = similarity · tap a card");
   const prov = $derived(data?.provenance);   // so a passed-around file introduces itself
   const provDate = (g?: number) => (g ? new Date(g).toISOString().slice(0, 10) : "");
   $effect(() => { try { document.title = prov?.title ? `${prov.title} · eidoscope 🔭` : "eidoscope 🔭"; } catch {} });
@@ -248,7 +248,7 @@
       <div class="mb-2 text-xs text-[var(--dim)]">{data.ids.length} cards · {curCount} regions</div>
       <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">layout</span>
         <select bind:value={layout} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">
-          <option value="mde">neighbor map</option><option value="axes">axis scatter</option><option value="orbit">3D orbit</option>
+          <option value="mde">neighbor map</option><option value="axes">axis scatter</option><option value="orbit">3D fly-through</option>
         </select></label>
       {#if layout === "axes"}
         <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">x-axis</span>

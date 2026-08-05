@@ -1,4 +1,4 @@
-import { Deck, OrthographicView, OrbitView } from "@deck.gl/core";
+import { Deck, OrthographicView, OrbitView, FirstPersonView } from "@deck.gl/core";
 import { ScatterplotLayer, LineLayer, PolygonLayer, TextLayer } from "@deck.gl/layers";
 import type { MapContract } from "../../src/schema";
 import { col, type RGB } from "./encode";
@@ -74,12 +74,16 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   for (const [x, y] of D.xy) { if (x < bb.minX) bb.minX = x; if (x > bb.maxX) bb.maxX = x; if (y < bb.minY) bb.minY = y; if (y > bb.maxY) bb.maxY = y; }
   const span = Math.max(bb.maxX - bb.minX, bb.maxY - bb.minY) || 2;
   const fitZoom = Math.log2((Math.min(window.innerWidth, window.innerHeight) * 0.92) / span);  // fill more of the canvas (eid-rc20)
-  // orbit dots use world (common) units; this maps a pixel radius to a common radius that renders the SAME
-  // at the orbit home zoom (fitZoom-0.5) and then grows proportionally as you zoom in. (common radius R →
-  // R·2^zoom px, so pick R = px / 2^homeZoom.)
-  const orbitRadiusScale = 1 / Math.pow(2, fitZoom - 0.5);
+  // 3D extent (the fly/orbit layout reads D.xyz) — for camera framing + world-unit point size.
+  const bb3 = { minX: Infinity, minY: Infinity, minZ: Infinity, maxX: -Infinity, maxY: -Infinity, maxZ: -Infinity };
+  for (const [x, y, z] of D.xyz) { if (x < bb3.minX) bb3.minX = x; if (x > bb3.maxX) bb3.maxX = x; if (y < bb3.minY) bb3.minY = y; if (y > bb3.maxY) bb3.maxY = y; if (z < bb3.minZ) bb3.minZ = z; if (z > bb3.maxZ) bb3.maxZ = z; }
+  const c3 = [(bb3.minX + bb3.maxX) / 2, (bb3.minY + bb3.maxY) / 2, (bb3.minZ + bb3.maxZ) / 2];
+  const span3 = Math.max(bb3.maxX - bb3.minX, bb3.maxY - bb3.minY, bb3.maxZ - bb3.minZ) || 2;
+  // FirstPersonView flies THROUGH a fixed constellation: the camera translates among fixed 3D points, dots
+  // hold a constant screen size (like stars) — the "same size and distance, zoom around among them" feel.
+  // (radiusUnits 'common' projects sub-pixel under the non-geo first-person camera, so pixels it is.)
   const home = (l: Layout): any => l === "orbit"
-    ? { target: [0, 0, 0], zoom: fitZoom - 0.5, rotationOrbit: 20, rotationX: 25, minZoom: fitZoom - 3, maxZoom: fitZoom + 9 }
+    ? { position: [c3[0], c3[1] - span3 * 1.4, c3[2]], bearing: 0, pitch: 0 }  // camera set back from the cloud centroid, looking into it (+y)
     : l === "axes"
       ? { target: [0, 0, 0], zoom: Math.log2(Math.min(window.innerWidth, window.innerHeight) * 0.4), minZoom: fitZoom - 3, maxZoom: fitZoom + 9 }
       : { target: [(bb.minX + bb.maxX) / 2, (bb.minY + bb.maxY) / 2, 0], zoom: fitZoom, minZoom: fitZoom - 2, maxZoom: fitZoom + 9 };
@@ -122,7 +126,9 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   // a point dims if excluded by the active focus/highlight isolate OR by the search query
   const isDim = (index: number) => { const ds = dimSet(); if (ds && !ds.has(index)) return true; if (queryMatch && !queryMatch.has(index)) return true; return false; };
 
-  const view = () => (layout === "orbit" ? new OrbitView({ id: "orbit", orbitAxis: "Y", fovy: 50 }) : new OrthographicView({ id: "ortho", flipY: false }));
+  // PROBE (eid-6vgy): first-person fly-through instead of orbit. FirstPersonView is normally geospatial;
+  // this tests whether it renders our CARTESIAN xyz cloud with a bare `position` viewState (no lng/lat).
+  const view = () => (layout === "orbit" ? new FirstPersonView({ id: "orbit", fovy: 60 }) : new OrthographicView({ id: "ortho", flipY: false }));
 
   const pointsLayer = () => new ScatterplotLayer({
     id: "points", data: { length: n },
@@ -131,8 +137,8 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     // 2D map: pixel radius (dots a constant screen size as you pan). 3D orbit: WORLD (common) radius so dots
     // scale WITH the zoom — approaching the cloud makes points grow, so zoom reads as moving INTO the object
     // instead of the structure inflating around a fixed-size dot (radiusMinPixels keeps far points visible).
-    getRadius: (_: any, { index }: any) => (layout === "orbit" ? getRadius(index) * orbitRadiusScale : getRadius(index)),
-    radiusUnits: layout === "orbit" ? "common" : "pixels", radiusMinPixels: 1.2, billboard: true,
+    getRadius: (_: any, { index }: any) => getRadius(index),
+    radiusUnits: "pixels", radiusMinPixels: 1.2, billboard: true,
     pickable: true, autoHighlight: true, highlightColor: [255, 255, 255, 180],
     transitions: reduce ? undefined : { getPosition: { duration: 700, easing: easeCubicInOut } },
     updateTriggers: { getFillColor: colorVer, getRadius: [sizeVer, posVer], getPosition: posVer },
@@ -270,11 +276,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
         // (2^zoom px per world unit), so KEEP the current target+zoom and only swap the view + add/drop the
         // orbit rotation. The points still ease from the flat plane (z=0) up into xyz — that's the 3D reveal.
         const viewChanged = (layout === "orbit") !== (prev === "orbit");
-        if (viewChanged) {
-          const h = home(layout), keep = { target: viewState?.target ?? [0, 0, 0], zoom: viewState?.zoom ?? h.zoom, minZoom: h.minZoom, maxZoom: h.maxZoom };
-          viewState = layout === "orbit" ? { ...keep, rotationOrbit: 20, rotationX: 25 } : keep;
-          deck.setProps({ views: [view()], viewState });
-        }
+        if (viewChanged) { viewState = home(layout); deck.setProps({ views: [view()], viewState }); }  // ortho<->fly: view types differ, reset to the new view's home
       }
       deck.setProps({ layers: layers() });
     },

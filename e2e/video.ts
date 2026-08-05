@@ -21,7 +21,7 @@ const setControl = (page: Page, label: string, value: string) => page.evaluate((
 const wait = (p: Page, ms: number) => p.waitForTimeout(ms);
 
 // MODE=switch → light readwise map (fast/smooth) to judge the mde→axes ease frame-by-frame at 24fps
-const map = process.env.MODE === "switch" ? "map.eido" : hasPf ? "pathfinder.eido" : "map.eido";
+const map = (process.env.MODE === "switch" || process.env.MODE === "flythrough") ? "map.eido" : hasPf ? "pathfinder.eido" : "map.eido";
 // env knobs so one harness characterises desktop/mobile × reduced-motion on/off:
 //   MOBILE=1  → 390×844 viewport   RM=reduce → emulate prefers-reduced-motion (the iOS "Reduce Motion" setting)
 const MOBILE = process.env.MOBILE === "1";
@@ -39,7 +39,15 @@ await p.waitForFunction(() => ((window as any).__eido?.()?.regions ?? 0) > 0, nu
 await wait(p, 2500); // let the initial mde layout fully settle before we touch anything
 if (MOBILE) { await p.locator('[aria-label="expand controls"]').click().catch(() => {}); await wait(p, 400); } // panel is collapsed under 640px
 
-if (process.env.MODE === "switch") {
+if (process.env.MODE === "flythrough") {
+  // first-person: switch to 3D, focus the canvas, then MOVE the camera forward through the constellation.
+  // LOOK for: near points GROW as we approach (perspective), far points small, relative geometry stable.
+  console.log("→ 3D (first-person)"); await setControl(p, "layout", "orbit"); await wait(p, 1500);
+  await p.evaluate(() => (document.querySelector("canvas") as HTMLCanvasElement)?.focus()); await wait(p, 200); // focus WITHOUT clicking a card
+  console.log("→ fly forward");
+  for (let i = 0; i < 22; i++) { await p.keyboard.press("ArrowUp"); await p.mouse.wheel(0, -60); await wait(p, 110); }
+  await wait(p, 800);
+} else if (process.env.MODE === "switch") {
   // one clean mde→axes, tight window either side, to see camera+points ease vs snap
   console.log("→ mde→axes (isolated)"); await setControl(p, "layout", "axes"); await wait(p, 1800);
 } else if (process.env.MODE === "orbitzoom") {
