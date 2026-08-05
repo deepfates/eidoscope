@@ -139,7 +139,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     // instead of the structure inflating around a fixed-size dot (radiusMinPixels keeps far points visible).
     getRadius: (_: any, { index }: any) => getRadius(index),
     radiusUnits: "pixels", radiusMinPixels: 1.2, billboard: true,
-    pickable: true, autoHighlight: true, highlightColor: [255, 255, 255, 180],
+    pickable: true, autoHighlight: n < 4000, highlightColor: [255, 255, 255, 180],
     transitions: reduce ? undefined : { getPosition: { duration: 700, easing: easeCubicInOut } },
     updateTriggers: { getFillColor: colorVer, getRadius: [sizeVer, posVer], getPosition: posVer },
   });
@@ -201,15 +201,21 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   ];
 
   let viewState: any = home(layout);
+  // Keep the live layer array so the per-frame zoom handler can refresh ONLY the label layer (reveal-on-zoom)
+  // instead of rebuilding the whole stack (incl. the 13k-pt cloud) every wheel tick — that was ~5fps at 13k
+  // (measured, e2e/perf.ts). Reusing the other layer INSTANCES lets deck diff them as unchanged (no re-upload).
+  let cur: any[] = layers();
+  const paint = () => { cur = layers(); deck.setProps({ layers: cur }); };                                   // full rebuild (color/focus/layout change) — keeps `cur` fresh
+  const paintLabels = () => { cur = cur.map((l: any) => (l && l.id === "labels" ? labelLayer() : l)); deck.setProps({ layers: cur }); };
   const deck = new Deck({
     canvas, views: [view()], viewState,
     controller: { doubleClickZoom: false, inertia: true }, pickingRadius: 8,
     onViewStateChange: ({ viewState: vs }: any) => {
       const zoomed = Math.abs((vs?.zoom ?? 0) - (viewState?.zoom ?? 0)) > 0.08;
       viewState = vs; deck.setProps({ viewState });
-      if (zoomed && showLabels) deck.setProps({ layers: layers() });  // reveal/hide labels as zoom changes
+      if (zoomed && showLabels) paintLabels();  // reveal/hide labels as zoom changes — label layer only, not the cloud
     },
-    layers: layers(),
+    layers: cur,
     onClick: (info: any) => {
       if (Date.now() < suppressClickUntil) return;  // ignore the click deck fires right after a double-click
       if (info?.layer?.id === "ghosts" && info.object?.url) { window.open(info.object.url, "_blank"); return; }  // ghosts open immediately
@@ -244,7 +250,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     for (let l = grain + 1; l < levels.length && l <= grain + 3; l++) { const sub = new Set<number>(); for (const i of curMembers) sub.add(levels[l][i]); newGrain = l; if (sub.size >= 2) break; }
     if (newGrain === grain) return;
     grain = newGrain; recomputeGrain(); highlight = null; colorVer++;
-    deck.setProps({ layers: layers() });
+    paint();
     fit(members[levels[newGrain][nodeIdx]] || []);
     init.onGrainChange?.(newGrain);
   };
@@ -278,15 +284,15 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
         const viewChanged = (layout === "orbit") !== (prev === "orbit");
         if (viewChanged) { viewState = home(layout); deck.setProps({ views: [view()], viewState }); }  // ortho<->fly: view types differ, reset to the new view's home
       }
-      deck.setProps({ layers: layers() });
+      paint();
     },
-    setFocus: (i) => { focus = i; fSet = i == null ? null : new Set<number>([i, ...(D.nbr[i] || [])]); colorVer++; deck.setProps({ layers: layers() }); },
-    setHighlight: (c) => { highlight = c; highlightSet = null; colorVer++; deck.setProps({ layers: layers() }); },
-    setHighlightSet: (idx, color) => { highlightSet = idx && idx.length ? new Set(idx) : null; if (color) highlightSetColor = color; highlight = null; colorVer++; deck.setProps({ layers: layers() }); },
+    setFocus: (i) => { focus = i; fSet = i == null ? null : new Set<number>([i, ...(D.nbr[i] || [])]); colorVer++; paint(); },
+    setHighlight: (c) => { highlight = c; highlightSet = null; colorVer++; paint(); },
+    setHighlightSet: (idx, color) => { highlightSet = idx && idx.length ? new Set(idx) : null; if (color) highlightSetColor = color; highlight = null; colorVer++; paint(); },
     setQuery: (q) => {
       const s = q.trim().toLowerCase();
       queryMatch = !s ? null : new Set<number>(D.ids.map((_, i) => i).filter((i) => D.titles[i].toLowerCase().includes(s) || D.cores[i].toLowerCase().includes(s)));
-      colorVer++; deck.setProps({ layers: layers() });
+      colorVer++; paint();
     },
     fitToIndices: (idx) => fit(idx),
     debug: () => ({ zoom: (deck.getViewports?.()?.[0] as any)?.zoom ?? viewState?.zoom ?? 0, labels: decluttered().length, regions: members.filter((m) => m.length).length, grain, rot: viewState?.rotationOrbit ?? null, rotX: viewState?.rotationX ?? null }),
