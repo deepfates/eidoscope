@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { loadMap, mapUrl } from "./loader";
+  import { loadMap, mapUrl, decodeEido } from "./loader";
   import { createMap, type MapHandle, type Layout } from "./deckmap";
   import { facets, colorFor, sizeFor, col, axisColor, type Facet } from "./encode";
   import type { MapContract } from "../../src/schema";
@@ -153,6 +153,39 @@
     return { destroy() { node.removeEventListener("keydown", onKey); try { opener?.focus(); } catch {} } };
   }
 
+  // Bring a decoded map onto the canvas — used for the first load AND for opening a new file/url at runtime,
+  // so the viewer is a general .eido opener, not welded to one bundled map. Tears down the old GPU context,
+  // resets per-corpus selection, re-wires the createMap handle + the read-only __eido test seam.
+  let dragOver = $state(false);
+  function mountMap(D: MapContract, opts?: { intro?: boolean }) {
+    handle?.destroy();                                   // free the previous deck's GPU context before recreating
+    selected = null; pinned = null; facetPin = null;      // per-corpus state doesn't carry across files
+    fac = facets(D);
+    xKey = D.axes[0]?.key ?? "";
+    yKey = D.axes[1]?.key ?? D.axes[0]?.key ?? "";
+    grain = D.di ?? 0;
+    data = D;
+    status = "";
+    if (opts?.intro) showIntro = true;                    // a freshly-opened file introduces itself
+    handle = createMap(canvas, D, {
+      getColor: colorFor(D, color, fac, D.levels?.[grain] ?? D.cluster), getRadius: sizeFor(D, size), layout, xKey, yKey, showLabels: labelsOn, grain, theme,
+      onClick: (i) => focusCard(i < 0 ? null : i),
+      onHover: (h, x, y) => (hovered = h == null ? null : { ...h, x, y }),
+      onGrainChange: (g) => { grain = g; pinned = null; },
+    });
+    // read-only introspection seam for the integration suite (drives the REAL built app, asserts real state)
+    (window as any).__eido = () => { const d = handle?.debug(); return { grain, k: curCount, layout, color, pin: pinned, facetPin, focus: selected, detail: selected !== null, deckOpen, cite: citeOn, ghosts: ghostsOn, theme, hover: hovered ? hovered.kind : null, zoom: d?.zoom ?? 0, labels: d?.labels ?? 0, regions: d?.regions ?? 0, rot: d?.rot ?? null, rotX: d?.rotX ?? null }; };
+    (window as any).__eidoProject = (xy: number[]) => handle?.project(xy);
+    (window as any).__eidoPick = (x: number, y: number) => handle?.pickAt(x, y);
+  }
+  async function openFile(file: File) {
+    try {
+      status = "opening " + file.name + "…"; loadFailed = false;
+      mountMap(await decodeEido(new Uint8Array(await file.arrayBuffer())), { intro: true });
+    } catch (e: any) { loadFailed = true; status = "couldn't open " + file.name + " — " + (e?.message ?? e); }
+  }
+  function onDrop(e: DragEvent) { e.preventDefault(); dragOver = false; const f = e.dataTransfer?.files?.[0]; if (f && /\.eido$/i.test(f.name)) openFile(f); }
+
   onMount(() => {
     try {
       const saved = localStorage.getItem("eido-theme");
@@ -163,23 +196,8 @@
     (async () => {
       try {
         const D = await loadMap(mapUrl());
-        fac = facets(D);
-        xKey = D.axes[0]?.key ?? "";
-        yKey = D.axes[1]?.key ?? D.axes[0]?.key ?? "";
-        grain = D.di ?? 0;
-        data = D;
-        status = "";
         try { showIntro = !localStorage.getItem("eido-seen"); } catch { showIntro = true; }
-        handle = createMap(canvas, D, {
-          getColor: colorFor(D, color, fac, D.levels?.[grain] ?? D.cluster), getRadius: sizeFor(D, size), layout, xKey, yKey, showLabels: labelsOn, grain, theme,
-          onClick: (i) => focusCard(i < 0 ? null : i),
-          onHover: (h, x, y) => (hovered = h == null ? null : { ...h, x, y }),
-          onGrainChange: (g) => { grain = g; pinned = null; },
-        });
-        // read-only introspection seam for the integration suite (drives the REAL built app, asserts real state)
-        (window as any).__eido = () => { const d = handle?.debug(); return { grain, k: curCount, layout, color, pin: pinned, facetPin, focus: selected, detail: selected !== null, deckOpen, cite: citeOn, ghosts: ghostsOn, theme, hover: hovered ? hovered.kind : null, zoom: d?.zoom ?? 0, labels: d?.labels ?? 0, regions: d?.regions ?? 0, rot: d?.rot ?? null, rotX: d?.rotX ?? null }; };
-        (window as any).__eidoProject = (xy: number[]) => handle?.project(xy);
-        (window as any).__eidoPick = (x: number, y: number) => handle?.pickAt(x, y);
+        mountMap(D);
         applyUrlState(); urlReady = true;  // restore any deep-linked view/card, then start mirroring state → URL
       } catch (e: any) {
         loadFailed = true;
@@ -210,7 +228,14 @@
   const weakAxes = $derived(layout === "axes" ? (xAxis?.weak ? 1 : 0) + (yAxis?.weak ? 1 : 0) : 0);
 </script>
 
-<div class="relative h-screen w-screen overflow-hidden bg-[var(--bg)] text-[var(--ink)] touch-none">
+<div class="relative h-screen w-screen overflow-hidden bg-[var(--bg)] text-[var(--ink)] touch-none"
+  role="application" aria-label="eidoscope map — drop a .eido file to open it"
+  ondragover={(e) => { e.preventDefault(); dragOver = true; }} ondragleave={() => (dragOver = false)} ondrop={onDrop}>
+ {#if dragOver}
+  <div class="pointer-events-none absolute inset-0 z-[60] grid place-items-center bg-[var(--bg)]/70 backdrop-blur-sm">
+   <div class="rounded-lg border-2 border-dashed border-[var(--ink)]/40 px-8 py-6 font-mono text-sm">drop a <b>.eido</b> to open it</div>
+  </div>
+ {/if}
   <!-- svelte-ignore a11y_no_interactive_element_to_noninteractive_role -->
   <!-- role="img"+aria-label is the intended pattern: present the canvas as one labeled image and route AT users to the deck list (the real accessible surface) -->
   <canvas bind:this={canvas} class="absolute inset-0 h-full w-full" role="img" aria-label="Document similarity map (visual). Use the deck list for a screen-reader-accessible view of the same cards."></canvas>

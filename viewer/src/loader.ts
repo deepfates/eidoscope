@@ -53,8 +53,14 @@ export function decodeContainer(buf: Uint8Array): MapContract {
 // no scheme, no `//`, no path segments — so the param can't turn into a cross-origin or traversal fetch.
 export function mapUrl(defaultUrl = "./map.eido"): string {
   try {
-    const q = new URLSearchParams(location.search).get("map");
+    const p = new URLSearchParams(location.search);
+    const q = p.get("map");
     if (q && /^[A-Za-z0-9._-]+\.eido$/.test(q) && !q.includes("..")) return "./" + q;
+    // ?url= opens a HOSTED .eido from anywhere ("open this map" links). The browser's CORS still bounds
+    // reading a cross-origin response, and the provenance intro surfaces the corpus before it's trusted;
+    // gate to http(s) so the param can't become a javascript:/data: vector.
+    const u = p.get("url");
+    if (u && /^https?:\/\//i.test(u)) return u;
   } catch {}
   return defaultUrl;
 }
@@ -69,4 +75,9 @@ export async function loadMap(url = "./map.eido"): Promise<MapContract> {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`eidoscope: could not load ${url} (${res.status})`);
   return decodeContainer(await gunzip(new Uint8Array(await res.arrayBuffer())));
+}
+
+// Decode a .eido the user dropped in / opened locally (browser File → bytes). Same container, no network.
+export async function decodeEido(bytes: Uint8Array): Promise<MapContract> {
+  return decodeContainer(await gunzip(bytes));
 }

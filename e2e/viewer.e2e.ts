@@ -260,6 +260,21 @@ try {
   const alt = await st();
   ok(alt.k === 2 && alt.regions === 2, `?map=alt.eido loads the alternate 2-region map (not the default 12) — k=${alt.k} regions=${alt.regions}`);
 
+  // 13. OPEN ANY .eido by DROPPING a file — the "hand someone a file" story (eid-0gs7). Reload the default
+  // 12-region map, then drop the 2-region alt file onto the app; it should tear down + re-mount to 2 regions.
+  await p.goto(base + "/index.html");
+  await p.waitForFunction(() => ((window as any).__eido?.()?.regions ?? 0) > 2, null, { timeout: 15000 });
+  await p.evaluate(async () => {
+    const bytes = new Uint8Array(await (await fetch("/alt.eido")).arrayBuffer());
+    const file = new File([bytes], "dropped.eido", { type: "application/octet-stream" });
+    const dt = new DataTransfer(); dt.items.add(file);
+    const root = document.querySelector('[role="application"]')!;
+    root.dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
+  });
+  await p.waitForFunction(() => (window as any).__eido?.()?.regions === 2, null, { timeout: 15000 }).catch(() => {});
+  const dropped = await st();
+  ok(dropped.k === 2 && dropped.regions === 2, `dropping a .eido file opens it (12-region → dropped 2-region) — k=${dropped.k} regions=${dropped.regions}`);
+
   ok(consoleErrs.length === 0, "no console errors during the run" + (consoleErrs.length ? " — " + consoleErrs[0] : ""));
 } finally {
   await browser.close();
