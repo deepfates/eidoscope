@@ -37,7 +37,7 @@ export function decodeContainer(buf: Uint8Array): MapContract {
   const sc = get("scores"); meta.axes.forEach((a: any, ai: number) => { scores[a.key] = Array.from({ length: n }, (_, i) => sc[ai * n + i]); });
 
   return {
-    version: meta.version, provenance: meta.provenance, derivedBy: meta.derivedBy, ids: meta.ids, titles: meta.titles, cores: meta.cores, notes: meta.notes,
+    version: meta.version, provenance: meta.provenance, derivedBy: meta.derivedBy, metaFields: meta.metaFields, ids: meta.ids, titles: meta.titles, cores: meta.cores, notes: meta.notes,
     axes: meta.axes, scores, xy: unflat(get("xy"), 2), xyz: unflat(get("xyz"), 3),
     cluster: Array.from(get("cluster")), k: meta.k, di: meta.di,
     levels: meta.hasLevels ? unragged(get("levels_v"), get("levels_o")) : undefined, counts: meta.counts,

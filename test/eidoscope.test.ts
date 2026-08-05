@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { loadFolder, splitOversized, type Doc } from "../src/corpus.ts";
 import { trajectory } from "../src/trajectory.ts";
 import { deckToJSONL, cardCorpus, type Card } from "../src/card.ts";
-import { cardText, projectionScores } from "../src/map.ts";
+import { cardText, projectionScores, buildMetaFields } from "../src/map.ts";
 import { scoreRedundancy } from "../src/redundancy.ts";
 import { docArxiv, fetchFrontier } from "../src/frontier.ts";
 import { distinctiveTerms, distinctiveAxes, nameLevels } from "../src/regions.ts";
@@ -248,6 +248,48 @@ test("mapbin v2: carries f16 card vectors + derivedBy, preserves ranking, and st
   expect(backLite.vectors).toBeUndefined();
   expect(backLite.derivedBy).toBeUndefined();
   expect(backLite.ids).toEqual(D.ids);
+});
+
+test("metaFields: pipeline declares each present field with the right TYPE; only what the corpus carries", () => {
+  const axes = [{ key: "a", name: "AxisA", low: "lo", high: "hi" }];
+  // a corpus WITH authors/dates/read/tags/citec present
+  const rich = buildMetaFields({ axes, authors: ["x", "y"], dates: [1, 2], read: [true, false], tags: [["t"], ["u"]], siteNames: ["s", undefined], urls: ["u1", "u2"], citec: [1, 2], hub: [1, 2] } as any);
+  const byKey = Object.fromEntries(rich.map((f) => [f.key, f]));
+  expect(byKey.author.type).toBe("categorical");
+  expect(byKey.date.type).toBe("temporal");
+  expect(byKey.read.type).toBe("boolean");
+  expect(byKey.tags.type).toBe("categorical"); expect(byKey.tags.multi).toBe(true);
+  expect(byKey.hub.type).toBe("scalar");
+  expect(byKey.citec.type).toBe("scalar");
+  expect(byKey.length.type).toBe("scalar");            // always derivable from cores
+  expect(byKey["axis:a"].type).toBe("scalar");         // each discovered axis is a scalar dimension
+  expect(byKey["axis:a"].source).toBe("axis:a");
+  expect(byKey.folder).toBeDefined();                  // urls present → folder declared (viewer derives values)
+  // a BARE corpus (no optional metadata) declares only the always-present dims — no phantom fields
+  const bare = buildMetaFields({ axes, hub: [1, 2] } as any);
+  expect(bare.find((f) => f.key === "author")).toBeUndefined();
+  expect(bare.find((f) => f.key === "date")).toBeUndefined();
+  expect(bare.map((f) => f.key).sort()).toEqual(["axis:a", "hub", "length"]);
+});
+
+test("mapbin v2: metaFields manifest round-trips in the wire format", () => {
+  const D: MapContract = {
+    version: 2, ids: ["a", "b"], titles: ["A", "B"], cores: ["c", "c"], notes: [{ x: "n" }, { x: "n" }],
+    axes: [{ key: "a", name: "AxisA", low: "lo", high: "hi" }], scores: { a: [10, 90] },
+    xy: [[0, 0], [1, 1]], xyz: [[0, 0, 0], [1, 1, 0]], cluster: [0, 1], k: 2, di: 0,
+    clusters: [{ c: 0, n: 1, label: "p" }, { c: 1, n: 1, label: "q" }], hub: [1, 2], nbr: [[1], [0]],
+    dates: [1, 2], read: [true, false],
+    metaFields: [
+      { key: "date", label: "date", type: "temporal", source: "col:dates" },
+      { key: "read", label: "read", type: "boolean", source: "col:read" },
+      { key: "hub", label: "influence", type: "scalar", source: "col:hub" },
+    ],
+  };
+  const back = decodeMap(encodeMap(D));
+  expect(back.metaFields).toEqual(D.metaFields);
+  // a map WITHOUT metaFields decodes with it absent (back-compat)
+  const { metaFields, ...lite } = D;
+  expect(decodeMap(encodeMap(lite as MapContract)).metaFields).toBeUndefined();
 });
 
 test("renderHTML: viewer script parses AND the grain ladder actually reaches the payload (both bugs I shipped)", () => {

@@ -24,6 +24,20 @@ export type RegionDef = { c: number; n: number; label: string; blurb?: string; c
 // A frontier "ghost" — a cited-but-not-in-corpus paper, placed near the work that cites it.
 export type GhostDef = { title: string; arxiv: string; url: string; n: number; core: string; xy: [number, number]; sim: number };
 
+// v2 — a TYPED declaration of one encodable dimension (the substrate of the channel grammar). The pipeline
+// declares each corpus field + its TYPE; the viewer offers only type-appropriate visual channels for it and
+// resolves `source` to values with its own accessors (no derivation logic duplicated into the file).
+//   source: "col:<field>"  read the named per-node column (authors/siteNames/tags/dates/read/hub/citec)
+//           "axis:<key>"    a discovered axis's per-node score (a scalar dimension)
+//           "derived:<k>"   the viewer derives it (e.g. folder from urls, length from cores)
+export type MetaField = {
+  key: string;
+  label: string;
+  type: "categorical" | "scalar" | "temporal" | "boolean";
+  multi?: boolean;              // value is a list (e.g. tags)
+  source: string;
+};
+
 // The full map. Arrays are node-indexed and parallel (index i = the i-th document/card) unless noted.
 export type MapContract = {
   version?: number;                        // CONTRACT_VERSION at emit time (absent = pre-versioned, treated as v1)
@@ -46,6 +60,10 @@ export type MapContract = {
   // re-interrogable offline (custom semantic axes, new-point placement) with no model. Stored f16 on the
   // wire (measured lossless for cosine ranking, half the bytes). Absent in a "lite" emit.
   vectors?: number[][];
+
+  // v2 OPTIONAL — the typed dimension manifest (see MetaField). Lets the viewer's channel grammar offer
+  // each corpus's own fields as encodable channels, type-checked, instead of a hard-coded folder/author set.
+  metaFields?: MetaField[];
 
   // identity + reader-facing content (per node)
   ids: string[];

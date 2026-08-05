@@ -7,6 +7,25 @@ import { CFG } from "./config.ts";
 import { getTextEmbeddings, EmbeddingCache } from "./embed.ts";
 import { divisiveLevels } from "./cluster.ts";
 import { HNSW } from "hnsw";
+import type { MapContract, MetaField } from "./schema.ts";
+
+// Declare each corpus field as a TYPED encodable dimension (the channel-grammar substrate). Presence-based:
+// only emit what this corpus actually carries. The viewer resolves `source` to values; we just declare types.
+export function buildMetaFields(D: Partial<MapContract> & { axes: MapContract["axes"] }): MetaField[] {
+  const has = (a?: unknown[]) => Array.isArray(a) && a.some((x) => x != null && x !== "");
+  const f: MetaField[] = [];
+  if (has(D.authors)) f.push({ key: "author", label: "author / source", type: "categorical", source: "col:authors" });
+  if (has(D.siteNames)) f.push({ key: "site", label: "source site", type: "categorical", source: "col:siteNames" });
+  if (has(D.urls)) f.push({ key: "folder", label: "folder", type: "categorical", source: "derived:folder" });
+  if (has(D.tags)) f.push({ key: "tags", label: "tags", type: "categorical", multi: true, source: "col:tags" });
+  if (has(D.dates)) f.push({ key: "date", label: "date", type: "temporal", source: "col:dates" });
+  if (has(D.read)) f.push({ key: "read", label: "read", type: "boolean", source: "col:read" });
+  f.push({ key: "hub", label: "influence", type: "scalar", source: "col:hub" });
+  if (has(D.citec)) f.push({ key: "citec", label: "citation impact", type: "scalar", source: "col:citec" });
+  f.push({ key: "length", label: "length", type: "scalar", source: "derived:length" });
+  for (const a of D.axes) f.push({ key: "axis:" + a.key, label: a.name, type: "scalar", source: "axis:" + a.key });
+  return f;
+}
 
 // Embed the DECK (local MiniLM) and lay it out (umap-js) — the readers' coordinates.
 // Embeds the cleaned, structured card text, not the raw document: that's what de-noises the map.

@@ -1,7 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { discoverAxes, type Axis } from "./axes.ts";
 import { cardCorpus, deckToJSONL, type Card } from "./card.ts";
-import { embedCards, projectAndCluster, projectionScores } from "./map.ts";
+import { embedCards, projectAndCluster, projectionScores, buildMetaFields } from "./map.ts";
 import { nameLevels } from "./regions.ts";
 import { provider } from "./provider.ts";
 import { renderHTML, type MapData } from "./render.ts";
@@ -102,6 +102,7 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
     geometryBasis: useRaw ? "raw" : "card",
     generated: Date.now(),
   };
+  (D as any).metaFields = buildMetaFields(D as any);   // typed dimension manifest for the channel grammar
   writeFileSync("map-data.json", JSON.stringify(D));
   writeFileSync("map.eido", encodeMap(D as unknown as MapContract));   // binary wire format for the deck.gl viewer (~5× smaller)
   writeFileSync("eidoscope.html", renderHTML(D));
