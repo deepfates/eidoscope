@@ -9,7 +9,10 @@
 // payload gzipped. JSON is the fallback/debug form. The FIELDS below are the contract; the encoding is
 // an implementation detail beneath them.
 
-export const CONTRACT_VERSION = 1;
+// v2 adds two OPTIONAL, presence-gated sections — carried card vectors (f16) and `derivedBy` provenance.
+// Both are additive: a v1 file lacks them and still loads; a v1 viewer ignores them. The bump is a human
+// signal of capability, not a decode gate (readers gate on the has* flags, never on this number).
+export const CONTRACT_VERSION = 2;
 
 // One discovered axis: a deterministic PCA direction, LLM-labeled. `weak` = below the variance floor.
 export type AxisDef = { key: string; name: string; low: string; high: string; variance?: number; weak?: boolean };
@@ -27,6 +30,22 @@ export type MapContract = {
 
   // provenance — so a file that gets passed around can introduce itself (what corpus, from where, when, how big)
   provenance?: { title?: string; source?: string; generated?: number; count?: number };
+
+  // v2 — HOW the map was made, for transparency AND reuse. `geometryBasis` is the honesty field: whether the
+  // layout was built on the cards (the concept bottleneck) or raw full text (--embed raw). `embedder` is the
+  // meta-embedding info a viewer needs to embed a query into the SAME space as `vectors` (custom semantic axes).
+  derivedBy?: {
+    cardModel?: string;
+    embedder?: { id: string; dim: number; pooling?: string; normalized?: boolean };
+    geometryBasis?: "card" | "raw";
+    pipelineVersion?: string;
+    generated?: number;
+  };
+
+  // v2 OPTIONAL — per-node card embedding (the layout substrate). Carried so a passed-around file is
+  // re-interrogable offline (custom semantic axes, new-point placement) with no model. Stored f16 on the
+  // wire (measured lossless for cosine ranking, half the bytes). Absent in a "lite" emit.
+  vectors?: number[][];
 
   // identity + reader-facing content (per node)
   ids: string[];

@@ -217,6 +217,39 @@ test("mapbin: binary codec round-trips the contract losslessly and is much small
   expect(bin.byteLength).toBeLessThan(JSON.stringify(D).length);    // smaller than the JSON form
 });
 
+test("mapbin v2: carries f16 card vectors + derivedBy, preserves ranking, and stays back/forward-compatible", () => {
+  const dim = 12, n = 24;
+  const vecs = Array.from({ length: n }, (_, i) => { const v = Array.from({ length: dim }, (_, j) => Math.sin(i * 0.9 + j * 1.3)); const norm = Math.hypot(...v); return v.map((x) => x / norm); });
+  const D: MapContract = {
+    version: 2, ids: Array.from({ length: n }, (_, i) => "d" + i), titles: Array.from({ length: n }, (_, i) => "T" + i),
+    cores: Array.from({ length: n }, (_, i) => "c" + i), notes: Array.from({ length: n }, () => ({ x: "n" })),
+    axes: [{ key: "x", name: "X", low: "lo", high: "hi" }], scores: { x: Array.from({ length: n }, (_, i) => (i / n) * 100) },
+    xy: Array.from({ length: n }, (_, i) => [Math.cos(i), Math.sin(i)]), xyz: Array.from({ length: n }, (_, i) => [Math.cos(i), Math.sin(i), 0]),
+    cluster: Array.from({ length: n }, (_, i) => i % 2), k: 2, di: 0, clusters: [{ c: 0, n: 12, label: "p" }, { c: 1, n: 12, label: "q" }],
+    hub: Array.from({ length: n }, () => 1), nbr: Array.from({ length: n }, (_, i) => [(i + 1) % n]),
+    derivedBy: { cardModel: "test/model", embedder: { id: "Xenova/all-MiniLM-L6-v2", dim, pooling: "mean", normalized: true }, geometryBasis: "card", generated: 7 },
+    vectors: vecs,
+  };
+  const back = decodeMap(encodeMap(D));
+  expect(back.version).toBe(2);
+  expect(back.derivedBy).toEqual(D.derivedBy);                       // provenance record survives exactly
+  expect(back.vectors!.length).toBe(n);
+  expect(back.vectors![0].length).toBe(dim);
+  // f16 is lossy in the last bits but must preserve the custom-axis RANKING (the thing it's for)
+  let maxErr = 0; for (let i = 0; i < n; i++) for (let j = 0; j < dim; j++) maxErr = Math.max(maxErr, Math.abs(vecs[i][j] - back.vectors![i][j]));
+  expect(maxErr).toBeLessThan(1e-3);
+  const q = vecs[5], dot = (a: number[], b: number[]) => a.reduce((s, x, i) => s + x * b[i], 0);
+  const rank = (vs: number[][]) => vs.map((_, i) => i).sort((a, b) => dot(q, vs[b]) - dot(q, vs[a]));
+  expect(rank(back.vectors!)).toEqual(rank(vecs));                   // projection ranking identical after f16 round-trip
+
+  // back-compat: a LITE emit (no vectors/derivedBy) decodes with those absent, nothing else lost
+  const { vectors, derivedBy, ...lite } = D;
+  const backLite = decodeMap(encodeMap(lite as MapContract));
+  expect(backLite.vectors).toBeUndefined();
+  expect(backLite.derivedBy).toBeUndefined();
+  expect(backLite.ids).toEqual(D.ids);
+});
+
 test("renderHTML: viewer script parses AND the grain ladder actually reaches the payload (both bugs I shipped)", () => {
   const html = renderHTML(synthMap());
   const script = html.match(/<script>([\s\S]*)<\/script>/)![1];

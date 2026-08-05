@@ -6,7 +6,10 @@ import type { MapContract } from "../../src/schema";
 //  - FETCHED : a hosted app pulls ./map.eido (or any url) — the same decoder either way.
 
 const MAGIC = "EIDOBIN1";
-type BufSpec = { key: string; type: "f32" | "i32"; length: number; offset: number };
+// v2: `type` may be "f16" (carried vectors); width derives from type so old f32/i32 reads are unchanged.
+type BufType = "f32" | "i32" | "f16";
+type BufSpec = { key: string; type: BufType; length: number; offset: number };
+const WIDTH: Record<BufType, number> = { f32: 4, i32: 4, f16: 2 };
 
 async function gunzip(bytes: Uint8Array): Promise<Uint8Array> {
   const stream = new Blob([bytes as BlobPart]).stream().pipeThrough(new DecompressionStream("gzip"));
@@ -20,9 +23,10 @@ export function decodeContainer(buf: Uint8Array): MapContract {
   const meta = JSON.parse(new TextDecoder().decode(buf.subarray(12, 12 + metaLen)));
   const base = 12 + metaLen + ((4 - (metaLen % 4)) % 4);
   const get = (key: string): Float32Array | Int32Array => {
-    const s: BufSpec = meta.buffers.find((b: BufSpec) => b.key === key);
-    const start = buf.byteOffset + base + s.offset, ab = buf.buffer.slice(start, start + s.length * 4);
-    return s.type === "f32" ? new Float32Array(ab) : new Int32Array(ab);
+    const s: BufSpec | undefined = meta.buffers.find((b: BufSpec) => b.key === key);
+    if (!s) throw new Error(`eidoscope: required buffer '${key}' missing from map payload`);
+    const start = buf.byteOffset + base + s.offset, ab = buf.buffer.slice(start, start + s.length * (WIDTH[s.type] ?? 4));
+    return s.type === "f32" ? new Float32Array(ab) : new Int32Array(ab); // f16 (vectors) is not read here yet — custom-axes will read the raw buffer directly
   };
   const n: number = meta.n;
   const unflat = (a: ArrayLike<number>, w: number) => Array.from({ length: n }, (_, i) => Array.from({ length: w }, (_, j) => a[i * w + j]));
@@ -33,7 +37,7 @@ export function decodeContainer(buf: Uint8Array): MapContract {
   const sc = get("scores"); meta.axes.forEach((a: any, ai: number) => { scores[a.key] = Array.from({ length: n }, (_, i) => sc[ai * n + i]); });
 
   return {
-    version: meta.version, provenance: meta.provenance, ids: meta.ids, titles: meta.titles, cores: meta.cores, notes: meta.notes,
+    version: meta.version, provenance: meta.provenance, derivedBy: meta.derivedBy, ids: meta.ids, titles: meta.titles, cores: meta.cores, notes: meta.notes,
     axes: meta.axes, scores, xy: unflat(get("xy"), 2), xyz: unflat(get("xyz"), 3),
     cluster: Array.from(get("cluster")), k: meta.k, di: meta.di,
     levels: meta.hasLevels ? unragged(get("levels_v"), get("levels_o")) : undefined, counts: meta.counts,

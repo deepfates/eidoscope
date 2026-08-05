@@ -13,7 +13,42 @@ import { CONTRACT_VERSION, type MapContract } from "./schema.ts";
 // metaJSON.buffers = [{key, type:'f32'|'i32', length, offset}]  — offsets are into the buffers region.
 
 const MAGIC = "EIDOBIN1";
-type BufSpec = { key: string; type: "f32" | "i32"; length: number; offset: number };
+// v2: `type` gains "f16" (half-precision, for carried embedding vectors — measured lossless for cosine
+// ranking at half the bytes). Width is derived from the type, so old readers that assumed 4 bytes stay
+// correct for f32/i32 and new optional sections can be narrower. Presence is gated by `has*` meta flags
+// (hasLevels/hasCite/hasVectors) — a reader skips a section it doesn't know, never crashes on its absence.
+type BufType = "f32" | "i32" | "f16";
+type BufSpec = { key: string; type: BufType; length: number; offset: number };
+const WIDTH: Record<BufType, number> = { f32: 4, i32: 4, f16: 2 };
+
+// f32<->f16 (IEEE half) — Node has no Float16Array until ES2025, and the browser can't rely on it either,
+// so we convert by hand on both sides. Round-to-nearest-even; handles subnormals/inf/nan.
+function f32ToF16(val: number): number {
+  const f = new Float32Array(1), i = new Int32Array(f.buffer); f[0] = val; const x = i[0];
+  const sign = (x >>> 16) & 0x8000; let exp = (x >>> 23) & 0xff, mant = x & 0x7fffff;
+  if (exp === 0xff) return sign | 0x7c00 | (mant ? 0x200 : 0);       // inf / nan
+  exp = exp - 127 + 15;
+  if (exp >= 0x1f) return sign | 0x7c00;                             // overflow -> inf
+  if (exp <= 0) {                                                    // subnormal / underflow
+    if (exp < -10) return sign;
+    mant |= 0x800000; const shift = 14 - exp; let h = mant >>> shift;
+    if ((mant >>> (shift - 1)) & 1) h += 1; return sign | h;
+  }
+  let h = (exp << 10) | (mant >>> 13);
+  if (mant & 0x1000) h += 1;                                         // round to nearest even
+  return sign | h;
+}
+function f16ToF32(h: number): number {
+  const sign = (h & 0x8000) << 16; const exp = (h >>> 10) & 0x1f, mant = h & 0x3ff; let bits: number;
+  if (exp === 0) {
+    if (mant === 0) bits = sign;
+    else { let e = -1, m = mant; do { e++; m <<= 1; } while (!(m & 0x400)); bits = sign | ((127 - 15 - e) << 23) | ((m & 0x3ff) << 13); }
+  } else if (exp === 0x1f) bits = sign | 0x7f800000 | (mant << 13);
+  else bits = sign | ((exp - 15 + 127) << 23) | (mant << 13);
+  const i = new Int32Array(1), f = new Float32Array(i.buffer); i[0] = bits; return f[0];
+}
+const toF16Buf = (a: Float32Array): Uint16Array => { const o = new Uint16Array(a.length); for (let i = 0; i < a.length; i++) o[i] = f32ToF16(a[i]); return o; };
+const fromF16Buf = (a: Uint16Array): Float32Array => { const o = new Float32Array(a.length); for (let i = 0; i < a.length; i++) o[i] = f16ToF32(a[i]); return o; };
 
 const flat = (rows: number[][], w: number): Float32Array => {
   const out = new Float32Array(rows.length * w);
@@ -31,25 +66,29 @@ const ragged = (rows: number[][]): { vals: Int32Array; offs: Int32Array } => {
 
 export function encodeMap(D: MapContract): Uint8Array {
   const n = D.ids.length;
-  const bufs: { key: string; arr: Float32Array | Int32Array }[] = [];
-  bufs.push({ key: "xy", arr: flat(D.xy, 2) });
-  bufs.push({ key: "xyz", arr: flat(D.xyz, 3) });
-  bufs.push({ key: "hub", arr: Float32Array.from(D.hub) });
-  bufs.push({ key: "cluster", arr: Int32Array.from(D.cluster) });
+  const bufs: { key: string; arr: Float32Array | Int32Array | Uint16Array; type: BufType }[] = [];
+  bufs.push({ key: "xy", arr: flat(D.xy, 2), type: "f32" });
+  bufs.push({ key: "xyz", arr: flat(D.xyz, 3), type: "f32" });
+  bufs.push({ key: "hub", arr: Float32Array.from(D.hub), type: "f32" });
+  bufs.push({ key: "cluster", arr: Int32Array.from(D.cluster), type: "i32" });
   // scores: axis-major flat (axis order = D.axes order)
   const sc = new Float32Array(D.axes.length * n);
   D.axes.forEach((a, ai) => { const col = D.scores[a.key] || []; for (let i = 0; i < n; i++) sc[ai * n + i] = col[i] ?? 50; });
-  bufs.push({ key: "scores", arr: sc });
+  bufs.push({ key: "scores", arr: sc, type: "f32" });
   // ragged / optional
-  const nb = ragged(D.nbr); bufs.push({ key: "nbr_v", arr: nb.vals }, { key: "nbr_o", arr: nb.offs });
-  if (D.levels) { const lv = ragged(D.levels); bufs.push({ key: "levels_v", arr: lv.vals }, { key: "levels_o", arr: lv.offs }); }
-  if (D.cite) { const c = ragged(D.cite); bufs.push({ key: "cite_v", arr: c.vals }, { key: "cite_o", arr: c.offs }); }
+  const nb = ragged(D.nbr); bufs.push({ key: "nbr_v", arr: nb.vals, type: "i32" }, { key: "nbr_o", arr: nb.offs, type: "i32" });
+  if (D.levels) { const lv = ragged(D.levels); bufs.push({ key: "levels_v", arr: lv.vals, type: "i32" }, { key: "levels_o", arr: lv.offs, type: "i32" }); }
+  if (D.cite) { const c = ragged(D.cite); bufs.push({ key: "cite_v", arr: c.vals, type: "i32" }, { key: "cite_o", arr: c.offs, type: "i32" }); }
+  // v2 OPTIONAL: per-node card embedding vectors (the re-interrogation substrate — custom semantic axes,
+  // new-point placement). Stored f16 (measured lossless for cosine ranking). A "lite" emit omits D.vectors.
+  const vdim = D.vectors?.[0]?.length ?? 0;
+  if (D.vectors && vdim) bufs.push({ key: "vectors", arr: toF16Buf(flat(D.vectors, vdim)), type: "f16" });
 
   // lay buffers out 4-byte aligned; build the manifest
   const manifest: BufSpec[] = []; const chunks: Uint8Array[] = []; let offset = 0;
   for (const b of bufs) {
     const bytes = new Uint8Array(b.arr.buffer, b.arr.byteOffset, b.arr.byteLength);
-    manifest.push({ key: b.key, type: b.arr instanceof Float32Array ? "f32" : "i32", length: b.arr.length, offset });
+    manifest.push({ key: b.key, type: b.type, length: b.arr.length, offset });
     chunks.push(bytes); offset += bytes.byteLength;
     const pad = (4 - (offset % 4)) % 4; if (pad) { chunks.push(new Uint8Array(pad)); offset += pad; }
   }
@@ -58,11 +97,11 @@ export function encodeMap(D: MapContract): Uint8Array {
 
   // meta = the contract MINUS what we moved to buffers (+ the manifest + axis key order)
   const meta = {
-    version: CONTRACT_VERSION, n, provenance: D.provenance,
+    version: CONTRACT_VERSION, n, provenance: D.provenance, derivedBy: D.derivedBy,
     ids: D.ids, titles: D.titles, cores: D.cores, notes: D.notes,
     axes: D.axes, k: D.k, di: D.di, counts: D.counts, levelLabels: D.levelLabels, levelBlurbs: D.levelBlurbs, clusters: D.clusters,
     urls: D.urls, sources: D.sources, siteNames: D.siteNames, authors: D.authors, tags: D.tags, dates: D.dates, read: D.read, citec: D.citec, ghosts: D.ghosts,
-    hasLevels: !!D.levels, hasCite: !!D.cite,
+    hasLevels: !!D.levels, hasCite: !!D.cite, hasVectors: !!(D.vectors && vdim), vdim,
     buffers: manifest,
   };
   const metaBytes = new TextEncoder().encode(JSON.stringify(meta));
@@ -88,10 +127,18 @@ export function decodeMap(gz: Uint8Array): MapContract {
   const meta = JSON.parse(new TextDecoder().decode(buf.subarray(12, 12 + metaLen)));
   const metaPad = (4 - (metaLen % 4)) % 4;
   const base = 12 + metaLen + metaPad;
+  // width-aware + presence-tolerant: getOpt returns undefined for an absent buffer (a reader on a file
+  // that predates a section skips it, no crash); get() throws a CLEAR error naming a genuinely-missing
+  // required buffer instead of a cryptic undefined dereference.
+  const getOpt = (key: string): Float32Array | Int32Array | Uint16Array | undefined => {
+    const s: BufSpec | undefined = meta.buffers.find((b: BufSpec) => b.key === key);
+    if (!s) return undefined;
+    const start = buf.byteOffset + base + s.offset, ab = buf.buffer.slice(start, start + s.length * (WIDTH[s.type] ?? 4));
+    return s.type === "f32" ? new Float32Array(ab) : s.type === "f16" ? new Uint16Array(ab) : new Int32Array(ab);
+  };
   const get = (key: string): Float32Array | Int32Array => {
-    const s = meta.buffers.find((b: BufSpec) => b.key === key)!;
-    const ab = buf.buffer.slice(buf.byteOffset + base + s.offset, buf.byteOffset + base + s.offset + s.length * 4);
-    return s.type === "f32" ? new Float32Array(ab) : new Int32Array(ab);
+    const b = getOpt(key); if (!b) throw new Error(`eidoscope: required buffer '${key}' missing from .eido`);
+    return b as Float32Array | Int32Array;
   };
   const n = meta.n;
   const unflat = (a: ArrayLike<number>, w: number) => Array.from({ length: n }, (_, i) => Array.from({ length: w }, (_, j) => a[i * w + j]));
@@ -105,13 +152,14 @@ export function decodeMap(gz: Uint8Array): MapContract {
   const nbr = unragged(get("nbr_v"), get("nbr_o"));
   const levels = meta.hasLevels ? unragged(get("levels_v"), get("levels_o")) : undefined;
   const cite = meta.hasCite ? unragged(get("cite_v"), get("cite_o")) : undefined;
+  const vectors = meta.hasVectors ? unflat(fromF16Buf(getOpt("vectors") as Uint16Array), meta.vdim) : undefined;
 
   return {
-    version: meta.version, provenance: meta.provenance, ids: meta.ids, titles: meta.titles, cores: meta.cores, notes: meta.notes,
+    version: meta.version, provenance: meta.provenance, derivedBy: meta.derivedBy, ids: meta.ids, titles: meta.titles, cores: meta.cores, notes: meta.notes,
     axes: meta.axes, scores, xy: unflat(get("xy"), 2), xyz: unflat(get("xyz"), 3),
     cluster: Array.from(get("cluster")), k: meta.k, di: meta.di, levels, counts: meta.counts,
     levelLabels: meta.levelLabels, levelBlurbs: meta.levelBlurbs, clusters: meta.clusters,
-    hub: Array.from(get("hub")), nbr, cite, citec: meta.citec,
+    hub: Array.from(get("hub")), nbr, cite, citec: meta.citec, vectors,
     urls: sparse(meta.urls), sources: sparse(meta.sources), siteNames: sparse(meta.siteNames), authors: sparse(meta.authors), tags: sparse(meta.tags), dates: sparse(meta.dates), read: sparse(meta.read), ghosts: meta.ghosts,
   };
 }

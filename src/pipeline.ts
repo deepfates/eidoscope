@@ -8,6 +8,7 @@ import { renderHTML, type MapData } from "./render.ts";
 import { trajectory } from "./trajectory.ts";
 import { buildReport } from "./report.ts";
 import { fetchFrontier, buildGhosts } from "./frontier.ts";
+import { CFG } from "./config.ts";
 import { encodeMap } from "./mapbin.ts";
 import { type MapContract } from "./schema.ts";
 import { loadFixture, type Doc } from "./corpus.ts";
@@ -91,6 +92,16 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
   for (const key of Object.keys(D.scores)) if (D.scores[key].length !== nNodes) throw new Error(`emit invariant violated: scores.${key}.length=${D.scores[key].length} != ids.length=${nNodes}`);
   // provenance — so a passed-around file introduces itself (what corpus, from where, when, how big)
   (D as any).provenance = { title: opts.name || "Corpus", source: opts.source, generated: Date.now(), count: D.ids.length };
+  // v2: carry the card vectors (the re-interrogation substrate) + how the map was made. `embs` is exactly
+  // what the layout was built on (card vectors by default, raw full-text under --embed raw), aligned to the
+  // deck; geometryBasis records which — so the file can't misrepresent whether it went through the bottleneck.
+  if (embs?.length === nNodes) (D as any).vectors = embs;
+  (D as any).derivedBy = {
+    cardModel: CFG.model,
+    embedder: { id: CFG.embedModel, dim: embs?.[0]?.length ?? 0, pooling: "mean", normalized: true },
+    geometryBasis: useRaw ? "raw" : "card",
+    generated: Date.now(),
+  };
   writeFileSync("map-data.json", JSON.stringify(D));
   writeFileSync("map.eido", encodeMap(D as unknown as MapContract));   // binary wire format for the deck.gl viewer (~5× smaller)
   writeFileSync("eidoscope.html", renderHTML(D));
