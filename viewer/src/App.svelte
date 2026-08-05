@@ -217,6 +217,22 @@
   });
   $effect(() => { const q = query, h = handle; if (h) h.setQuery(q); }); // search dims non-matching map points
 
+  // TIME SCRUBBER (first channel-grammar scrubber): reveal cards cumulatively by date via deck's GPU
+  // DataFilterExtension (filterSoftRange fades the leading edge). Only shown when the corpus carries dates.
+  let scrubT = $state<number | null>(null);
+  const dateRange = $derived.by((): [number, number] | null => {
+    const ds = (data?.dates ?? []).filter((d): d is number => typeof d === "number");
+    return ds.length >= 2 ? [Math.min(...ds), Math.max(...ds)] : null;
+  });
+  const fmtDate = (ms: number) => new Date(ms).toISOString().slice(0, 7);
+  $effect(() => { if (dateRange && scrubT === null) scrubT = dateRange[1]; });   // init full (no filtering)
+  $effect(() => {
+    const h = handle, dr = dateRange, t = scrubT, ds = data?.dates;
+    if (!h) return;
+    if (dr && ds && t != null && t < dr[1]) h.setScrub((i) => (typeof ds[i] === "number" ? (ds[i] as number) : dr[0] - 1), [dr[0], t]);
+    else h.setScrub(null, null);   // slid to the end (or no dates) → show everything
+  });
+
   const curFacet = $derived(fac.find((f) => "meta:" + f.key === color));
   const legendAxis = $derived(data?.axes.find((x) => x.key === color));
   const xAxis = $derived(data?.axes.find((a) => a.key === xKey));
@@ -295,6 +311,13 @@
           <span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">grain</span>
           <input type="range" min="0" max={nLevels - 1} bind:value={grain} oninput={() => (pinned = null)} class="min-w-0 flex-1 accent-[var(--accent)]" aria-label="grain level: how finely the map is divided into regions" aria-valuetext="{curCount} regions" />
           <span class="w-6 flex-none text-right font-mono text-[10px] text-[var(--faint)]">{curCount}</span>
+        </label>
+      {/if}
+      {#if dateRange}
+        <label class="mt-2 flex items-center gap-2 text-xs">
+          <span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">time</span>
+          <input type="range" min={dateRange[0]} max={dateRange[1]} step={(dateRange[1] - dateRange[0]) / 240} bind:value={scrubT} class="min-w-0 flex-1 accent-[var(--accent)]" aria-label="reveal cards up to this date" />
+          <span class="w-[52px] flex-none text-right font-mono text-[9px] text-[var(--faint)]">{fmtDate(scrubT ?? dateRange[1])}</span>
         </label>
       {/if}
       <div class="mt-2 flex gap-2">

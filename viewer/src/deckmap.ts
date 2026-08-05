@@ -1,5 +1,6 @@
 import { Deck, OrthographicView, OrbitView, FirstPersonView } from "@deck.gl/core";
 import { ScatterplotLayer, LineLayer, PolygonLayer, TextLayer } from "@deck.gl/layers";
+import { DataFilterExtension } from "@deck.gl/extensions";
 import type { MapContract } from "../../src/schema";
 import { col, type RGB } from "./encode";
 import { easeCubicInOut } from "d3-ease";
@@ -17,6 +18,7 @@ export type MapHandle = {
   setHighlight: (c: number | null) => void;
   setHighlightSet: (idx: number[] | null, color: RGB | null) => void;
   setQuery: (q: string) => void;
+  setScrub: (get: ((i: number) => number) | null, range: [number, number] | null) => void;  // channel-grammar scrubber
   fitToIndices: (idx: number[]) => void;
   resetView: () => void;
   destroy: () => void;
@@ -40,7 +42,10 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   const n = D.ids.length;
   const reduce = typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;  // a11y: no motion
   let { getColor, getRadius, layout, xKey, yKey, showLabels, grain } = init;
-  let colorVer = 0, sizeVer = 0, posVer = 0, flyVer = 0;
+  let colorVer = 0, sizeVer = 0, posVer = 0, flyVer = 0, scrubVer = 0;
+  let scrubGet: ((i: number) => number) | null = null;   // the scrubbed dimension's per-node value (channel-grammar scrubber)
+  let scrubRange: [number, number] | null = null;         // active [lo,hi]; null = pass everything
+  const dataFilter = new DataFilterExtension({ filterSize: 1 });
   let focus: number | null = null, fSet: Set<number> | null = null;
   let highlight: number | null = null;
   let highlightSet: Set<number> | null = null;   // isolate an arbitrary set (a facet value, e.g. a folder), not just a cluster
@@ -160,9 +165,15 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     // size (perspective near-bigger). Bigger dots + a min-pixel floor so far points stay visible.
     getRadius: (_: any, { index }: any) => (orbit ? getRadius(index) * (fc.unit === "common" ? fc.commonScale : fc.dotMul) : getRadius(index)),
     radiusUnits: orbit ? fc.unit : "pixels", radiusMinPixels: orbit ? fc.dotMin : 1.2, billboard: true,
+    // channel-grammar scrubber: GPU range-filter on a scalar/temporal dimension (filtered-out points also go
+    // non-pickable). filterSoftRange fades points near the edges instead of popping. Wide-open when no scrub.
+    extensions: [dataFilter],
+    getFilterValue: (_: any, { index }: any) => (scrubGet ? scrubGet(index) : 0),
+    filterRange: scrubRange ?? [-1e30, 1e30],
+    filterSoftRange: scrubRange ? [scrubRange[0] + (scrubRange[1] - scrubRange[0]) * 0.04, scrubRange[1] - (scrubRange[1] - scrubRange[0]) * 0.04] : undefined,
     pickable: true, autoHighlight: n < 4000, highlightColor: [255, 255, 255, 180],
     transitions: reduce ? undefined : { getPosition: { duration: 700, easing: easeCubicInOut } },
-    updateTriggers: { getFillColor: colorVer, getRadius: [sizeVer, posVer, layout, flyVer], getPosition: posVer },
+    updateTriggers: { getFillColor: colorVer, getRadius: [sizeVer, posVer, layout, flyVer], getPosition: posVer, getFilterValue: scrubVer },
   }); };
   const spokesLayer = () => new LineLayer({
     id: "spokes", data: focus == null ? [] : (D.nbr[focus] || []).map((j) => ({ j })),
@@ -336,6 +347,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     project: (worldXY) => { const vp = (deck as any).getViewports?.()[0]; return vp ? vp.project([worldXY[0], worldXY[1], 0]).slice(0, 2) : [0, 0]; },
     pickAt: (x, y) => { const o = (deck as any).pickObject?.({ x, y, radius: 8 }); return o ? { layer: o.layer?.id ?? null, url: o.object?.url ?? null, index: o.index ?? -1 } : null; },
     resetView: () => { viewState = home(layout); deck.setProps({ viewState }); },
+    setScrub: (get, range) => { scrubGet = get; scrubRange = range; scrubVer++; paint(); },
     destroy: () => deck.finalize(),
   };
 }
