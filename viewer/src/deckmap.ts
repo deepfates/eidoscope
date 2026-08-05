@@ -40,7 +40,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   const n = D.ids.length;
   const reduce = typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;  // a11y: no motion
   let { getColor, getRadius, layout, xKey, yKey, showLabels, grain } = init;
-  let colorVer = 0, sizeVer = 0, posVer = 0;
+  let colorVer = 0, sizeVer = 0, posVer = 0, flyVer = 0;
   let focus: number | null = null, fSet: Set<number> | null = null;
   let highlight: number | null = null;
   let highlightSet: Set<number> | null = null;   // isolate an arbitrary set (a facet value, e.g. a folder), not just a cluster
@@ -139,24 +139,31 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   // so it must be layout-aware and updated on every switch. In fly mode, calibrate the NATIVE controls to
   // the small cloud: arrow-key moveSpeed ≈ span3/12, gentle scrollZoom, no inertia (momentum flung the tiny
   // cloud off-screen). 2D keeps pan/pinch-zoom.
+  // 3D fly params, LIVE-TUNABLE via window.__fly (then call window.__eidoRetune()) so the options can be
+  // explored in a real browser without rebuilding. move is a multiplier (base ≈ span3-relative). unit
+  // 'pixels' = constant-size dots (like stars); 'common' = world-size (perspective near-bigger depth cue).
+  // defaults chosen by real-browser exploration (see eid-6vgy): pixels not 'common' (common is sub-pixel under
+  // FirstPersonView), dots sized up so they're visible from outside and big when you fly in, move≈10 (cross the
+  // cloud in ~3 scroll ticks, not sluggish), billboarded region labels ON (isomorphic landmarks).
+  const flyDefaults = { unit: "pixels" as "pixels" | "common", dotMul: 3, commonScale: 0.03, dotMin: 4, fovy: 60, move: 10, labels: true };
+  const flyCfg = (): typeof flyDefaults => ({ ...flyDefaults, ...(typeof window !== "undefined" ? (window as any).__fly : null) });
   const controllerFor = (l: Layout) => l === "orbit"
-    ? { doubleClickZoom: false, inertia: false, keyboard: { moveSpeed: span3 * 0.08 }, scrollZoom: { speed: 0.00025 } }
+    ? { doubleClickZoom: false, inertia: false, keyboard: { moveSpeed: span3 * 0.02 * flyCfg().move }, scrollZoom: { speed: 0.0000625 * flyCfg().move } }
     : { doubleClickZoom: false, inertia: true };
-  const view = () => (layout === "orbit" ? new FirstPersonView({ id: "orbit", fovy: 60 }) : new OrthographicView({ id: "ortho", flipY: false }));
+  const view = () => (layout === "orbit" ? new FirstPersonView({ id: "orbit", fovy: flyCfg().fovy }) : new OrthographicView({ id: "ortho", flipY: false }));
 
-  const pointsLayer = () => new ScatterplotLayer({
+  const pointsLayer = () => { const fc = flyCfg(); const orbit = layout === "orbit"; return new ScatterplotLayer({
     id: "points", data: { length: n },
     getPosition: (_: any, { index }: any) => pos(index) as any,
     getFillColor: (_: any, { index }: any) => { const c = getColor(index); return (isDim(index) ? [c[0], c[1], c[2], 28] : [c[0], c[1], c[2], 255]) as any; },
-    // 2D map: pixel radius (dots a constant screen size as you pan). 3D orbit: WORLD (common) radius so dots
-    // scale WITH the zoom — approaching the cloud makes points grow, so zoom reads as moving INTO the object
-    // instead of the structure inflating around a fixed-size dot (radiusMinPixels keeps far points visible).
-    getRadius: (_: any, { index }: any) => getRadius(index),
-    radiusUnits: "pixels", radiusMinPixels: 1.2, billboard: true,
+    // 2D: pixel radius (constant screen size). 3D: tunable — 'pixels' = constant (stars) or 'common' = world
+    // size (perspective near-bigger). Bigger dots + a min-pixel floor so far points stay visible.
+    getRadius: (_: any, { index }: any) => (orbit ? getRadius(index) * (fc.unit === "common" ? fc.commonScale : fc.dotMul) : getRadius(index)),
+    radiusUnits: orbit ? fc.unit : "pixels", radiusMinPixels: orbit ? fc.dotMin : 1.2, billboard: true,
     pickable: true, autoHighlight: n < 4000, highlightColor: [255, 255, 255, 180],
     transitions: reduce ? undefined : { getPosition: { duration: 700, easing: easeCubicInOut } },
-    updateTriggers: { getFillColor: colorVer, getRadius: [sizeVer, posVer], getPosition: posVer },
-  });
+    updateTriggers: { getFillColor: colorVer, getRadius: [sizeVer, posVer, layout, flyVer], getPosition: posVer },
+  }); };
   const spokesLayer = () => new LineLayer({
     id: "spokes", data: focus == null ? [] : (D.nbr[focus] || []).map((j) => ({ j })),
     getSourcePosition: () => pos(focus as number) as any, getTargetPosition: (d: any) => pos(d.j) as any,
@@ -186,6 +193,19 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     getBackgroundColor: labelBg(), background: true, backgroundPadding: [4, 2],
     updateTriggers: { getPosition: [posVer], data: [posVer], getColor: [highlight], getPixelOffset: [posVer], getBackgroundColor: themeVer },
   });
+  // 3D region labels: billboarded at each region's 3D centroid, so the fly-through stays isomorphic with the
+  // 2D map (same regions, colours, names — one mental map at a different angle). No screen-space declutter in
+  // 3D (positions move with the camera) — just show them all, biggest-first; deck's depth sorts them.
+  const centroid3 = (idx: number[]): number[] => { let x = 0, y = 0, z = 0; for (const i of idx) { const p = D.xyz[i]; x += p[0]; y += p[1]; z += p[2]; } const k = idx.length || 1; return [x / k, y / k, z / k]; };
+  const label3dLayer = () => new TextLayer({
+    id: "labels",
+    data: members.map((idx, c) => ({ c, label: dispLabel(labelOf(c)), n: idx.length, p: centroid3(idx) })).filter((d) => d.n > 0 && d.label).sort((a, b) => b.n - a.n),
+    getPosition: (d: any) => d.p, getText: (d: any) => d.label,
+    getColor: (d: any) => [...col(d.c), highlight != null && d.c !== highlight ? 70 : 245] as any, getSize: 12, sizeUnits: "pixels", billboard: true,
+    fontFamily: "ui-monospace, monospace", fontWeight: 700, getTextAnchor: "middle", getAlignmentBaseline: "center", characterSet: "auto",
+    getBackgroundColor: labelBg(), background: true, backgroundPadding: [4, 2],
+    updateTriggers: { getPosition: [posVer, grain], data: [posVer, grain], getColor: [highlight], getBackgroundColor: themeVer },
+  });
   // frontier telescope (only for --frontier arxiv corpora; absent otherwise): intra-corpus citation edges
   // + "ghost" papers cited-but-not-in-corpus, placed near the work that cites them, sized by citation count.
   const citeLayer = () => new LineLayer({
@@ -211,7 +231,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     ...(focus != null ? [spokesLayer()] : []),
     pointsLayer(),
     ...(ghostsOn && D.ghosts ? [ghostLayer()] : []),
-    ...(showLabels ? [labelLayer()] : []),
+    ...(showLabels && (layout !== "orbit" || flyCfg().labels) ? [layout === "orbit" ? label3dLayer() : labelLayer()] : []),
   ];
 
   let viewState: any = home(layout);
@@ -245,6 +265,9 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     },
     getCursor: ({ isDragging, isHovering }: any) => (isDragging ? "grabbing" : isHovering ? "pointer" : "grab"),
   });
+
+  // exploration hook: set window.__fly = {…} in the console, then __eidoRetune() re-applies view+controller+layers
+  if (typeof window !== "undefined") (window as any).__eidoRetune = () => { flyVer++; deck.setProps({ views: [view()], controller: controllerFor(layout) }); paint(); };
 
   const fit = (idx: number[]) => {
     if (!idx.length) return;

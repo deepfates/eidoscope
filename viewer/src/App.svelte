@@ -56,7 +56,7 @@
     list.sort((a, b) => (deckSort === "hub" ? data!.hub[b] - data!.hub[a] : (data!.scores[deckSort]?.[b] ?? 0) - (data!.scores[deckSort]?.[a] ?? 0)));
     return list.slice(0, 2000);  // show the whole corpus (was 300 — which hid most cards + masked "unread only")
   });
-  const labelsOn = $derived(showLabels && color === "cluster" && layout !== "orbit");
+  const labelsOn = $derived(showLabels && color === "cluster");  // 3D now has proper billboarded region labels (isomorphic with 2D)
   const nLevels = $derived(data?.counts?.length ?? 1);
   const assignment = $derived(data?.levels?.[grain] ?? data?.cluster ?? []);
   const curCount = $derived(data?.counts?.[grain] ?? data?.k ?? 0);
