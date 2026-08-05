@@ -20,7 +20,8 @@ const base = `http://localhost:${server.port}`;
 const setControl = (page: Page, label: string, value: string) => page.evaluate(([label, value]) => { const l = [...document.querySelectorAll("label")].find((l) => l.querySelector("span")?.textContent?.trim() === label); const s = l?.querySelector("select") as HTMLSelectElement | undefined; if (!s) return; const set = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!; set.call(s, value); s.dispatchEvent(new Event("change", { bubbles: true })); }, [label, value] as [string, string]);
 const wait = (p: Page, ms: number) => p.waitForTimeout(ms);
 
-const map = hasPf ? "pathfinder.eido" : "map.eido";
+// MODE=switch → light readwise map (fast/smooth) to judge the mde→axes ease frame-by-frame at 24fps
+const map = process.env.MODE === "switch" ? "map.eido" : hasPf ? "pathfinder.eido" : "map.eido";
 // env knobs so one harness characterises desktop/mobile × reduced-motion on/off:
 //   MOBILE=1  → 390×844 viewport   RM=reduce → emulate prefers-reduced-motion (the iOS "Reduce Motion" setting)
 const MOBILE = process.env.MOBILE === "1";
@@ -38,7 +39,10 @@ await p.waitForFunction(() => ((window as any).__eido?.()?.regions ?? 0) > 0, nu
 await wait(p, 2500); // let the initial mde layout fully settle before we touch anything
 if (MOBILE) { await p.locator('[aria-label="expand controls"]').click().catch(() => {}); await wait(p, 400); } // panel is collapsed under 640px
 
-if (process.env.MODE === "orbitzoom") {
+if (process.env.MODE === "switch") {
+  // one clean mde→axes, tight window either side, to see camera+points ease vs snap
+  console.log("→ mde→axes (isolated)"); await setControl(p, "layout", "axes"); await wait(p, 1800);
+} else if (process.env.MODE === "orbitzoom") {
   // ISOLATE the reported bug: switch to 3D orbit, then wheel-zoom IN — do the points shrink? (they shouldn't)
   console.log("→ orbit"); await setControl(p, "layout", "orbit"); await wait(p, 2500);
   console.log("→ zoom-IN in orbit");
@@ -66,7 +70,7 @@ console.log("video:", join(out, webm));
 
 // pull evenly-spaced stills so we can look at the in-between frames
 const { spawnSync } = await import("node:child_process");
-const r = spawnSync("ffmpeg", ["-y", "-i", join(out, webm), "-vf", "fps=12", join(out, "f-%03d.png")], { encoding: "utf8" });
+const r = spawnSync("ffmpeg", ["-y", "-i", join(out, webm), "-vf", "fps=24", join(out, "f-%03d.png")], { encoding: "utf8" });
 if (r.status !== 0) { console.error("ffmpeg failed:", r.stderr?.slice(-400)); process.exit(1); }
 const frames = readdirSync(out).filter((f) => f.startsWith("f-")).sort();
 console.log(`extracted ${frames.length} frames → story/video/f-*.png`);

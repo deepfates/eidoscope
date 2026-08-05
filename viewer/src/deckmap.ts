@@ -262,7 +262,17 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
       if (o.grain !== undefined && o.grain !== grain) { grain = o.grain; recomputeGrain(); highlight = null; colorVer++; }  // grain change clears stale highlight
       const prev = layout;
       if (o.layout) layout = o.layout;
-      if (layout !== prev) { posVer++; viewState = home(layout); deck.setProps({ views: [view()], viewState }); }
+      if (layout !== prev) {
+        posVer++;
+        // ortho<->orbit changes the VIEW TYPE — swap the view and set its camera directly (can't tween types).
+        // mde<->axes share the OrthographicView, so LEAVE the camera exactly where the user has it and let only
+        // the point positions ease into the new layout. (Resetting to the layout's home snapped the zoom first
+        // — a jarring pre-jump the eased positions couldn't hide, worst on the 13k-pt map. deck's viewState
+        // transition can't smooth it here because the controlled onViewStateChange feeds the state back every
+        // frame and cancels it — so the right move is simply not to jump.)
+        const viewChanged = (layout === "orbit") !== (prev === "orbit");
+        if (viewChanged) { viewState = home(layout); deck.setProps({ views: [view()], viewState }); }
+      }
       deck.setProps({ layers: layers() });
     },
     setFocus: (i) => { focus = i; fSet = i == null ? null : new Set<number>([i, ...(D.nbr[i] || [])]); colorVer++; deck.setProps({ layers: layers() }); },
@@ -274,7 +284,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
       colorVer++; deck.setProps({ layers: layers() });
     },
     fitToIndices: (idx) => fit(idx),
-    debug: () => ({ zoom: viewState?.zoom ?? 0, labels: decluttered().length, regions: members.filter((m) => m.length).length, grain, rot: viewState?.rotationOrbit ?? null, rotX: viewState?.rotationX ?? null }),
+    debug: () => ({ zoom: (deck.getViewports?.()?.[0] as any)?.zoom ?? viewState?.zoom ?? 0, labels: decluttered().length, regions: members.filter((m) => m.length).length, grain, rot: viewState?.rotationOrbit ?? null, rotX: viewState?.rotationX ?? null }),
     project: (worldXY) => { const vp = (deck as any).getViewports?.()[0]; return vp ? vp.project([worldXY[0], worldXY[1], 0]).slice(0, 2) : [0, 0]; },
     pickAt: (x, y) => { const o = (deck as any).pickObject?.({ x, y, radius: 8 }); return o ? { layer: o.layer?.id ?? null, url: o.object?.url ?? null, index: o.index ?? -1 } : null; },
     resetView: () => { viewState = home(layout); deck.setProps({ viewState }); },
