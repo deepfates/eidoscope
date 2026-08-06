@@ -147,10 +147,12 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   // so it must be layout-aware and updated on every switch. In fly mode, calibrate the NATIVE controls to
   // the small cloud: arrow-key moveSpeed ≈ span3/12, gentle scrollZoom, no inertia (momentum flung the tiny
   // cloud off-screen). 2D keeps pan/pinch-zoom.
-  // OrbitController: drag rotates around target, pinch zooms. We DISABLE scrollZoom and handle the wheel
+  // OrbitController with dragMode:'pan' so a plain drag PANS (grab-and-move), same as the 2D map — one gesture,
+  // one meaning across views. Rotation is demoted to the modifier drag (hold shift), so the disorienting
+  // swing-around-an-invisible-pivot is opt-in, not the default. We DISABLE scrollZoom and handle the wheel
   // ourselves (dolly target along the view ray — the dive) so scroll flies IN instead of scaling the scene.
   const controllerFor = (l: Layout) => l === "orbit"
-    ? { doubleClickZoom: false, inertia: false, scrollZoom: false }
+    ? { doubleClickZoom: false, inertia: false, scrollZoom: false, dragMode: "pan" as const }
     : { doubleClickZoom: false, inertia: true };
   const FOVY = 50;  // OrbitView perspective; positions get the perspective/parallax, the dot itself does not
   const view = () => (layout === "orbit" ? new OrbitView({ id: "orbit", fovy: FOVY, orbitAxis: "Z" }) : new OrthographicView({ id: "ortho", flipY: false }));
