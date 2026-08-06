@@ -10,7 +10,8 @@ import { join } from "node:path";
 import { loadFolder, loadFixture, splitOversized, type Doc } from "./corpus.ts";
 import { embedDocs } from "./map.ts";
 import { run, relabelMap } from "./pipeline.ts";
-import { renderHTML } from "./render.ts";
+import { encodeMap } from "./mapbin.ts";
+import { singlefileHTML } from "./singlefile.ts";
 import { CFG } from "./config.ts";
 
 const args = process.argv.slice(2);
@@ -24,8 +25,11 @@ if (args.includes("--relabel")) {
   const D = JSON.parse(readFileSync(join(d, "map-data.json"), "utf8"));
   const D2 = await relabelMap(D, { cacheDir: d });
   writeFileSync(join(d, "map-data.json"), JSON.stringify(D2));
-  writeFileSync(join(d, "eidoscope.html"), renderHTML(D2));
-  console.error(`\n✅ relabeled ${D2.counts?.length ?? 1} grain levels → ${join(d, "eidoscope.html")}`);
+  const enc = encodeMap(D2);                       // re-encode so the .eido carries the new labels (the viewer reads it)
+  writeFileSync(join(d, "map.eido"), enc);
+  const html = singlefileHTML(enc);
+  if (html) writeFileSync(join(d, "eidoscope.html"), html);
+  console.error(`\n✅ relabeled ${D2.counts?.length ?? 1} grain levels → ${join(d, "map.eido")}${html ? " + eidoscope.html" : ""}`);
   process.exit(0);
 }
 

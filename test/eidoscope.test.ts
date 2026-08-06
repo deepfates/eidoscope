@@ -9,7 +9,7 @@ import { cardText, projectionScores, buildMetaFields } from "../src/map.ts";
 import { scoreRedundancy } from "../src/redundancy.ts";
 import { docArxiv, fetchFrontier } from "../src/frontier.ts";
 import { distinctiveTerms, distinctiveAxes, nameLevels } from "../src/regions.ts";
-import { renderHTML } from "../src/render.ts";
+
 import { relabelMap } from "../src/pipeline.ts";
 import { encodeMap, decodeMap } from "../src/mapbin.ts";
 import type { MapContract } from "../src/schema.ts";
@@ -306,18 +306,6 @@ test("mapbin v2: metaFields manifest round-trips in the wire format", () => {
   // a map WITHOUT metaFields decodes with it absent (back-compat)
   const { metaFields, ...lite } = D;
   expect(decodeMap(encodeMap(lite as MapContract)).metaFields).toBeUndefined();
-});
-
-test("renderHTML: viewer script parses AND the grain ladder actually reaches the payload (both bugs I shipped)", () => {
-  const html = renderHTML(synthMap());
-  const script = html.match(/<script>([\s\S]*)<\/script>/)![1];
-  expect(() => new Function(script)).not.toThrow();               // catches syntax bugs (e.g. a backtick inside the template)
-  const payload = JSON.parse(html.match(/<script id="data"[^>]*>([\s\S]*?)<\/script>/)![1].replace(/<\\\//g, "</"));
-  expect(payload.levels.length).toBe(2);                          // the ladder is SHIPPED, not thrown away
-  expect(payload.counts).toEqual([2, 3]);
-  expect(payload.levelLabels.length).toBe(2);
-  expect(payload.nodes.length).toBe(6);
-  expect(html).toContain('id="grain"');                          // the grain slider control is rendered
 });
 
 test("relabelMap: end-to-end — names every grain level, picks the ~18 default, rebuilds regions (mock LLM)", async () => {

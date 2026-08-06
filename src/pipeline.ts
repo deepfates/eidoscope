@@ -5,7 +5,7 @@ import { cardCorpus, deckToJSONL, type Card } from "./card.ts";
 import { embedCards, projectAndCluster, projectionScores, rawProjectionScores, buildMetaFields } from "./map.ts";
 import { nameLevels } from "./regions.ts";
 import { provider } from "./provider.ts";
-import { renderHTML } from "./render.ts";
+import { singlefileHTML } from "./singlefile.ts";
 import { trajectory } from "./trajectory.ts";
 import { buildReport } from "./report.ts";
 import { fetchFrontier, buildGhosts } from "./frontier.ts";
@@ -15,7 +15,7 @@ import { type MapContract } from "./schema.ts";
 import { loadFixture, type Doc } from "./corpus.ts";
 
 // The full instrument, end to end: docs (+embeddings) -> discover axes -> card -> embed cards ->
-// project + cluster -> name regions -> deck.jsonl + map-data.json + eidoscope.html.
+// project + cluster -> name regions -> deck.jsonl + map-data.json + <slug>.eido + <slug>.html (self-contained viewer).
 export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?: boolean; name?: string; source?: string; embed?: "card" | "raw"; out?: string } = {}) {
   const llm = provider();
   // Every corpus gets its OWN self-describing output directory + `<slug>.eido` — the .eido is a portable,
@@ -112,14 +112,18 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
   };
   D.metaFields = buildMetaFields(D);   // typed dimension manifest for the channel grammar
   writeFileSync(join(outDir, "map-data.json"), JSON.stringify(D));
-  writeFileSync(join(outDir, eidoName), encodeMap(D));   // the portable artifact (~5× smaller)
-  writeFileSync(join(outDir, "eidoscope.html"), renderHTML(D));
+  const enc = encodeMap(D);
+  writeFileSync(join(outDir, eidoName), enc);   // the portable artifact (~5× smaller)
+  // self-contained offline explorer = the built Svelte+deck viewer with this .eido inlined (one HTML, no server)
+  const htmlName = slug + ".html", html = singlefileHTML(enc);
+  if (html) writeFileSync(join(outDir, htmlName), html);
+  else console.error("  ⚠ viewer not built — skipped the self-contained HTML (run `cd viewer && bun run build`); the .eido still opens in the viewer");
   const state = trajectory({ dates: deck.map((c) => c.date), cluster: D.cluster, scores: D.scores, axes: D.axes, clusters });
   if (state) writeFileSync(join(outDir, "STATE.md"), state);
   writeFileSync(join(outDir, "REPORT.md"), buildReport(D, opts.name || "Corpus"));
   console.error(`\n✅ ${deck.length} cards · ${axes.length} axes · ${k} regions  →  ${outDir}/`);
   console.error(`   → map   ${join(outDir, eidoName)}   (the portable L-space; open in the viewer)`);
-  console.error(`   → open  ${join(outDir, "eidoscope.html")}   (self-contained interactive map)`);
+  if (html) console.error(`   → open  ${join(outDir, htmlName)}   (self-contained interactive explorer)`);
   console.error(`   → read  ${join(outDir, "REPORT.md")}        (shareable summary${state ? " + STATE.md trajectory" : ""})`);
   console.error(`   → data  ${join(outDir, "deck.jsonl")} · ${join(outDir, "map-data.json")}`);
   return D;

@@ -38,6 +38,7 @@
   },
   "files": [
     "src",
+    "viewer/dist/index.html",
     "README.md",
     "ROADMAP.md",
     "LICENSE"
