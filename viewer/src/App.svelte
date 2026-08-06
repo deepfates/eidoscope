@@ -3,7 +3,7 @@
   import { loadMap, mapUrl, decodeEido } from "./loader";
   import { createMap, type MapHandle, type Layout } from "./deckmap";
   import { col, axisColor } from "./encode";
-  import { buildDimensions, sizeAccessor, colorAccessor, defaultProps, type Dimension, type DimProps } from "./dimensions";
+  import { buildDimensions, sizeAccessor, colorAccessor, scores01, defaultProps, type Dimension, type DimProps } from "./dimensions";
   import { embedQuery, cosineAll, scale100, rankNorm100 } from "./semantic";
   import type { MapContract } from "../../src/schema";
 
@@ -54,6 +54,11 @@
   const allDims = $derived([...dimList, ...queryDims]);
   const colorDim = $derived(color === "region" ? undefined : allDims.find((d) => d.key === color)); // undefined = the region clustering
   const colorGet = (dims: Dimension[], key: string, assign: number[]) => { const d = dims.find((x) => x.key === key); return colorAccessor(d, d ? propsOf(d) : { norm: "honest", invert: false }, assign); };
+  // position accessor: a chosen scalar dimension → per-card coord in -1..1 (its norm/invert applied). Axis-scatter only.
+  const posGet = (dims: Dimension[], key: string) => { const d = dims.find((x) => x.key === key); if (!d || d.kind === "categorical") return () => 0; const s = scores01(d, propsOf(d)); return (i: number) => ((s[i] ?? 50) - 50) / 50; };
+  const xDim = $derived(allDims.find((d) => d.key === xKey));
+  const yDim = $derived(allDims.find((d) => d.key === yKey));
+  const zDim = $derived(allDims.find((d) => d.key === zKey));
   function setTheme(t: "dark" | "light", persist = true) { theme = t; document.documentElement.dataset.theme = t; if (persist) try { localStorage.setItem("eido-theme", t); } catch {} }
   function toggleTheme() { setTheme(theme === "dark" ? "light" : "dark"); }
   const hasCite = $derived(!!data?.cite?.some((e) => e.length));
@@ -190,7 +195,7 @@
     status = "";
     if (opts?.intro) showIntro = true;                    // a freshly-opened file introduces itself
     handle = createMap(canvas, D, {
-      getColor: colorGet(buildDimensions(D), color, D.levels?.[grain] ?? D.cluster), getRadius: sizeGet(buildDimensions(D), size), layout, xKey, yKey, zKey, showLabels: labelsOn, grain, theme,
+      getColor: colorGet(buildDimensions(D), color, D.levels?.[grain] ?? D.cluster), getRadius: sizeGet(buildDimensions(D), size), getX: posGet(buildDimensions(D), xKey), getY: posGet(buildDimensions(D), yKey), getZ: posGet(buildDimensions(D), zKey), layout, xKey, yKey, zKey, showLabels: labelsOn, grain, theme,
       onClick: (i) => focusCard(i < 0 ? null : i),
       onHover: (h, x, y) => (hovered = h == null ? null : { ...h, x, y }),
       onGrainChange: (g) => { grain = g; pinned = null; },
@@ -287,7 +292,8 @@
 
   $effect(() => {
     const l = layout, c = color, s = size, xk = xKey, yk = yKey, zk = zKey, sl = labelsOn, g = grain, a = assignment, co = citeOn, go = ghostsOn, th = theme, h = handle, d = data, ad = allDims, dp = dimProps;
-    if (h && d) h.update({ getColor: colorGet(ad, c, a), getRadius: sizeGet(ad, s), layout: l, xKey: xk, yKey: yk, zKey: zk, showLabels: sl, grain: g, citeOn: co, ghostsOn: go, theme: th });
+    void dp; // dimProps in deps so a norm/invert change re-pushes the accessors
+    if (h && d) h.update({ getColor: colorGet(ad, c, a), getRadius: sizeGet(ad, s), getX: posGet(ad, xk), getY: posGet(ad, yk), getZ: posGet(ad, zk), layout: l, xKey: xk, yKey: yk, zKey: zk, showLabels: sl, grain: g, citeOn: co, ghostsOn: go, theme: th });
   });
   $effect(() => { const q = query, h = handle; if (h) h.setQuery(q); }); // search dims non-matching map points
 
@@ -331,14 +337,11 @@
     else h.setScrub(null, null);
   });
 
-  const xAxis = $derived(data?.axes.find((a) => a.key === xKey));
-  const yAxis = $derived(data?.axes.find((a) => a.key === yKey));
-  const zAxis = $derived(data?.axes.find((a) => a.key === zKey));
   const hint = $derived(layout === "axes" ? "positioned by where each card projects on the two axes" : layout === "axes3d" ? "three axes on x/y/z · drag to rotate · scroll to zoom" : layout === "orbit" ? "drag to rotate · scroll to zoom" : "proximity = similarity · tap a card");
   const prov = $derived(data?.provenance);   // so a passed-around file introduces itself
   const provDate = (g?: number) => (g ? new Date(g).toISOString().slice(0, 10) : "");
   $effect(() => { try { document.title = prov?.title ? `${prov.title} · eidoscope 🔭` : "eidoscope 🔭"; } catch {} });
-  const weakAxes = $derived(layout === "axes" ? (xAxis?.weak ? 1 : 0) + (yAxis?.weak ? 1 : 0) : 0);
+  const weakAxes = $derived(layout === "axes" ? (xDim?.weak ? 1 : 0) + (yDim?.weak ? 1 : 0) : 0);
 </script>
 
 <div class="relative h-screen w-screen overflow-hidden bg-[var(--bg)] text-[var(--ink)] touch-none"
@@ -364,12 +367,12 @@
   {/if}
 
   {#if data}
-    {#if layout === "axes" && xAxis && yAxis}
+    {#if layout === "axes" && xDim && yDim}
       <div class="pointer-events-none absolute inset-0 font-mono text-xs text-[var(--dim)]">
-        <div class="absolute left-3 top-1/2 max-w-[42%] -translate-y-1/2" title={xAxis.low}>← {trunc(xAxis.low)}</div>
-        <div class="absolute right-3 top-1/2 max-w-[42%] -translate-y-1/2 text-right" title={xAxis.high}>{trunc(xAxis.high)} →</div>
-        <div class="absolute left-1/2 top-3 max-w-[60%] -translate-x-1/2 truncate" title={yAxis.high}>↑ {trunc(yAxis.high)}</div>
-        <div class="absolute bottom-9 left-1/2 max-w-[60%] -translate-x-1/2 truncate" title={yAxis.low}>↓ {trunc(yAxis.low)}</div>
+        <div class="absolute left-3 top-1/2 max-w-[42%] -translate-y-1/2" title={xDim.low ?? "low " + xDim.name}>← {trunc(xDim.low ?? "low " + xDim.name)}</div>
+        <div class="absolute right-3 top-1/2 max-w-[42%] -translate-y-1/2 text-right" title={xDim.high ?? xDim.name}>{trunc(xDim.high ?? xDim.name)} →</div>
+        <div class="absolute left-1/2 top-3 max-w-[60%] -translate-x-1/2 truncate" title={yDim.high ?? yDim.name}>↑ {trunc(yDim.high ?? yDim.name)}</div>
+        <div class="absolute bottom-9 left-1/2 max-w-[60%] -translate-x-1/2 truncate" title={yDim.low ?? "low " + yDim.name}>↓ {trunc(yDim.low ?? "low " + yDim.name)}</div>
       </div>
     {/if}
 
@@ -390,12 +393,12 @@
         </select></label>
       {#if layout === "axes" || layout === "axes3d"}
         <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">x-axis</span>
-          <select bind:value={xKey} title={xAxis?.name ?? ""} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">{#each data.axes as a}<option value={a.key}>{axl(a)}</option>{/each}</select></label>
+          <select bind:value={xKey} title={xDim?.name ?? ""} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">{#each allDims.filter((d) => d.kind !== "categorical") as d}<option value={d.key}>{d.name}</option>{/each}</select></label>
         <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">y-axis</span>
-          <select bind:value={yKey} title={yAxis?.name ?? ""} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">{#each data.axes as a}<option value={a.key}>{axl(a)}</option>{/each}</select></label>
+          <select bind:value={yKey} title={yDim?.name ?? ""} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">{#each allDims.filter((d) => d.kind !== "categorical") as d}<option value={d.key}>{d.name}</option>{/each}</select></label>
         {#if layout === "axes3d"}
           <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">z-axis</span>
-            <select bind:value={zKey} title={zAxis?.name ?? ""} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">{#each data.axes as a}<option value={a.key}>{axl(a)}</option>{/each}</select></label>
+            <select bind:value={zKey} title={zDim?.name ?? ""} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">{#each allDims.filter((d) => d.kind !== "categorical") as d}<option value={d.key}>{d.name}</option>{/each}</select></label>
         {/if}
         {#if weakAxes}<div class="mb-1.5 rounded-md bg-[var(--chip2)] px-2 py-1 text-[10px] leading-snug text-[var(--dim)]">~ {weakAxes > 1 ? "minor axes" : "a minor axis"} (under 2% variance) — position is thin, read it loosely</div>{/if}
       {/if}
@@ -533,7 +536,7 @@
         <span class="font-mono text-[10px] text-[var(--faint)]">{deckList.length} cards</span>
         <label class="flex items-center gap-1 text-xs"><span class="font-mono text-[10px] text-[var(--faint)]">sort</span>
           <select bind:value={deckSort} class="rounded-md border border-[var(--hair2)] bg-[var(--card)] px-1.5 py-1 text-xs">
-            <option value="hub">influence</option>{#each data.axes as a}<option value={a.key}>{axl(a)}</option>{/each}
+            <option value="hub">influence</option>{#each allDims.filter((d) => d.kind !== "categorical") as d}<option value={d.key}>{d.name}</option>{/each}
           </select></label>
         {#if hasRead}<button class="rounded-md border border-[var(--hair2)] px-2 py-1 font-mono text-[11px] {deckUnread ? 'bg-[var(--chip)] text-[var(--ink)]' : 'text-[var(--faint)]'}" onclick={() => (deckUnread = !deckUnread)}>unread only</button>{/if}
         <input bind:value={deckQ} placeholder="filter…" class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--card)] px-2 py-1 text-xs" />

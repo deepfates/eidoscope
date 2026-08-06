@@ -29,7 +29,7 @@ export type MapHandle = {
   project: (worldXY: number[]) => number[];  // world → screen px, so tests can click exact nodes/ghosts
   pickAt: (x: number, y: number) => { layer: string | null; url: string | null; index: number } | null;  // what deck picks at a screen px
 };
-type Opts = { getColor: (i: number) => RGB; getRadius: (i: number) => number; layout: Layout; xKey: string; yKey: string; zKey?: string; showLabels: boolean; grain: number; citeOn?: boolean; ghostsOn?: boolean; theme?: "dark" | "light" };
+type Opts = { getColor: (i: number) => RGB; getRadius: (i: number) => number; layout: Layout; xKey: string; yKey: string; zKey?: string; getX?: (i: number) => number; getY?: (i: number) => number; getZ?: (i: number) => number; posVer?: number; showLabels: boolean; grain: number; citeOn?: boolean; ghostsOn?: boolean; theme?: "dark" | "light" };
 
 const hull2d = (pts: number[][]): number[][] => {
   if (pts.length < 3) return pts;
@@ -46,6 +46,9 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   const reduce = typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;  // a11y: no motion
   let { getColor, getRadius, layout, xKey, yKey, showLabels, grain } = init;
   let zKey = init.zKey ?? "";
+  // resolved position accessors from the App (dimension → -1..1 coord, with the dimension's norm/invert applied);
+  // deckmap is a renderer — it no longer resolves axis values itself. Fallback to the raw-score ax() if absent.
+  let getX = init.getX, getY = init.getY, getZ = init.getZ;
   let colorVer = 0, sizeVer = 0, posVer = 0, scrubVer = 0;
   let scrubGet: ((i: number) => number) | null = null;   // the scrubbed dimension's per-node value (channel-grammar scrubber)
   let scrubRange: [number, number] | null = null;         // active [lo,hi]; null = pass everything
@@ -104,8 +107,8 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
 
   const ax = (k: string, index: number) => ((D.scores[k]?.[index] ?? 50) - 50) / 50;  // 0..100 score → -1..1 axis coord
   const pos = (index: number): number[] => {
-    if (layout === "axes") return [ax(xKey, index), ax(yKey, index)];
-    if (layout === "axes3d") return [ax(xKey, index), ax(yKey, index), ax(zKey, index)];  // three honest axes on x/y/z
+    if (layout === "axes") return [getX ? getX(index) : ax(xKey, index), getY ? getY(index) : ax(yKey, index)];
+    if (layout === "axes3d") return [getX ? getX(index) : ax(xKey, index), getY ? getY(index) : ax(yKey, index), getZ ? getZ(index) : ax(zKey, index)];  // three honest axes on x/y/z
     if (layout === "orbit") return [D.xyz[index][0], D.xyz[index][1], D.xyz[index][2]];
     return [D.xy[index][0], D.xy[index][1]];
   };
@@ -306,6 +309,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     update: (o) => {
       if (o.getColor) { getColor = o.getColor; colorVer++; }
       if (o.getRadius) { getRadius = o.getRadius; sizeVer++; }
+      if (o.getX) getX = o.getX; if (o.getY) getY = o.getY; if (o.getZ) getZ = o.getZ;
       if (o.xKey && o.xKey !== xKey) { xKey = o.xKey; posVer++; }
       if (o.yKey && o.yKey !== yKey) { yKey = o.yKey; posVer++; }
       if (o.zKey && o.zKey !== zKey) { zKey = o.zKey; posVer++; }
