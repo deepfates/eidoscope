@@ -17,6 +17,7 @@
   let layout = $state<Layout>("mde");
   let xKey = $state("");
   let yKey = $state("");
+  let zKey = $state("");
   let fac = $state<Facet[]>([]);
   let handle = $state<MapHandle | null>(null);
   let showLabels = $state(true);
@@ -172,12 +173,13 @@
     fac = facets(D);
     xKey = D.axes[0]?.key ?? "";
     yKey = D.axes[1]?.key ?? D.axes[0]?.key ?? "";
+    zKey = D.axes[2]?.key ?? D.axes[0]?.key ?? "";
     grain = D.di ?? 0;
     data = D;
     status = "";
     if (opts?.intro) showIntro = true;                    // a freshly-opened file introduces itself
     handle = createMap(canvas, D, {
-      getColor: colorFor(D, color, fac, D.levels?.[grain] ?? D.cluster), getRadius: sizeFor(D, size), layout, xKey, yKey, showLabels: labelsOn, grain, theme,
+      getColor: colorFor(D, color, fac, D.levels?.[grain] ?? D.cluster), getRadius: sizeFor(D, size), layout, xKey, yKey, zKey, showLabels: labelsOn, grain, theme,
       onClick: (i) => focusCard(i < 0 ? null : i),
       onHover: (h, x, y) => (hovered = h == null ? null : { ...h, x, y }),
       onGrainChange: (g) => { grain = g; pinned = null; },
@@ -260,8 +262,8 @@
   });
 
   $effect(() => {
-    const l = layout, c = color, s = size, xk = xKey, yk = yKey, sl = labelsOn, g = grain, a = assignment, co = citeOn, go = ghostsOn, th = theme, h = handle, d = data, f = fac;
-    if (h && d) h.update({ getColor: colorFor(d, c, f, a), getRadius: sizeFor(d, s), layout: l, xKey: xk, yKey: yk, showLabels: sl, grain: g, citeOn: co, ghostsOn: go, theme: th });
+    const l = layout, c = color, s = size, xk = xKey, yk = yKey, zk = zKey, sl = labelsOn, g = grain, a = assignment, co = citeOn, go = ghostsOn, th = theme, h = handle, d = data, f = fac;
+    if (h && d) h.update({ getColor: colorFor(d, c, f, a), getRadius: sizeFor(d, s), layout: l, xKey: xk, yKey: yk, zKey: zk, showLabels: sl, grain: g, citeOn: co, ghostsOn: go, theme: th });
   });
   $effect(() => { const q = query, h = handle; if (h) h.setQuery(q); }); // search dims non-matching map points
 
@@ -308,7 +310,8 @@
   const legendAxis = $derived(data?.axes.find((x) => x.key === color));
   const xAxis = $derived(data?.axes.find((a) => a.key === xKey));
   const yAxis = $derived(data?.axes.find((a) => a.key === yKey));
-  const hint = $derived(layout === "axes" ? "positioned by where each card projects on the two axes" : layout === "orbit" ? "drag to rotate · scroll to zoom" : "proximity = similarity · tap a card");
+  const zAxis = $derived(data?.axes.find((a) => a.key === zKey));
+  const hint = $derived(layout === "axes" ? "positioned by where each card projects on the two axes" : layout === "axes3d" ? "three axes on x/y/z · drag to rotate · scroll to zoom" : layout === "orbit" ? "drag to rotate · scroll to zoom" : "proximity = similarity · tap a card");
   const prov = $derived(data?.provenance);   // so a passed-around file introduces itself
   const provDate = (g?: number) => (g ? new Date(g).toISOString().slice(0, 10) : "");
   $effect(() => { try { document.title = prov?.title ? `${prov.title} · eidoscope 🔭` : "eidoscope 🔭"; } catch {} });
@@ -360,14 +363,18 @@
       <div class="mb-2 text-xs text-[var(--dim)]">{data.ids.length} cards · {curCount} regions</div>
       <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">layout</span>
         <select bind:value={layout} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">
-          <option value="mde">neighbor map</option><option value="axes">axis scatter</option><option value="orbit">3D space</option>
+          <option value="mde">neighbor map</option><option value="axes">axis scatter</option><option value="orbit">3D space</option><option value="axes3d">3D axis scatter</option>
         </select></label>
-      {#if layout === "axes"}
+      {#if layout === "axes" || layout === "axes3d"}
         <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">x-axis</span>
           <select bind:value={xKey} title={xAxis?.name ?? ""} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">{#each data.axes as a}<option value={a.key}>{axl(a)}</option>{/each}</select></label>
         <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">y-axis</span>
           <select bind:value={yKey} title={yAxis?.name ?? ""} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">{#each data.axes as a}<option value={a.key}>{axl(a)}</option>{/each}</select></label>
-        {#if weakAxes}<div class="mb-1.5 rounded-md bg-[var(--chip2)] px-2 py-1 text-[10px] leading-snug text-[var(--dim)]">~ {weakAxes > 1 ? "both are minor axes" : "a minor axis"} (under 2% variance) — position is thin, read it loosely</div>{/if}
+        {#if layout === "axes3d"}
+          <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">z-axis</span>
+            <select bind:value={zKey} title={zAxis?.name ?? ""} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">{#each data.axes as a}<option value={a.key}>{axl(a)}</option>{/each}</select></label>
+        {/if}
+        {#if weakAxes}<div class="mb-1.5 rounded-md bg-[var(--chip2)] px-2 py-1 text-[10px] leading-snug text-[var(--dim)]">~ {weakAxes > 1 ? "minor axes" : "a minor axis"} (under 2% variance) — position is thin, read it loosely</div>{/if}
       {/if}
       <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">color</span>
         <select bind:value={color} title={legendAxis?.name ?? ""} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">

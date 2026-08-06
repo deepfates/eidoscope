@@ -11,7 +11,9 @@ import { easeCubicInOut } from "d3-ease";
 // points (encoded colour/size) · region hulls (PolygonLayer, on highlight) · region labels (TextLayer,
 // collision-decluttered) · neighbour spokes (LineLayer, on focus). Everything drives through update().
 
-export type Layout = "mde" | "axes" | "orbit";
+export type Layout = "mde" | "axes" | "orbit" | "axes3d";
+// which layouts render in 3D (OrbitView): neighbour-orbit and 3-axis scatter. mde/axes are 2D (Orthographic).
+const is3d = (l: Layout) => l === "orbit" || l === "axes3d";
 export type MapHandle = {
   update: (o: Partial<Opts>) => void;
   setFocus: (i: number | null) => void;
@@ -27,7 +29,7 @@ export type MapHandle = {
   project: (worldXY: number[]) => number[];  // world → screen px, so tests can click exact nodes/ghosts
   pickAt: (x: number, y: number) => { layer: string | null; url: string | null; index: number } | null;  // what deck picks at a screen px
 };
-type Opts = { getColor: (i: number) => RGB; getRadius: (i: number) => number; layout: Layout; xKey: string; yKey: string; showLabels: boolean; grain: number; citeOn?: boolean; ghostsOn?: boolean; theme?: "dark" | "light" };
+type Opts = { getColor: (i: number) => RGB; getRadius: (i: number) => number; layout: Layout; xKey: string; yKey: string; zKey?: string; showLabels: boolean; grain: number; citeOn?: boolean; ghostsOn?: boolean; theme?: "dark" | "light" };
 
 const hull2d = (pts: number[][]): number[][] => {
   if (pts.length < 3) return pts;
@@ -43,6 +45,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   const n = D.ids.length;
   const reduce = typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;  // a11y: no motion
   let { getColor, getRadius, layout, xKey, yKey, showLabels, grain } = init;
+  let zKey = init.zKey ?? "";
   let colorVer = 0, sizeVer = 0, posVer = 0, scrubVer = 0;
   let scrubGet: ((i: number) => number) | null = null;   // the scrubbed dimension's per-node value (channel-grammar scrubber)
   let scrubRange: [number, number] | null = null;         // active [lo,hi]; null = pass everything
@@ -92,14 +95,17 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   // 3D home: an OrbitView parked at the cloud centroid, framed to fill ~60% of the viewport, with a gentle tilt
   // so it reads as 3D. deck's default OrbitController takes it from there (drag-rotate, scroll-zoom).
   const orbitFit = Math.log2((vp * 0.6) / span3);  // 2^zoom px per world unit → fit span3 into ~60% of the viewport
-  const home = (l: Layout): any => l === "orbit"
-    ? { target: c3, zoom: orbitFit, rotationX: 22, rotationOrbit: 0, minZoom: orbitFit - 4, maxZoom: orbitFit + 8 }  // examine: anchored at the centroid, slight tilt
-    : l === "axes"
-      ? { target: [0, 0, 0], zoom: Math.log2(vp * 0.4), minZoom: fitZoom - 3, maxZoom: fitZoom + 9 }
-      : { target: [(bb.minX + bb.maxX) / 2, (bb.minY + bb.maxY) / 2, 0], zoom: fitZoom, minZoom: fitZoom - 2, maxZoom: fitZoom + 9 };
+  const axis3Fit = Math.log2((vp * 0.6) / 2.2);    // axis coords live in ~[-1,1] (span ~2), so fit that box
+  const home = (l: Layout): any =>
+    l === "orbit" ? { target: c3, zoom: orbitFit, rotationX: 22, rotationOrbit: 0, minZoom: orbitFit - 4, maxZoom: orbitFit + 8 }  // examine: anchored at the centroid, slight tilt
+    : l === "axes3d" ? { target: [0, 0, 0], zoom: axis3Fit, rotationX: 22, rotationOrbit: 0, minZoom: axis3Fit - 4, maxZoom: axis3Fit + 8 }  // 3-axis box centred at origin
+    : l === "axes" ? { target: [0, 0, 0], zoom: Math.log2(vp * 0.4), minZoom: fitZoom - 3, maxZoom: fitZoom + 9 }
+    : { target: [(bb.minX + bb.maxX) / 2, (bb.minY + bb.maxY) / 2, 0], zoom: fitZoom, minZoom: fitZoom - 2, maxZoom: fitZoom + 9 };
 
+  const ax = (k: string, index: number) => ((D.scores[k]?.[index] ?? 50) - 50) / 50;  // 0..100 score → -1..1 axis coord
   const pos = (index: number): number[] => {
-    if (layout === "axes") return [((D.scores[xKey]?.[index] ?? 50) - 50) / 50, ((D.scores[yKey]?.[index] ?? 50) - 50) / 50];
+    if (layout === "axes") return [ax(xKey, index), ax(yKey, index)];
+    if (layout === "axes3d") return [ax(xKey, index), ax(yKey, index), ax(zKey, index)];  // three honest axes on x/y/z
     if (layout === "orbit") return [D.xyz[index][0], D.xyz[index][1], D.xyz[index][2]];
     return [D.xy[index][0], D.xy[index][1]];
   };
@@ -149,10 +155,10 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   // 3D uses deck.gl's OWN default OrbitController — drag rotates, scroll zooms — the battle-tested interaction
   // for a point cloud. No custom wheel-dolly, no bounds clamp, no dragMode override (those were blind patches
   // that fought each other). Just sensible defaults; we can add deliberate motion later, seeing it work.
-  const controllerFor = (l: Layout) => l === "orbit"
+  const controllerFor = (l: Layout) => is3d(l)
     ? true
     : { doubleClickZoom: false, inertia: true };
-  const view = () => (layout === "orbit" ? new OrbitView({ id: "orbit" }) : new OrthographicView({ id: "ortho", flipY: false }));
+  const view = () => (is3d(layout) ? new OrbitView({ id: "orbit" }) : new OrthographicView({ id: "ortho", flipY: false }));
 
   // A dot is ONE thing in every view: a pixel-radius disc sized by getRadius(), with the same min-pixel floor.
   // 2D and 3D differ only in the PROJECTION of its position (orthographic vs perspective) — never the dot. Depth
@@ -181,7 +187,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     updateTriggers: { getSourcePosition: [posVer], getTargetPosition: [posVer], getColor: themeVer },
   });
   const hullPts = (): number[][] | null => {
-    if (layout === "orbit") return null;
+    if (is3d(layout)) return null;
     const idx = highlightSet ? [...highlightSet] : highlight != null ? members[highlight] : null;
     return idx && idx.length >= 3 ? hull2d(idx.map((i) => pos(i))) : null;
   };
@@ -206,7 +212,8 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   // 3D region labels: billboarded at each region's 3D centroid, so the fly-through stays isomorphic with the
   // 2D map (same regions, colours, names — one mental map at a different angle). No screen-space declutter in
   // 3D (positions move with the camera) — just show them all, biggest-first; deck's depth sorts them.
-  const centroid3 = (idx: number[]): number[] => { let x = 0, y = 0, z = 0; for (const i of idx) { const p = D.xyz[i]; x += p[0]; y += p[1]; z += p[2]; } const k = idx.length || 1; return [x / k, y / k, z / k]; };
+  // region centroid in the ACTIVE 3D space — pos() so labels sit correctly in orbit (xyz) AND axes3d (axis coords)
+  const centroid3 = (idx: number[]): number[] => { let x = 0, y = 0, z = 0; for (const i of idx) { const p = pos(i); x += p[0]; y += p[1]; z += p[2] || 0; } const k = idx.length || 1; return [x / k, y / k, z / k]; };
   const label3dLayer = () => new TextLayer({
     id: "labels",
     data: members.map((idx, c) => ({ c, label: dispLabel(labelOf(c)), n: idx.length, p: centroid3(idx) })).filter((d) => d.n > 0 && d.label).sort((a, b) => b.n - a.n),
@@ -241,7 +248,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     ...(focus != null ? [spokesLayer()] : []),
     pointsLayer(),
     ...(ghostsOn && D.ghosts ? [ghostLayer()] : []),
-    ...(showLabels ? [layout === "orbit" ? label3dLayer() : labelLayer()] : []),
+    ...(showLabels ? [is3d(layout) ? label3dLayer() : labelLayer()] : []),
   ];
 
   let viewState: any = home(layout);
@@ -288,7 +295,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   };
   // drill: step grain finer so the clicked region resolves into sub-clumps (gentle, ≤3 levels), fit to it.
   const drill = (nodeIdx: number) => {
-    const levels = D.levels; if (!levels || layout === "orbit") return;
+    const levels = D.levels; if (!levels || is3d(layout)) return;
     const curRegion = (levels[grain] ?? D.cluster)[nodeIdx];
     const curMembers = members[curRegion] || [];
     let newGrain = grain;
@@ -311,6 +318,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
       if (o.getRadius) { getRadius = o.getRadius; sizeVer++; }
       if (o.xKey && o.xKey !== xKey) { xKey = o.xKey; posVer++; }
       if (o.yKey && o.yKey !== yKey) { yKey = o.yKey; posVer++; }
+      if (o.zKey && o.zKey !== zKey) { zKey = o.zKey; posVer++; }
       if (o.showLabels !== undefined) showLabels = o.showLabels;
       if (o.citeOn !== undefined) citeOn = o.citeOn;
       if (o.ghostsOn !== undefined) ghostsOn = o.ghostsOn;
@@ -325,8 +333,10 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
         // the positions ease. ortho<->orbit changes the VIEW TYPE, but `zoom` means the same in both
         // (2^zoom px per world unit), so KEEP the current target+zoom and only swap the view + add/drop the
         // orbit rotation. The points still ease from the flat plane (z=0) up into xyz — that's the 3D reveal.
-        const viewChanged = (layout === "orbit") !== (prev === "orbit");
-        if (viewChanged) { viewState = home(layout); deck.setProps({ views: [view()], viewState, controller: controllerFor(layout) }); }  // ortho<->fly: view + controller differ, reset to the new view's home
+        // Reset the camera when crossing 2D<->3D, AND when switching BETWEEN the two 3D layouts (orbit's xyz vs
+        // axes3d's ~[-1,1] axis box are different world scales, so the old zoom/target would be wrong).
+        const viewChanged = is3d(layout) !== is3d(prev) || (is3d(layout) && is3d(prev) && layout !== prev);
+        if (viewChanged) { viewState = home(layout); deck.setProps({ views: [view()], viewState, controller: controllerFor(layout) }); }  // reset to the new view's home
       }
       paint();
     },
