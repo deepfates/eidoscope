@@ -3,6 +3,7 @@
   import { loadMap, mapUrl, decodeEido } from "./loader";
   import { createMap, type MapHandle, type Layout } from "./deckmap";
   import { facets, colorFor, sizeFor, col, axisColor, type Facet } from "./encode";
+  import { embedQuery, cosineAll, scale100 } from "./semantic";
   import type { MapContract } from "../../src/schema";
 
   let canvas: HTMLCanvasElement;
@@ -27,6 +28,11 @@
   let deckQ = $state("");
   let deckUnread = $state(false);
   let query = $state("");
+  let semQuery = $state("");                 // the semantic query (embedded); distinct from `query` (text filter)
+  let querying = $state(false);
+  let queryErr = $state("");
+  let queryActive = $state(false);           // is a semantic-query axis (__q) currently injected?
+  const QKEY = "__q";
   let showIntro = $state(false);
   let citeOn = $state(false);
   let ghostsOn = $state(false);
@@ -178,6 +184,36 @@
     (window as any).__eidoProject = (xy: number[]) => handle?.project(xy);
     (window as any).__eidoPick = (x: number, y: number) => handle?.pickAt(x, y);
   }
+  // The semantic-query keystone: embed the query in-browser (same model that made the card vectors), cosine-rank
+  // the cards, and inject the result as a synthetic axis (__q). Because color/size/x/y dropdowns iterate
+  // data.axes and colorFor/sizeFor/pos() read data.scores, the query is instantly usable on EVERY channel.
+  async function runQuery() {
+    const D = data; const q = semQuery.trim();
+    if (!D?.vectors || !q) return;
+    querying = true; queryErr = "";
+    try {
+      const qv = await embedQuery(q, (D as any).derivedBy?.embedder?.id);
+      const s100 = scale100(cosineAll(qv, D.vectors));
+      D.scores[QKEY] = s100;
+      D.axes = [...D.axes.filter((a) => a.key !== QKEY), { key: QKEY, name: "⌕ " + q, low: "unrelated", high: q, pc: 0, weak: false } as any];
+      data = D;                       // proxy mutation → dropdowns + colorFor closure pick it up
+      handle?.injectScores(QKEY, s100); // …and deckmap's own scores (pos() reads those) so it works as an AXIS too
+      queryActive = true;
+      color = QKEY;                   // immediate payoff: colour the map by similarity to the query
+    } catch (e: any) { queryErr = String(e?.message ?? e); }
+    finally { querying = false; }
+  }
+  function clearQuery() {
+    const D = data; if (!D) return;
+    delete D.scores[QKEY];
+    D.axes = D.axes.filter((a) => a.key !== QKEY);
+    data = D;
+    handle?.injectScores(QKEY, null);
+    queryActive = false; semQuery = "";
+    if (color === QKEY) color = "cluster";
+    if (xKey === QKEY) xKey = D.axes[0]?.key ?? "";
+    if (yKey === QKEY) yKey = D.axes[1]?.key ?? "";
+  }
   async function openFile(file: File) {
     try {
       status = "opening " + file.name + "…"; loadFailed = false;
@@ -328,6 +364,14 @@
         <button class="flex-1 rounded-md border border-[var(--hair2)] px-2 py-1 font-mono text-[11px] text-[var(--soft)] hover:bg-[var(--chip)]" onclick={reset}>reset</button>
       </div>
       <input type="search" bind:value={query} placeholder="find a card…" class="mt-2 w-full rounded-md border border-[var(--hair2)] bg-[var(--field)] px-2 py-1.5 text-xs" />
+      {#if data?.vectors}
+        <div class="mt-2 flex gap-1">
+          <input bind:value={semQuery} onkeydown={(e) => e.key === "Enter" && runQuery()} placeholder="semantic query…" disabled={querying} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-2 py-1.5 text-xs" />
+          <button onclick={runQuery} disabled={querying || !semQuery.trim()} title="embed & rank the corpus by meaning" class="flex-none rounded-md border border-[var(--hair2)] px-2.5 py-1 font-mono text-[11px] {queryActive ? 'bg-[var(--accent)] text-white' : 'text-[var(--soft)] hover:bg-[var(--chip)]'}">{querying ? "…" : "⌕"}</button>
+          {#if queryActive}<button onclick={clearQuery} title="clear query" class="flex-none rounded-md border border-[var(--hair2)] px-2 py-1 font-mono text-[11px] text-[var(--faint)] hover:bg-[var(--chip)]">✕</button>{/if}
+        </div>
+        {#if queryErr}<div class="mt-1 text-[10px] text-red-400">{queryErr}</div>{/if}
+      {/if}
       {#if hasCite || hasGhosts}
         <div class="mt-2 flex gap-2">
           {#if hasCite}<button class="flex-1 rounded-md border border-[var(--hair2)] px-2 py-1 font-mono text-[11px] {citeOn ? 'bg-[var(--chip)] text-[var(--ink)]' : 'text-[var(--faint)]'}" onclick={() => (citeOn = !citeOn)}>cite edges</button>{/if}

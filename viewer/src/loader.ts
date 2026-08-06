@@ -16,6 +16,16 @@ async function gunzip(bytes: Uint8Array): Promise<Uint8Array> {
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
+// IEEE half → float (mirror of src/mapbin.ts f16ToF32) so the browser can read the carried card vectors
+// without a Float16Array. These are the re-interrogation substrate: custom semantic axes / search.
+function f16ToF32(h: number): number {
+  const sign = (h & 0x8000) << 16; const exp = (h >>> 10) & 0x1f, mant = h & 0x3ff; let bits: number;
+  if (exp === 0) { if (mant === 0) bits = sign; else { let e = -1, m = mant; do { e++; m <<= 1; } while (!(m & 0x400)); bits = sign | ((127 - 15 - e) << 23) | ((m & 0x3ff) << 13); } }
+  else if (exp === 0x1f) bits = sign | 0x7f800000 | (mant << 13);
+  else bits = sign | ((exp - 15 + 127) << 23) | (mant << 13);
+  const i = new Int32Array(1), f = new Float32Array(i.buffer); i[0] = bits; return f[0];
+}
+
 export function decodeContainer(buf: Uint8Array): MapContract {
   const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   if (new TextDecoder().decode(buf.subarray(0, 8)) !== MAGIC) throw new Error("eidoscope: not a map.eido payload");
@@ -36,7 +46,17 @@ export function decodeContainer(buf: Uint8Array): MapContract {
   const scores: Record<string, number[]> = {};
   const sc = get("scores"); meta.axes.forEach((a: any, ai: number) => { scores[a.key] = Array.from({ length: n }, (_, i) => sc[ai * n + i]); });
 
+  // v2 carried card vectors (f16): the substrate for in-app semantic query / custom axes. Decoded to number[][].
+  let vectors: number[][] | undefined;
+  const vspec: BufSpec | undefined = meta.buffers.find((b: BufSpec) => b.key === "vectors");
+  if (vspec && meta.vdim) {
+    const start = buf.byteOffset + base + vspec.offset, u16 = new Uint16Array(buf.buffer.slice(start, start + vspec.length * 2));
+    const flat = new Float32Array(u16.length); for (let i = 0; i < u16.length; i++) flat[i] = f16ToF32(u16[i]);
+    vectors = unflat(flat, meta.vdim);
+  }
+
   return {
+    vectors,
     version: meta.version, provenance: meta.provenance, derivedBy: meta.derivedBy, metaFields: meta.metaFields, ids: meta.ids, titles: meta.titles, cores: meta.cores, notes: meta.notes,
     axes: meta.axes, scores, xy: unflat(get("xy"), 2), xyz: unflat(get("xyz"), 3),
     cluster: Array.from(get("cluster")), k: meta.k, di: meta.di,

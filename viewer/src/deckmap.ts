@@ -19,6 +19,7 @@ export type MapHandle = {
   setHighlightSet: (idx: number[] | null, color: RGB | null) => void;
   setQuery: (q: string) => void;
   setScrub: (get: ((i: number) => number) | null, range: [number, number] | null) => void;  // channel-grammar scrubber
+  injectScores: (key: string, arr: number[] | null) => void;  // add/remove a dynamic scalar dimension (e.g. a semantic-query axis) into the geometry's own scores
   fitToIndices: (idx: number[]) => void;
   resetView: () => void;
   destroy: () => void;
@@ -343,6 +344,9 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     pickAt: (x, y) => { const o = (deck as any).pickObject?.({ x, y, radius: 8 }); return o ? { layer: o.layer?.id ?? null, url: o.object?.url ?? null, index: o.index ?? -1 } : null; },
     resetView: () => { viewState = home(layout); deck.setProps({ viewState }); },
     setScrub: (get, range) => { scrubGet = get; scrubRange = range; scrubVer++; paint(); },
+    // A semantic-query axis is injected AFTER createMap, so deckmap's own D.scores must be updated (pos() reads
+    // it directly). null removes it. Bump pos+color so the position/gradient recompute.
+    injectScores: (key, arr) => { if (arr) (D as any).scores[key] = arr; else delete (D as any).scores[key]; posVer++; colorVer++; paint(); },
     destroy: () => deck.finalize(),
   };
 }
