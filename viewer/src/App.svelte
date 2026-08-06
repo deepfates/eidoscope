@@ -284,7 +284,8 @@
   // SCRUBBER (channel grammar): ONE slider that reveals cards cumulatively along ANY scalar/temporal field —
   // date, length, influence, citation impact, or a discovered axis — chosen from D.metaFields, via deck's GPU
   // DataFilterExtension. Falls back to a date scrubber for pre-metaFields (v1) files.
-  let scrubT = $state<number | null>(null);   // threshold; null = show everything (never writes min back on mount)
+  let scrubLo = $state<number | null>(null);  // window lower bound; null = field min
+  let scrubHi = $state<number | null>(null);  // window upper bound; null = field max (both null = show everything)
   let scrubKey = $state("");
   const fmtDate = (ms: number) => new Date(ms).toISOString().slice(0, 7);
   // resolve a scalar/temporal metaField's source to its per-card numeric values
@@ -308,15 +309,15 @@
     for (const v of scrubVals) if (typeof v === "number") { if (v < lo) lo = v; if (v > hi) hi = v; }
     return hi > lo ? [lo, hi] : null;
   });
-  // scrubT stays null = "show everything" until dragged. The slider READS `scrubT ?? max` and only WRITES on
-  // real input, so it can't write its default back on mount (the race that emptied the map on load).
+  // scrubLo/scrubHi stay null = "show everything" until dragged (they READ `?? min/max`, WRITE only on input,
+  // so they never write a default back on mount — the race that emptied the map on load).
   $effect(() => {
-    const h = handle, r = scrubRange, vs = scrubVals, t = scrubT, sc = data?.scores?.[QKEY];
+    const h = handle, r = scrubRange, vs = scrubVals, lo = scrubLo, hi = scrubHi, sc = data?.scores?.[QKEY];
     if (!h) return;
     // one scrub channel: an active semantic query's similarity threshold takes precedence (dissolve the
-    // unrelated), else the chosen scalar/temporal field reveals cumulatively, else show everything.
+    // unrelated), else the chosen field's WINDOW [lo,hi] shows only cards in the band, else show everything.
     if (queryActive && sc && simMin > 0) h.setScrub((i) => sc[i], [simMin, 100]);
-    else if (r && vs && t != null && t < r[1]) h.setScrub((i) => (typeof vs[i] === "number" ? (vs[i] as number) : r[0] - 1), [r[0], t]);
+    else if (r && vs && ((lo != null && lo > r[0]) || (hi != null && hi < r[1]))) h.setScrub((i) => (typeof vs[i] === "number" ? (vs[i] as number) : r[0] - 1), [lo ?? r[0], hi ?? r[1]]);
     else h.setScrub(null, null);
   });
 
@@ -407,9 +408,12 @@
       {/if}
       {#if scrubFields.length && scrubRange && scrubField}
         <label class="mt-2 flex items-center gap-2 text-xs">
-          <select bind:value={scrubKey} onchange={() => (scrubT = null)} title="which scalar/temporal field the scrubber reveals along" class="w-[76px] flex-none rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1 py-1 font-mono text-[10px] text-[var(--faint)]">{#each scrubFields as f}<option value={f.key}>{f.label}</option>{/each}</select>
-          <input type="range" min={scrubRange[0]} max={scrubRange[1]} step={(scrubRange[1] - scrubRange[0]) / 240} value={scrubT ?? scrubRange[1]} oninput={(e) => (scrubT = +e.currentTarget.value)} class="min-w-0 flex-1 accent-[var(--accent)]" aria-label="reveal cards up to this {scrubField.label} value" />
-          <span class="w-[52px] flex-none text-right font-mono text-[9px] text-[var(--faint)]">{scrubField.type === "temporal" ? fmtDate(scrubT ?? scrubRange[1]) : Math.round(scrubT ?? scrubRange[1])}</span>
+          <select bind:value={scrubKey} onchange={() => { scrubLo = null; scrubHi = null; }} title="which scalar/temporal field the scrubber windows" class="w-[70px] flex-none rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1 py-1 font-mono text-[10px] text-[var(--faint)]">{#each scrubFields as f}<option value={f.key}>{f.label}</option>{/each}</select>
+          <div class="relative flex h-4 min-w-0 flex-1 items-center">
+            <input type="range" min={scrubRange[0]} max={scrubRange[1]} step={(scrubRange[1] - scrubRange[0]) / 240} value={scrubLo ?? scrubRange[0]} oninput={(e) => (scrubLo = Math.min(+e.currentTarget.value, scrubHi ?? scrubRange[1]))} class="dual absolute inset-0 w-full appearance-none bg-transparent accent-[var(--accent)]" aria-label="window lower bound ({scrubField.label})" />
+            <input type="range" min={scrubRange[0]} max={scrubRange[1]} step={(scrubRange[1] - scrubRange[0]) / 240} value={scrubHi ?? scrubRange[1]} oninput={(e) => (scrubHi = Math.max(+e.currentTarget.value, scrubLo ?? scrubRange[0]))} class="dual absolute inset-0 w-full appearance-none bg-transparent accent-[var(--accent)]" aria-label="window upper bound ({scrubField.label})" />
+          </div>
+          <span class="w-[86px] flex-none text-right font-mono text-[8px] leading-tight text-[var(--faint)]">{scrubField.type === "temporal" ? fmtDate(scrubLo ?? scrubRange[0]) + "–" + fmtDate(scrubHi ?? scrubRange[1]) : Math.round(scrubLo ?? scrubRange[0]) + "–" + Math.round(scrubHi ?? scrubRange[1])}</span>
         </label>
       {/if}
       <div class="mt-2 flex gap-2">
@@ -562,3 +566,12 @@
     </div>
   {/if}
 </div>
+
+<style>
+  /* dual-thumb range: the two inputs overlap to share one track; only the thumbs take pointer events so BOTH
+     are draggable (the top input would otherwise swallow clicks meant for the bottom one's thumb). */
+  .dual { pointer-events: none; }
+  .dual::-webkit-slider-thumb { pointer-events: auto; }
+  .dual::-moz-range-thumb { pointer-events: auto; }
+  .dual::-webkit-slider-runnable-track { background: transparent; }
+</style>
