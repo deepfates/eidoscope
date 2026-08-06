@@ -202,7 +202,7 @@
     if (shi !== null && !Number.isNaN(+shi)) scrubHi = +shi;
     if (slo !== null || shi !== null) scrubNonce++;   // remount the slider so its thumbs show the restored window
     // re-embed query dimensions from their text (best-effort, background; won't block the restore or hang the app)
-    for (const t of p.getAll("q")) embedAndAdd(t, false);
+    for (const t of p.getAll("q")) embedAndAdd(t);
     // region + card + facet + find depend on grain-derived state, so apply once the reactive graph has settled
     queueMicrotask(() => {
       const r = p.get("region"); if (r && !Number.isNaN(+r) && +r >= 0 && +r < curCount) togglePin(+r);
@@ -259,9 +259,9 @@
   // Semantic query: embed in-browser (same model that made the card vectors), cosine-rank, and append a
   // query-kind DIMENSION. It then appears in every channel menu (color/size/x/y/z/scrubber/deck-sort) like any
   // other dimension — no bespoke plumbing. N queries coexist. To hide low-similarity cards, put the query on the scrubber.
-  // embed a text query → append a query-kind dimension; returns its key (or null). grabColor: colour by it (the
-  // interactive payoff); URL-restore passes false so it doesn't steal a colour channel the URL already set.
-  async function embedAndAdd(q: string, grabColor: boolean): Promise<string | null> {
+  // embed a text query → append a query-kind dimension; returns its key (or null). It does NOT touch any channel:
+  // making an axis and placing it are separate acts (the user decides where it goes), so nothing moves underneath.
+  async function embedAndAdd(q: string): Promise<string | null> {
     const D = data; if (!D?.vectors || !q) return null;
     querying = true; queryErr = ""; queryStatus = "loading model…"; queryPct = null;
     // The first query lazy-loads a ~23MB model from a CDN. Show live progress, and detect a genuine STALL (no
@@ -278,7 +278,6 @@
       ]);
       const key = "q" + qN++;
       queries = [...queries, { key, text: q, raw: cosineAll(qv, D.vectors) }];
-      if (grabColor) color = key;
       queryStatus = "";
       return key;
     } catch (e: any) {
@@ -290,7 +289,7 @@
       return null;
     } finally { clearTimeout(stallTimer); querying = false; }
   }
-  async function runQuery() { const q = semQuery.trim(); if (!q) return; semQuery = ""; await embedAndAdd(q, true); }
+  async function runQuery() { const q = semQuery.trim(); if (!q) return; semQuery = ""; await embedAndAdd(q); }
   // remove a query dimension; reset any channel that was pointing at it back to a default.
   function removeQuery(key: string) {
     queries = queries.filter((q) => q.key !== key);
@@ -355,6 +354,9 @@
   let scrubNonce = $state(0);
   function resetScrub() { scrubLo = null; scrubHi = null; scrubNonce++; }
   const fmtDate = (ms: number) => new Date(ms).toISOString().slice(0, 7);
+  // adaptive numeric label: more decimals for small-span axes so a cosine/PCA range (~[-0.5,0.5]) doesn't
+  // collapse to "0 – 0" while a length axis (~[100,2300]) doesn't show noise decimals.
+  const fmtNum = (v: number, span: number) => { const a = Math.abs(span); return v.toFixed(a >= 100 ? 0 : a >= 10 ? 1 : a >= 1 ? 2 : 3); };
   const scrubFields = $derived(allDims.filter((d) => d.kind === "scalar" || d.kind === "temporal"));  // registry
   $effect(() => { if (!scrubKey && scrubFields.length) scrubKey = (scrubFields.find((d) => d.kind === "temporal") ?? scrubFields[0]).key; });
   const scrubField = $derived(scrubFields.find((d) => d.key === scrubKey));
@@ -400,7 +402,6 @@
     return out;
   });
 
-  const hint = $derived(layout === "axes" ? "positioned by where each card projects on the two axes" : layout === "axes3d" ? "three axes on x/y/z · drag to rotate · scroll to zoom" : layout === "orbit" ? "drag to rotate · scroll to zoom" : "proximity = similarity · tap a card");
   const prov = $derived(data?.provenance);   // so a passed-around file introduces itself
   const provDate = (g?: number) => (g ? new Date(g).toISOString().slice(0, 10) : "");
   $effect(() => { try { document.title = prov?.title ? `${prov.title} · eidoscope 🔭` : "eidoscope 🔭"; } catch {} });
@@ -458,7 +459,7 @@
             {#if !d.fixedNorm}
               <button onclick={() => setProp(d, { norm: p.norm === "rank" ? "honest" : "rank" })}
                 title={p.norm === "rank" ? "rank-normalized: even spread — click for honest (true magnitudes; the skew shows)" : "honest: true magnitudes — click for rank (even spread)"}
-                class="rounded border border-[var(--hair2)] px-1 py-0.5 font-mono text-[9px] {p.norm === 'rank' ? 'text-[var(--faint)]' : 'bg-[var(--chip)] text-[var(--ink)]'}">{p.norm === "rank" ? "rank" : "honest"}</button>
+                class="w-11 flex-none rounded border border-[var(--hair2)] py-0.5 text-center font-mono text-[9px] {p.norm === 'rank' ? 'text-[var(--faint)]' : 'bg-[var(--chip)] text-[var(--ink)]'}">{p.norm === "rank" ? "rank" : "honest"}</button>
             {/if}
             <button onclick={() => setProp(d, { invert: !p.invert })}
               title={p.invert ? "inverted (high↔low) — click to restore" : "invert this dimension (high↔low)"}
@@ -502,7 +503,7 @@
         <div class="mt-2">
           <div class="mb-1 flex items-center gap-2 text-xs">
             <select bind:value={scrubKey} onchange={resetScrub} title="which scalar/temporal dimension the scrubber windows" class="w-[72px] flex-none rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1 py-1 font-mono text-[10px] text-[var(--faint)]">{#each scrubFields as f}<option value={f.key}>{f.name}</option>{/each}</select>
-            <span class="min-w-0 flex-1 truncate text-right font-mono text-[9px] text-[var(--faint)]">{scrubField.kind === "temporal" ? fmtDate(scrubLo ?? scrubRange[0]) + " – " + fmtDate(scrubHi ?? scrubRange[1]) : Math.round(scrubLo ?? scrubRange[0]) + " – " + Math.round(scrubHi ?? scrubRange[1])}</span>
+            <span class="min-w-0 flex-1 truncate text-right font-mono text-[9px] text-[var(--faint)]">{scrubField.kind === "temporal" ? fmtDate(scrubLo ?? scrubRange[0]) + " – " + fmtDate(scrubHi ?? scrubRange[1]) : fmtNum(scrubLo ?? scrubRange[0], scrubRange[1] - scrubRange[0]) + " – " + fmtNum(scrubHi ?? scrubRange[1], scrubRange[1] - scrubRange[0])}</span>
           </div>
           <div class="scrub">
             {#key scrubNonce}
@@ -539,8 +540,6 @@
           {#if queryPct != null}<div class="mt-0.5 h-0.5 w-full overflow-hidden rounded bg-[var(--chip2)]"><div class="h-full bg-[var(--accent)] transition-all duration-200" style="width:{queryPct}%"></div></div>{/if}
         {:else if queryErr}
           <div class="mt-1 text-[10px] leading-snug text-red-400">{queryErr}</div>
-        {:else if !queryDims.length}
-          <div class="mt-1 text-[10px] leading-snug text-[var(--faint)]">first query downloads a small model once (~23 MB), then it’s instant</div>
         {/if}
         {#each queryDims as qd}
           <div class="mt-1 flex items-center gap-1 rounded-md bg-[var(--chip2)] px-2 py-1 text-[10px]">
@@ -562,10 +561,10 @@
     <div class="absolute bottom-3 right-3 flex max-h-[44vh] w-[min(13rem,62vw)] flex-col overflow-hidden rounded-xl border border-[var(--hair)] bg-[var(--panel)] p-2.5 text-xs backdrop-blur">
       <button class="flex w-full flex-none items-center gap-1 font-mono text-[10px] uppercase text-[var(--faint)] hover:text-[var(--ink)] {legendOpen ? 'mb-1.5' : ''}" onclick={() => (legendOpen = !legendOpen)} aria-expanded={legendOpen} aria-label="{legendOpen ? 'collapse' : 'expand'} legend">
         <span class="text-[9px]">{legendOpen ? "▾" : "▸"}</span>
-        <span class="truncate">{#if color === "region"}{curCount} regions{#if legendOpen}<span class="normal-case text-[var(--faint)]"> · click to isolate</span>{/if}{:else if colorDim?.kind === "categorical"}{colorDim.name} · {colorDim.ord?.length}{#if legendOpen}<span class="normal-case text-[var(--faint)]"> · click to isolate</span>{/if}{:else if colorDim}{colorDim.name}{#if colorDim.variance != null}<span class="normal-case text-[var(--faint)]"> · {Math.round(colorDim.variance * 100)}% variance{colorDim.weak ? " (thin)" : ""}</span>{/if}{:else}legend{/if}</span>
+        <span class="truncate">{#if color === "region"}{curCount} regions{:else if colorDim?.kind === "categorical"}{colorDim.name} · {colorDim.ord?.length}{:else if colorDim}{colorDim.name}{#if colorDim.variance != null}<span class="normal-case text-[var(--faint)]"> · {Math.round(colorDim.variance * 100)}% variance{colorDim.weak ? " (thin)" : ""}</span>{/if}{:else}legend{/if}</span>
       </button>
       {#if legendOpen}
-        <div class="min-h-0 overflow-auto">
+        <div class="thin-sb min-h-0 overflow-auto">
         {#if color === "region"}
           {#each curClusters as c}<div class="flex cursor-pointer items-center gap-2 py-1.5 hover:text-[var(--ink)] {pinned === c.c ? 'text-[var(--ink)] font-semibold' : ''}" role="button" tabindex="0" aria-label="isolate region {c.label}" aria-pressed={pinned === c.c} onmouseenter={() => { if (pinned === null) handle?.setHighlight(c.c); }} onmouseleave={() => { if (pinned === null) handle?.setHighlight(null); }} onclick={() => togglePin(c.c)} onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); togglePin(c.c); } }}><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(col(c.c))}"></span><span class="truncate" title={c.label}>{c.label} <span class="text-[var(--faint)]">{c.n}</span></span></div>{/each}
         {:else if colorDim?.kind === "categorical"}
@@ -580,7 +579,6 @@
       {/if}
     </div>
 
-    <div class="pointer-events-none absolute bottom-3 left-1/2 hidden -translate-x-1/2 whitespace-nowrap font-mono text-[11px] text-[var(--faint)] sm:block">{hint}</div>
     {#if selected === null && !deckOpen}
       <div class="pointer-events-none absolute bottom-3 right-56 hidden font-mono text-[10px] text-[var(--faint)] min-[980px]:block">{data.ids.length} cards · {layout} · {sizeLabel}</div>
     {/if}
@@ -603,7 +601,7 @@
 
   <!-- detail panel -->
   {#if selected !== null && data}
-    <div use:trapFocus tabindex="-1" role="dialog" aria-label="card detail" class="absolute bottom-3 left-3 right-3 max-h-[64vh] overflow-auto rounded-xl border border-[var(--hair)] bg-[var(--panel)] p-4 text-sm backdrop-blur sm:right-auto sm:w-80">
+    <div use:trapFocus tabindex="-1" role="dialog" aria-label="card detail" class="thin-sb absolute bottom-3 left-3 right-3 max-h-[64vh] overflow-auto rounded-xl border border-[var(--hair)] bg-[var(--panel)] p-4 text-sm backdrop-blur sm:right-auto sm:w-80">
       <button class="absolute right-2 top-2 grid h-9 w-9 place-items-center rounded-md font-mono text-base text-[var(--faint)] hover:bg-[var(--chip)] hover:text-[var(--soft)]" onclick={() => requestClose()} aria-label="close">✕</button>
       <div class="mb-1 pr-6 font-bold">{data.titles[selected]}</div>
       <div class="mb-2 font-mono text-[10px] text-[var(--faint)]">{[data.authors?.[selected], dateOf(selected), regionOf(selected)].filter(Boolean).join(" · ")}</div>
@@ -632,7 +630,6 @@
   {#if deckOpen && data}
     <div use:trapFocus tabindex="-1" role="dialog" aria-label="deck reader" class="absolute inset-x-2 top-2 bottom-2 z-30 mx-auto flex max-w-4xl flex-col rounded-xl border border-[var(--hair)] bg-[var(--panel-solid)] p-3 backdrop-blur">
       <div class="mb-2 flex flex-wrap items-center gap-2">
-        <b class="text-sm">Deck</b>
         <span class="font-mono text-[10px] text-[var(--faint)]">{deckList.length} cards</span>
         <label class="flex items-center gap-1 text-xs"><span class="font-mono text-[10px] text-[var(--faint)]">sort</span>
           <select bind:value={deckSort} class="rounded-md border border-[var(--hair2)] bg-[var(--card)] px-1.5 py-1 text-xs">
@@ -640,9 +637,9 @@
           </select></label>
         {#if hasRead}<button class="rounded-md border border-[var(--hair2)] px-2 py-1 font-mono text-[11px] {deckUnread ? 'bg-[var(--chip)] text-[var(--ink)]' : 'text-[var(--faint)]'}" onclick={() => (deckUnread = !deckUnread)}>unread only</button>{/if}
         <input bind:value={deckQ} placeholder="filter…" class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--card)] px-2 py-1 text-xs" />
-        <button class="ml-auto grid h-10 w-10 flex-none place-items-center rounded-md border border-[var(--hair2)] font-mono text-base text-[var(--faint)] hover:bg-[var(--chip)] hover:text-[var(--ink)]" onclick={() => requestClose()} aria-label="close deck">✕</button>
+        <button class="ml-auto grid h-7 w-7 flex-none place-items-center rounded-md font-mono text-sm text-[var(--faint)] hover:bg-[var(--chip)] hover:text-[var(--ink)]" onclick={() => requestClose()} aria-label="close deck">✕</button>
       </div>
-      <div class="grid grid-cols-1 gap-2 overflow-auto sm:grid-cols-2">
+      <div class="thin-sb grid grid-cols-1 gap-2 overflow-auto sm:grid-cols-2">
         {#if deckList.length === 0}<div class="col-span-full py-16 text-center font-mono text-xs text-[var(--faint)]">no cards match “{deckQ}”{deckUnread ? " (unread only)" : ""}</div>{/if}
         {#each deckList as i (i)}
           <button class="rounded-lg border border-[var(--hair)] bg-[var(--card)] p-2.5 text-left hover:border-[var(--hair2)] {data.read?.[i] === true ? 'opacity-60' : ''}" onclick={() => { focusCard(i); deckOpen = false; }}>
@@ -685,4 +682,10 @@
      replaces the hand-rolled two-overlapping-inputs + pointer-events hack. :global reaches its scoped nodes. */
   .scrub :global(.rangeSlider) { margin: 4px 2px; height: 5px; background: var(--chip2); --range-handle-inactive: var(--accent); --range-handle: var(--accent); --range-handle-focus: var(--accent); --range-range: var(--accent); }
   .scrub :global(.rangeSlider .rangeHandle .rangeNub) { box-shadow: 0 0 0 1px var(--panel); }
+  /* scrollable regions that shouldn't advertise a chrome scrollbar — still scrolls, just quietly (thin on
+     firefox, hidden track on webkit; the content fades are enough of an affordance). */
+  .thin-sb { scrollbar-width: thin; scrollbar-color: var(--hair2) transparent; }
+  .thin-sb::-webkit-scrollbar { width: 6px; height: 6px; }
+  .thin-sb::-webkit-scrollbar-thumb { background: var(--hair2); border-radius: 3px; }
+  .thin-sb::-webkit-scrollbar-track { background: transparent; }
 </style>
