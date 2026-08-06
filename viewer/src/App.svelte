@@ -32,6 +32,7 @@
   let querying = $state(false);
   let queryErr = $state("");
   let queryActive = $state(false);           // is a semantic-query axis (__q) currently injected?
+  let simMin = $state(0);                     // similarity-threshold filter (0..99) when a query is active
   const QKEY = "__q";
   let showIntro = $state(false);
   let citeOn = $state(false);
@@ -200,6 +201,7 @@
       handle?.injectScores(QKEY, s100); // …and deckmap's own scores (pos() reads those) so it works as an AXIS too
       queryActive = true;
       color = QKEY;                   // immediate payoff: colour the map by similarity to the query
+      deckSort = QKEY;                // …and the deck becomes semantic search results
     } catch (e: any) { queryErr = String(e?.message ?? e); }
     finally { querying = false; }
   }
@@ -209,8 +211,9 @@
     D.axes = D.axes.filter((a) => a.key !== QKEY);
     data = D;
     handle?.injectScores(QKEY, null);
-    queryActive = false; semQuery = "";
+    queryActive = false; semQuery = ""; simMin = 0;
     if (color === QKEY) color = "cluster";
+    if (deckSort === QKEY) deckSort = "hub";
     if (xKey === QKEY) xKey = D.axes[0]?.key ?? "";
     if (yKey === QKEY) yKey = D.axes[1]?.key ?? "";
   }
@@ -265,9 +268,12 @@
   // only WRITES on real input, so it can never write its default (min) back on mount — that race emptied the
   // map on load. No init effect needed: null → setScrub(null) below → full corpus.
   $effect(() => {
-    const h = handle, dr = dateRange, t = scrubT, ds = data?.dates;
+    const h = handle, dr = dateRange, t = scrubT, ds = data?.dates, sc = data?.scores?.[QKEY];
     if (!h) return;
-    if (dr && ds && t != null && t < dr[1]) h.setScrub((i) => (typeof ds[i] === "number" ? (ds[i] as number) : dr[0] - 1), [dr[0], t]);
+    // one scrub channel; when a semantic query is active its similarity threshold takes it (dissolve the
+    // unrelated, keep the neighbourhood), else fall back to the time scrubber, else show everything.
+    if (queryActive && sc && simMin > 0) h.setScrub((i) => sc[i], [simMin, 100]);
+    else if (dr && ds && t != null && t < dr[1]) h.setScrub((i) => (typeof ds[i] === "number" ? (ds[i] as number) : dr[0] - 1), [dr[0], t]);
     else h.setScrub(null, null);   // slid to the end (or no dates) → show everything
   });
 
@@ -371,6 +377,13 @@
           {#if queryActive}<button onclick={clearQuery} title="clear query" class="flex-none rounded-md border border-[var(--hair2)] px-2 py-1 font-mono text-[11px] text-[var(--faint)] hover:bg-[var(--chip)]">✕</button>{/if}
         </div>
         {#if queryErr}<div class="mt-1 text-[10px] text-red-400">{queryErr}</div>{/if}
+        {#if queryActive}
+          <label class="mt-1 flex items-center gap-2 text-[10px] text-[var(--faint)]">
+            <span class="w-9 flex-none font-mono">sim ≥</span>
+            <input type="range" min="0" max="99" value={simMin} oninput={(e) => (simMin = +e.currentTarget.value)} class="min-w-0 flex-1 accent-[var(--accent)]" aria-label="hide cards below this similarity to the query" />
+            <span class="w-6 flex-none text-right font-mono">{simMin}</span>
+          </label>
+        {/if}
       {/if}
       {#if hasCite || hasGhosts}
         <div class="mt-2 flex gap-2">
