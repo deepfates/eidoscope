@@ -1,4 +1,4 @@
-import { Deck, OrthographicView, OrbitView, FirstPersonView } from "@deck.gl/core";
+import { Deck, OrthographicView, OrbitView } from "@deck.gl/core";
 import { ScatterplotLayer, LineLayer, PolygonLayer, TextLayer } from "@deck.gl/layers";
 import { DataFilterExtension } from "@deck.gl/extensions";
 import type { MapContract } from "../../src/schema";
@@ -22,7 +22,7 @@ export type MapHandle = {
   fitToIndices: (idx: number[]) => void;
   resetView: () => void;
   destroy: () => void;
-  debug: () => { zoom: number; labels: number; regions: number; grain: number; rot: number | null; rotX: number | null; pos: number[] | null; span3: number };  // read-only seam for integration tests
+  debug: () => { zoom: number; labels: number; regions: number; grain: number; rot: number | null; rotX: number | null; target: number[] | null; span3: number };  // read-only seam for integration tests
   project: (worldXY: number[]) => number[];  // world → screen px, so tests can click exact nodes/ghosts
   pickAt: (x: number, y: number) => { layer: string | null; url: string | null; index: number } | null;  // what deck picks at a screen px
 };
@@ -88,10 +88,13 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   for (const [x, y, z] of D.xyz) { if (x < bb3.minX) bb3.minX = x; if (x > bb3.maxX) bb3.maxX = x; if (y < bb3.minY) bb3.minY = y; if (y > bb3.maxY) bb3.maxY = y; if (z < bb3.minZ) bb3.minZ = z; if (z > bb3.maxZ) bb3.maxZ = z; }
   const c3 = [(bb3.minX + bb3.maxX) / 2, (bb3.minY + bb3.maxY) / 2, (bb3.minZ + bb3.maxZ) / 2];
   const span3 = Math.max(bb3.maxX - bb3.minX, bb3.maxY - bb3.minY, bb3.maxZ - bb3.minZ) || 2;
-  // FirstPersonView flies THROUGH a fixed constellation: the camera translates among fixed 3D points, dots
-  // hold a constant screen size (like stars). (radiusUnits 'common' projects sub-pixel here, so pixels.)
+  // SPIKE (one-camera dive): ONE OrbitView for 3D. `target` is the world point at the viewport centre and
+  // rotation happens AROUND it, so parking target at the cloud centroid = "examine from outside" and dollying
+  // target forward along the view ray = "fly among the concepts" — same view class, same viewState, one mental
+  // map. zoom stays fixed (no balloon-inflation); scroll translates target (see the wheel handler below).
+  const orbitFit = Math.log2((vp * 0.6) / span3);  // 2^zoom common-px per world unit → fit span3 into ~60% of the viewport
   const home = (l: Layout): any => l === "orbit"
-    ? { position: [c3[0], c3[1] - span3 * 1.4, c3[2]], bearing: 0, pitch: 0 }  // set back from the centroid, looking in (+y)
+    ? { target: c3, zoom: orbitFit, rotationX: 22, rotationOrbit: 0, minZoom: orbitFit - 4, maxZoom: orbitFit + 8 }  // examine: anchored at the centroid, slight tilt
     : l === "axes"
       ? { target: [0, 0, 0], zoom: Math.log2(vp * 0.4), minZoom: fitZoom - 3, maxZoom: fitZoom + 9 }
       : { target: [(bb.minX + bb.maxX) / 2, (bb.minY + bb.maxY) / 2, 0], zoom: fitZoom, minZoom: fitZoom - 2, maxZoom: fitZoom + 9 };
@@ -150,12 +153,16 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   // defaults chosen by real-browser exploration (see eid-6vgy): pixels not 'common' (common is sub-pixel under
   // FirstPersonView), dots sized up so they're visible from outside and big when you fly in, move≈10 (cross the
   // cloud in ~3 scroll ticks, not sluggish), billboarded region labels ON (isomorphic landmarks).
-  const flyDefaults = { unit: "pixels" as "pixels" | "common", dotMul: 3, commonScale: 0.03, dotMin: 4, fovy: 60, move: 10, labels: true };
+  // World-size dots ('common') under OrbitView perspective: near dots grow, far dots shrink — the depth cue
+  // that makes the dive read as *moving through* a constellation (verified in-browser, spike/one-camera-dolly).
+  const flyDefaults = { unit: "common" as "pixels" | "common", dotMul: 3, commonScale: 0.02, dotMin: 2, fovy: 55, move: 6, labels: true };
   const flyCfg = (): typeof flyDefaults => ({ ...flyDefaults, ...(typeof window !== "undefined" ? (window as any).__fly : null) });
+  // OrbitController: drag rotates around target, pinch zooms. We DISABLE scrollZoom and handle the wheel
+  // ourselves (dolly target along the view ray — the dive) so scroll flies IN instead of scaling the scene.
   const controllerFor = (l: Layout) => l === "orbit"
-    ? { doubleClickZoom: false, inertia: false, keyboard: { moveSpeed: span3 * 0.02 * flyCfg().move }, scrollZoom: { speed: 0.0000625 * flyCfg().move } }
+    ? { doubleClickZoom: false, inertia: false, scrollZoom: false }
     : { doubleClickZoom: false, inertia: true };
-  const view = () => (layout === "orbit" ? new FirstPersonView({ id: "orbit", fovy: flyCfg().fovy }) : new OrthographicView({ id: "ortho", flipY: false }));
+  const view = () => (layout === "orbit" ? new OrbitView({ id: "orbit", fovy: flyCfg().fovy, orbitAxis: "Z" }) : new OrthographicView({ id: "ortho", flipY: false }));
 
   const pointsLayer = () => { const fc = flyCfg(); const orbit = layout === "orbit"; return new ScatterplotLayer({
     id: "points", data: { length: n },
@@ -212,7 +219,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     id: "labels",
     data: members.map((idx, c) => ({ c, label: dispLabel(labelOf(c)), n: idx.length, p: centroid3(idx) })).filter((d) => d.n > 0 && d.label).sort((a, b) => b.n - a.n),
     getPosition: (d: any) => d.p, getText: (d: any) => d.label,
-    getColor: (d: any) => [...col(d.c), highlight != null && d.c !== highlight ? 70 : 245] as any, getSize: 12, sizeUnits: "pixels", billboard: true,
+    getColor: (d: any) => [...col(d.c), highlight != null && d.c !== highlight ? 70 : 245] as any, getSize: 14, sizeUnits: "pixels", sizeMaxPixels: 22, billboard: true,
     fontFamily: "ui-monospace, monospace", fontWeight: 700, getTextAnchor: "middle", getAlignmentBaseline: "center", characterSet: "auto",
     getBackgroundColor: labelBg(), background: true, backgroundPadding: [4, 2],
     updateTriggers: { getPosition: [posVer, grain], data: [posVer, grain], getColor: [highlight], getBackgroundColor: themeVer },
@@ -308,6 +315,37 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     const info = (deck as any).pickObject({ x: (e as MouseEvent).offsetX, y: (e as MouseEvent).offsetY, radius: 8 });
     if (info && info.layer?.id === "points" && info.index >= 0) drill(info.index);
   });
+  // SPIKE — the dive: in 3D, the wheel dollies `target` along the view ray instead of zooming. We get the ray
+  // direction from the viewport's own unproject (near→far through screen centre), so it's exact in world space
+  // regardless of orbitAxis/rotation. Moving target translates the whole rig forward (camera = target + fixed
+  // offset), so dots get CLOSER as you enter the cloud without changing screen size (no balloon). Target is
+  // clamped to the cloud's bounds + a margin, so you physically cannot fly off into the void — the anchor that
+  // orbit had, kept while flying. Wheel-down = forward (into the cloud); wheel-up = back out to examine.
+  canvas.addEventListener("wheel", (e) => {
+    if (layout !== "orbit") return;
+    const w = e as WheelEvent; w.preventDefault();
+    const vp: any = deck.getViewports?.()?.[0]; if (!vp) return;
+    const t = viewState.target as number[];
+    // Dive toward the CURSOR (unproject the mouse ray near→far), so you go where you're looking, not just to
+    // screen centre. The ray is exact world-space regardless of orbitAxis/rotation.
+    const ox = w.offsetX ?? vp.width / 2, oy = w.offsetY ?? vp.height / 2;
+    const p0 = vp.unproject([ox, oy, 0]);
+    const p1 = vp.unproject([ox, oy, 1]);
+    let fx = p1[0] - p0[0], fy = p1[1] - p0[1], fz = p1[2] - p0[2];
+    const len = Math.hypot(fx, fy, fz) || 1; fx /= len; fy /= len; fz /= len;
+    // Magnitude-scaled: a normal wheel notch (~100 deltaY) crosses a meaningful slice of the cloud, so ~4–5
+    // notches take you from examine to inside. deltaY is clamped so a flung trackpad can't teleport.
+    const dy = Math.max(-120, Math.min(120, w.deltaY || 0));
+    const step = span3 * 0.0026 * (flyCfg().move / 6) * dy;  // wheel-down (deltaY>0) = dive forward
+    const m = span3 * 0.5;
+    const clamp = (v: number, lo: number, hi: number) => Math.max(lo - m, Math.min(hi + m, v));
+    viewState = { ...viewState, target: [
+      clamp(t[0] + fx * step, bb3.minX, bb3.maxX),
+      clamp(t[1] + fy * step, bb3.minY, bb3.maxY),
+      clamp(t[2] + fz * step, bb3.minZ, bb3.maxZ),
+    ] };
+    deck.setProps({ viewState });  // 3D labels are billboarded → they re-render with the camera automatically
+  }, { passive: false });
 
   return {
     update: (o) => {
@@ -343,7 +381,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
       colorVer++; paint();
     },
     fitToIndices: (idx) => fit(idx),
-    debug: () => ({ zoom: (deck.getViewports?.()?.[0] as any)?.zoom ?? viewState?.zoom ?? 0, labels: decluttered().length, regions: members.filter((m) => m.length).length, grain, rot: viewState?.rotationOrbit ?? null, rotX: viewState?.rotationX ?? null, pos: viewState?.position ?? null, span3 }),
+    debug: () => ({ zoom: (deck.getViewports?.()?.[0] as any)?.zoom ?? viewState?.zoom ?? 0, labels: decluttered().length, regions: members.filter((m) => m.length).length, grain, rot: viewState?.rotationOrbit ?? null, rotX: viewState?.rotationX ?? null, target: viewState?.target ?? null, span3 }),
     project: (worldXY) => { const vp = (deck as any).getViewports?.()[0]; return vp ? vp.project([worldXY[0], worldXY[1], 0]).slice(0, 2) : [0, 0]; },
     pickAt: (x, y) => { const o = (deck as any).pickObject?.({ x, y, radius: 8 }); return o ? { layer: o.layer?.id ?? null, url: o.object?.url ?? null, index: o.index ?? -1 } : null; },
     resetView: () => { viewState = home(layout); deck.setProps({ viewState }); },
