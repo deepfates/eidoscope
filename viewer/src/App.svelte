@@ -58,6 +58,21 @@
   const xDim = $derived(allDims.find((d) => d.key === xKey));
   const yDim = $derived(allDims.find((d) => d.key === yKey));
   const zDim = $derived(allDims.find((d) => d.key === zKey));
+  const sizeDim = $derived(size === "uniform" ? undefined : allDims.find((d) => d.key === size));
+  // Per-dimension norm/invert lives in dimProps (keyed by dim.key) so the props travel WITH the dimension —
+  // toggling honest⇄rank on a dim changes it identically wherever it's placed (colour/size/x/y/z). One writer:
+  function setProp(d: Dimension, patch: Partial<DimProps>) { dimProps = { ...dimProps, [d.key]: { ...propsOf(d), ...patch } }; }
+  // The two poles of a scalar dim as [score-0 label, score-100 label]. scores01 applies invert, so when a dim is
+  // inverted the labels swap too — keeping the legend/axis honest (the pole where a card sits matches its label).
+  const poles = (d: Dimension): [string, string] => { const lo = d.low ?? "low " + d.name, hi = d.high ?? d.name; return propsOf(d).invert ? [hi, lo] : [lo, hi]; };
+  // Position accessors are fresh closures each update but deckmap only recomputes positions on a KEY change —
+  // so a prop-only change (same xKey, new norm) wouldn't move the points. This signature makes the change
+  // observable: deckmap bumps posVer whenever posSig differs (a plain $derived — NOT a self-incrementing $effect,
+  // which hung the app before). Includes each axis dim's props so honest⇄rank/invert on an axis re-lays-out.
+  const posSig = $derived.by(() => {
+    const sig = (k: string) => { const d = allDims.find((x) => x.key === k); return d ? [k, propsOf(d).norm, propsOf(d).invert] : [k]; };
+    return JSON.stringify([sig(xKey), sig(yKey), sig(zKey)]);
+  });
   function setTheme(t: "dark" | "light", persist = true) { theme = t; document.documentElement.dataset.theme = t; if (persist) try { localStorage.setItem("eido-theme", t); } catch {} }
   function toggleTheme() { setTheme(theme === "dark" ? "light" : "dark"); }
   const hasCite = $derived(!!data?.cite?.some((e) => e.length));
@@ -195,7 +210,7 @@
     status = "";
     if (opts?.intro) showIntro = true;                    // a freshly-opened file introduces itself
     handle = createMap(canvas, D, {
-      getColor: colorGet(buildDimensions(D), color, D.levels?.[grain] ?? D.cluster), getRadius: sizeGet(buildDimensions(D), size), getX: posGet(buildDimensions(D), xKey), getY: posGet(buildDimensions(D), yKey), getZ: posGet(buildDimensions(D), zKey), layout, xKey, yKey, zKey, showLabels: labelsOn, grain, theme,
+      getColor: colorGet(buildDimensions(D), color, D.levels?.[grain] ?? D.cluster), getRadius: sizeGet(buildDimensions(D), size), getX: posGet(buildDimensions(D), xKey), getY: posGet(buildDimensions(D), yKey), getZ: posGet(buildDimensions(D), zKey), posSig, layout, xKey, yKey, zKey, showLabels: labelsOn, grain, theme,
       onClick: (i) => focusCard(i < 0 ? null : i),
       onHover: (h, x, y) => (hovered = h == null ? null : { ...h, x, y }),
       onGrainChange: (g) => { grain = g; pinned = null; },
@@ -267,9 +282,9 @@
   });
 
   $effect(() => {
-    const l = layout, c = color, s = size, xk = xKey, yk = yKey, zk = zKey, sl = labelsOn, g = grain, a = assignment, co = citeOn, go = ghostsOn, th = theme, h = handle, d = data, ad = allDims, dp = dimProps;
+    const l = layout, c = color, s = size, xk = xKey, yk = yKey, zk = zKey, sl = labelsOn, g = grain, a = assignment, co = citeOn, go = ghostsOn, th = theme, h = handle, d = data, ad = allDims, dp = dimProps, ps = posSig;
     void dp; // dimProps in deps so a norm/invert change re-pushes the accessors
-    if (h && d) h.update({ getColor: colorGet(ad, c, a), getRadius: sizeGet(ad, s), getX: posGet(ad, xk), getY: posGet(ad, yk), getZ: posGet(ad, zk), layout: l, xKey: xk, yKey: yk, zKey: zk, showLabels: sl, grain: g, citeOn: co, ghostsOn: go, theme: th });
+    if (h && d) h.update({ getColor: colorGet(ad, c, a), getRadius: sizeGet(ad, s), getX: posGet(ad, xk), getY: posGet(ad, yk), getZ: posGet(ad, zk), posSig: ps, layout: l, xKey: xk, yKey: yk, zKey: zk, showLabels: sl, grain: g, citeOn: co, ghostsOn: go, theme: th });
   });
   $effect(() => { const q = query, h = handle; if (h) h.setQuery(q); }); // search dims non-matching map points
 
@@ -331,11 +346,12 @@
 
   {#if data}
     {#if layout === "axes" && xDim && yDim}
+      {@const xp = poles(xDim)}{@const yp = poles(yDim)}
       <div class="pointer-events-none absolute inset-0 font-mono text-xs text-[var(--dim)]">
-        <div class="absolute left-3 top-1/2 max-w-[42%] -translate-y-1/2" title={xDim.low ?? "low " + xDim.name}>← {trunc(xDim.low ?? "low " + xDim.name)}</div>
-        <div class="absolute right-3 top-1/2 max-w-[42%] -translate-y-1/2 text-right" title={xDim.high ?? xDim.name}>{trunc(xDim.high ?? xDim.name)} →</div>
-        <div class="absolute left-1/2 top-3 max-w-[60%] -translate-x-1/2 truncate" title={yDim.high ?? yDim.name}>↑ {trunc(yDim.high ?? yDim.name)}</div>
-        <div class="absolute bottom-9 left-1/2 max-w-[60%] -translate-x-1/2 truncate" title={yDim.low ?? "low " + yDim.name}>↓ {trunc(yDim.low ?? "low " + yDim.name)}</div>
+        <div class="absolute left-3 top-1/2 max-w-[42%] -translate-y-1/2" title={xp[0]}>← {trunc(xp[0])}</div>
+        <div class="absolute right-3 top-1/2 max-w-[42%] -translate-y-1/2 text-right" title={xp[1]}>{trunc(xp[1])} →</div>
+        <div class="absolute left-1/2 top-3 max-w-[60%] -translate-x-1/2 truncate" title={yp[1]}>↑ {trunc(yp[1])}</div>
+        <div class="absolute bottom-9 left-1/2 max-w-[60%] -translate-x-1/2 truncate" title={yp[0]}>↓ {trunc(yp[0])}</div>
       </div>
     {/if}
 
@@ -348,6 +364,19 @@
         </div>
       </div>
       {#if panelOpen}
+      {#snippet propToggle(d: Dimension | undefined)}
+        {#if d && (d.kind === "scalar" || d.kind === "temporal")}
+          {@const p = propsOf(d)}
+          <span class="flex flex-none gap-0.5">
+            <button onclick={() => setProp(d, { norm: p.norm === "rank" ? "honest" : "rank" })} disabled={d.fixedNorm}
+              title={d.fixedNorm ? "discovered axes are stored rank-normalized; honest needs raw PCA projections (not emitted yet)" : p.norm === "rank" ? "rank-normalized: even spread — click for honest (true magnitudes; the skew shows)" : "honest: true magnitudes — click for rank (even spread)"}
+              class="rounded border border-[var(--hair2)] px-1 py-0.5 font-mono text-[9px] disabled:opacity-40 {p.norm === 'rank' ? 'text-[var(--faint)]' : 'bg-[var(--chip)] text-[var(--ink)]'}">{p.norm === "rank" ? "rank" : "honest"}</button>
+            <button onclick={() => setProp(d, { invert: !p.invert })}
+              title={p.invert ? "inverted (high↔low) — click to restore" : "invert this dimension (high↔low)"}
+              class="rounded border border-[var(--hair2)] px-1 py-0.5 font-mono text-[9px] {p.invert ? 'bg-[var(--chip)] text-[var(--ink)]' : 'text-[var(--faint)]'}">⇅</button>
+          </span>
+        {/if}
+      {/snippet}
       {#if prov?.title}<div class="-mt-1 mb-0.5 truncate text-sm font-bold text-[var(--ink)]" title={prov.source ?? ""}>{prov.title}</div>{/if}
       <div class="mb-2 text-xs text-[var(--dim)]">{data.ids.length} cards · {curCount} regions</div>
       <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">layout</span>
@@ -356,23 +385,23 @@
         </select></label>
       {#if layout === "axes" || layout === "axes3d"}
         <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">x-axis</span>
-          <select bind:value={xKey} title={xDim?.name ?? ""} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">{#each allDims.filter((d) => d.kind !== "categorical") as d}<option value={d.key}>{d.name}</option>{/each}</select></label>
+          <select bind:value={xKey} title={xDim?.name ?? ""} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">{#each allDims.filter((d) => d.kind !== "categorical") as d}<option value={d.key}>{d.name}</option>{/each}</select>{@render propToggle(xDim)}</label>
         <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">y-axis</span>
-          <select bind:value={yKey} title={yDim?.name ?? ""} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">{#each allDims.filter((d) => d.kind !== "categorical") as d}<option value={d.key}>{d.name}</option>{/each}</select></label>
+          <select bind:value={yKey} title={yDim?.name ?? ""} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">{#each allDims.filter((d) => d.kind !== "categorical") as d}<option value={d.key}>{d.name}</option>{/each}</select>{@render propToggle(yDim)}</label>
         {#if layout === "axes3d"}
           <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">z-axis</span>
-            <select bind:value={zKey} title={zDim?.name ?? ""} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">{#each allDims.filter((d) => d.kind !== "categorical") as d}<option value={d.key}>{d.name}</option>{/each}</select></label>
+            <select bind:value={zKey} title={zDim?.name ?? ""} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">{#each allDims.filter((d) => d.kind !== "categorical") as d}<option value={d.key}>{d.name}</option>{/each}</select>{@render propToggle(zDim)}</label>
         {/if}
         {#if weakAxes}<div class="mb-1.5 rounded-md bg-[var(--chip2)] px-2 py-1 text-[10px] leading-snug text-[var(--dim)]">~ {weakAxes > 1 ? "minor axes" : "a minor axis"} (under 2% variance) — position is thin, read it loosely</div>{/if}
       {/if}
       <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">color</span>
         <select bind:value={color} title={colorDim?.name ?? "region"} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">
           <option value="region">region</option>{#each allDims.filter((d) => d.kind === "categorical") as d}<option value={d.key}>{d.name}</option>{/each}{#each allDims.filter((d) => d.kind !== "categorical") as d}<option value={d.key}>{d.source === "axis" ? "axis: " + d.name : d.name}</option>{/each}
-        </select></label>
+        </select>{@render propToggle(colorDim)}</label>
       <label class="flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">size</span>
         <select bind:value={size} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">
           <option value="uniform">uniform</option>{#each allDims.filter((d) => d.kind === "scalar") as d}<option value={d.key}>{d.name}</option>{/each}
-        </select></label>
+        </select>{@render propToggle(sizeDim)}</label>
       {#if nLevels > 1}
         <label class="mt-2 flex items-center gap-2 text-xs">
           <span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">grain</span>
@@ -434,8 +463,9 @@
           {#each colorDim.ord!.slice(0, 16) as v}<div class="flex cursor-pointer items-center gap-2 py-1.5 hover:text-[var(--ink)] {facetPin === v ? 'text-[var(--ink)] font-semibold' : ''}" role="button" tabindex="0" aria-label="isolate {colorDim.name} {v}" aria-pressed={facetPin === v} onclick={() => toggleFacetPin(v)} onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleFacetPin(v); } }}><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(col(colorDim.idx![v]))}"></span><span class="truncate" title={v}>{v} <span class="text-[var(--faint)]">{colorDim.cnt![v]}</span></span></div>{/each}
           {#if colorDim.ord!.length > 16}<div class="text-[var(--faint)]">+{colorDim.ord!.length - 16} more</div>{/if}
         {:else if colorDim}
-          <div class="flex items-center gap-2 py-0.5"><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(axisColor(0))}"></span>{colorDim.low ?? "low"}</div>
-          <div class="flex items-center gap-2 py-0.5"><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(axisColor(1))}"></span>{colorDim.high ?? "high"}</div>
+          {@const cp = poles(colorDim)}
+          <div class="flex items-center gap-2 py-0.5"><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(axisColor(0))}"></span>{cp[0]}</div>
+          <div class="flex items-center gap-2 py-0.5"><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(axisColor(1))}"></span>{cp[1]}</div>
         {/if}
         </div>
       {/if}

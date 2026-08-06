@@ -29,7 +29,7 @@ export type MapHandle = {
   project: (worldXY: number[]) => number[];  // world → screen px, so tests can click exact nodes/ghosts
   pickAt: (x: number, y: number) => { layer: string | null; url: string | null; index: number } | null;  // what deck picks at a screen px
 };
-type Opts = { getColor: (i: number) => RGB; getRadius: (i: number) => number; layout: Layout; xKey: string; yKey: string; zKey?: string; getX?: (i: number) => number; getY?: (i: number) => number; getZ?: (i: number) => number; posVer?: number; showLabels: boolean; grain: number; citeOn?: boolean; ghostsOn?: boolean; theme?: "dark" | "light" };
+type Opts = { getColor: (i: number) => RGB; getRadius: (i: number) => number; layout: Layout; xKey: string; yKey: string; zKey?: string; getX?: (i: number) => number; getY?: (i: number) => number; getZ?: (i: number) => number; posVer?: number; posSig?: string; showLabels: boolean; grain: number; citeOn?: boolean; ghostsOn?: boolean; theme?: "dark" | "light" };
 
 const hull2d = (pts: number[][]): number[][] => {
   if (pts.length < 3) return pts;
@@ -49,6 +49,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   // resolved position accessors from the App (dimension → -1..1 coord, with the dimension's norm/invert applied);
   // deckmap is a renderer — it no longer resolves axis values itself. Fallback to the raw-score ax() if absent.
   let getX = init.getX, getY = init.getY, getZ = init.getZ;
+  let posSig = init.posSig ?? "";
   let colorVer = 0, sizeVer = 0, posVer = 0, scrubVer = 0;
   let scrubGet: ((i: number) => number) | null = null;   // the scrubbed dimension's per-node value (channel-grammar scrubber)
   let scrubRange: [number, number] | null = null;         // active [lo,hi]; null = pass everything
@@ -310,9 +311,12 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
       if (o.getColor) { getColor = o.getColor; colorVer++; }
       if (o.getRadius) { getRadius = o.getRadius; sizeVer++; }
       if (o.getX) getX = o.getX; if (o.getY) getY = o.getY; if (o.getZ) getZ = o.getZ;
-      if (o.xKey && o.xKey !== xKey) { xKey = o.xKey; posVer++; }
-      if (o.yKey && o.yKey !== yKey) { yKey = o.yKey; posVer++; }
-      if (o.zKey && o.zKey !== zKey) { zKey = o.zKey; posVer++; }
+      if (o.xKey && o.xKey !== xKey) xKey = o.xKey;
+      if (o.yKey && o.yKey !== yKey) yKey = o.yKey;
+      if (o.zKey && o.zKey !== zKey) zKey = o.zKey;
+      // posSig folds in the axis KEYS and their norm/invert props, so it bumps on a key change OR a prop-only
+      // change (same key, new normalization) — the latter is what key-only comparison missed (points wouldn't move).
+      if (o.posSig !== undefined && o.posSig !== posSig) { posSig = o.posSig; posVer++; }
       if (o.showLabels !== undefined) showLabels = o.showLabels;
       if (o.citeOn !== undefined) citeOn = o.citeOn;
       if (o.ghostsOn !== undefined) ghostsOn = o.ghostsOn;
