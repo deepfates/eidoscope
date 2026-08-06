@@ -5,7 +5,7 @@
   import { createMap, type MapHandle, type Layout } from "./deckmap";
   import { col, axisColor } from "./encode";
   import { buildDimensions, sizeAccessor, colorAccessor, scores01, defaultProps, type Dimension, type DimProps } from "./dimensions";
-  import { embedQuery, cosineAll } from "./semantic";
+  import { embedQuery, cosineAll, resetEmbedder } from "./semantic";
   import type { MapContract } from "../../src/schema";
 
   let canvas: HTMLCanvasElement;
@@ -33,6 +33,8 @@
   let semQuery = $state("");                 // the query-box text (distinct from `query`, the substring find)
   let querying = $state(false);
   let queryErr = $state("");
+  let queryStatus = $state("");   // live line while the first query downloads the model / embeds
+  let queryPct = $state<number | null>(null);   // download % when known (drives the thin progress bar)
   // N semantic queries, each a first-class dimension: {key, text, raw cosines}. "+ query" appends one; it then
   // shows up in every channel menu like any other dimension. Filtering by a query = putting it on the scrubber.
   let queries = $state<{ key: string; text: string; raw: number[] }[]>([]);
@@ -261,15 +263,32 @@
   // interactive payoff); URL-restore passes false so it doesn't steal a colour channel the URL already set.
   async function embedAndAdd(q: string, grabColor: boolean): Promise<string | null> {
     const D = data; if (!D?.vectors || !q) return null;
-    querying = true; queryErr = "";
+    querying = true; queryErr = ""; queryStatus = "loading model…"; queryPct = null;
+    // The first query lazy-loads a ~23MB model from a CDN. Show live progress, and detect a genuine STALL (no
+    // progress for a while) vs. merely-slow — so a throttled/hung download surfaces a retry instead of freezing.
+    let stallTimer: ReturnType<typeof setTimeout> | undefined;
+    let onStall!: (e: Error) => void;
+    const stalled = new Promise<never>((_, rej) => (onStall = rej));
+    const armStall = () => { clearTimeout(stallTimer); stallTimer = setTimeout(() => onStall(new Error("__stall__")), 40000); };
+    armStall();
     try {
-      const qv = await embedQuery(q, (D as any).derivedBy?.embedder?.id);
+      const qv = await Promise.race([
+        embedQuery(q, (D as any).derivedBy?.embedder?.id, (p) => { queryStatus = p.label; queryPct = p.pct ?? null; armStall(); }),
+        stalled,
+      ]);
       const key = "q" + qN++;
       queries = [...queries, { key, text: q, raw: cosineAll(qv, D.vectors) }];
       if (grabColor) color = key;
+      queryStatus = "";
       return key;
-    } catch (e: any) { queryErr = String(e?.message ?? e); return null; }
-    finally { querying = false; }
+    } catch (e: any) {
+      resetEmbedder();   // drop the poisoned/half-loaded model so the next ⌕ retries cleanly
+      queryErr = e?.message === "__stall__"
+        ? "model download stalled — check your connection, then press ⌕ to retry"
+        : "couldn’t run the query (" + String(e?.message ?? e) + ") — press ⌕ to retry";
+      queryStatus = "";
+      return null;
+    } finally { clearTimeout(stallTimer); querying = false; }
   }
   async function runQuery() { const q = semQuery.trim(); if (!q) return; semQuery = ""; await embedAndAdd(q, true); }
   // remove a query dimension; reset any channel that was pointing at it back to a default.
@@ -512,7 +531,17 @@
           <input bind:value={semQuery} onkeydown={(e) => e.key === "Enter" && runQuery()} placeholder="+ semantic axis…" disabled={querying} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-2 py-1.5 text-xs" />
           <button onclick={runQuery} disabled={querying || !semQuery.trim()} title="embed & add a query dimension you can place on any channel" class="flex-none rounded-md border border-[var(--hair2)] px-2.5 py-1 font-mono text-[11px] text-[var(--soft)] hover:bg-[var(--chip)]">{querying ? "…" : "⌕"}</button>
         </div>
-        {#if queryErr}<div class="mt-1 text-[10px] text-red-400">{queryErr}</div>{/if}
+        {#if querying}
+          <div class="mt-1 flex items-center gap-1.5 text-[10px] text-[var(--faint)]">
+            <span class="inline-block h-1.5 w-1.5 flex-none animate-pulse rounded-full bg-[var(--accent)]"></span>
+            <span class="min-w-0 flex-1 truncate">{queryStatus || "working…"}</span>
+          </div>
+          {#if queryPct != null}<div class="mt-0.5 h-0.5 w-full overflow-hidden rounded bg-[var(--chip2)]"><div class="h-full bg-[var(--accent)] transition-all duration-200" style="width:{queryPct}%"></div></div>{/if}
+        {:else if queryErr}
+          <div class="mt-1 text-[10px] leading-snug text-red-400">{queryErr}</div>
+        {:else if !queryDims.length}
+          <div class="mt-1 text-[10px] leading-snug text-[var(--faint)]">first query downloads a small model once (~23 MB), then it’s instant</div>
+        {/if}
         {#each queryDims as qd}
           <div class="mt-1 flex items-center gap-1 rounded-md bg-[var(--chip2)] px-2 py-1 text-[10px]">
             <span class="min-w-0 flex-1 truncate font-mono text-[var(--dim)]" title={qd.name}>{qd.name}</span>

@@ -11,23 +11,39 @@
 const CDN = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1";
 let extractorP: Promise<any> | null = null;
 
-// Load transformers.js + the model once. `id` should be the file's derivedBy.embedder.id.
-async function extractor(id: string): Promise<any> {
+// Progress the caller can surface while the (one-time) model download runs — so the first query isn't a
+// silent 30s freeze. `pct` is 0..100 during download; `phase` distinguishes the runtime/model fetch from embed.
+export type EmbedProgress = { phase: "runtime" | "download" | "embed"; pct?: number; label: string };
+
+// Load transformers.js + the model once. `id` should be the file's derivedBy.embedder.id. On ANY failure the
+// cached promise is cleared so a retry starts clean (a throttled/aborted CDN fetch shouldn't poison later tries).
+async function extractor(id: string, onProgress?: (p: EmbedProgress) => void): Promise<any> {
   if (!extractorP) {
     extractorP = (async () => {
+      onProgress?.({ phase: "runtime", label: "loading model runtime…" });
       const t: any = await import(/* @vite-ignore */ CDN);
       // let onnxruntime-web fetch its wasm from the same CDN (no local asset wiring needed)
       if (t.env?.backends?.onnx?.wasm) t.env.backends.onnx.wasm.wasmPaths = CDN + "/dist/";
-      return t.pipeline("feature-extraction", id);
-    })();
+      return t.pipeline("feature-extraction", id, {
+        // transformers.js streams {status, file, progress 0..100, loaded, total} while it pulls the ~23MB weights.
+        progress_callback: (e: any) => {
+          if (!onProgress) return;
+          if (e?.status === "progress" && typeof e.progress === "number") onProgress({ phase: "download", pct: Math.round(e.progress), label: `downloading model ${Math.round(e.progress)}%` });
+          else if (e?.status === "done" || e?.status === "ready") onProgress({ phase: "download", pct: 100, label: "model ready" });
+        },
+      });
+    })().catch((err) => { extractorP = null; throw err; });
   }
   return extractorP;
 }
 
+// Drop the cached model so the next embed re-fetches from scratch (called after a stall/abort, for a clean retry).
+export function resetEmbedder(): void { extractorP = null; }
 
-// Embed one query → unit-normalized Float32Array (384 dims for MiniLM).
-export async function embedQuery(text: string, embedderId = "Xenova/all-MiniLM-L6-v2"): Promise<Float32Array> {
-  const ex = await extractor(embedderId);
+// Embed one query → unit-normalized Float32Array (384 dims for MiniLM). Reports load/embed progress if asked.
+export async function embedQuery(text: string, embedderId = "Xenova/all-MiniLM-L6-v2", onProgress?: (p: EmbedProgress) => void): Promise<Float32Array> {
+  const ex = await extractor(embedderId, onProgress);
+  onProgress?.({ phase: "embed", label: "embedding query…" });
   const out = await ex(text, { pooling: "mean", normalize: true });
   return out.data as Float32Array;
 }
