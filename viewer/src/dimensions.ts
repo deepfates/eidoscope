@@ -20,6 +20,10 @@ export type Dimension = {
   raw?: (number | undefined)[]; // per-card raw values
   bipolar?: boolean;            // discovered axes: value grows from the centre (size); metrics/queries ramp low→high
   fixedNorm?: boolean;          // discovered axes only carry the pre-rank-normed score, so honest isn't recoverable yet
+  low?: string;                 // gradient legend poles (discovered axes; query low = "unrelated")
+  high?: string;
+  variance?: number;            // discovered axes: PCA variance share (legend strength)
+  weak?: boolean;
   // categorical:
   cat?: (i: number) => string | undefined;
   ord?: string[];               // categories, most-frequent first
@@ -59,7 +63,7 @@ export function buildDimensions(D: MapContract): Dimension[] {
   const dims: Dimension[] = [];
   // only the DISCOVERED axes — skip the injected metadata/query pseudo-axes (flagged `monotonic`) the old path
   // still pushes into D.axes during migration; this module owns metadata + queries itself.
-  for (const a of D.axes) if (!(a as any).monotonic) dims.push({ key: a.key, name: a.name, kind: "scalar", source: "axis", raw: D.scores[a.key], bipolar: true, fixedNorm: true });
+  for (const a of D.axes) if (!(a as any).monotonic) dims.push({ key: a.key, name: a.name, kind: "scalar", source: "axis", raw: D.scores[a.key], bipolar: true, fixedNorm: true, low: (a as any).low, high: (a as any).high, variance: (a as any).variance, weak: (a as any).weak });
   dims.push({ key: "hub", name: "influence", kind: "scalar", source: "meta", raw: D.hub, bipolar: false });
   if (D.citec?.some((x) => typeof x === "number")) dims.push({ key: "citec", name: "citation impact", kind: "scalar", source: "meta", raw: D.citec as number[], bipolar: false });
   dims.push({ key: "length", name: "length", kind: "scalar", source: "meta", raw: D.cores.map((c) => (c || "").length), bipolar: false });

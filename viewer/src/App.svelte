@@ -2,8 +2,8 @@
   import { onMount } from "svelte";
   import { loadMap, mapUrl, decodeEido } from "./loader";
   import { createMap, type MapHandle, type Layout } from "./deckmap";
-  import { facets, colorFor, col, axisColor, type Facet } from "./encode";
-  import { buildDimensions, sizeAccessor, defaultProps, type Dimension, type DimProps } from "./dimensions";
+  import { col, axisColor } from "./encode";
+  import { buildDimensions, sizeAccessor, colorAccessor, defaultProps, type Dimension, type DimProps } from "./dimensions";
   import { embedQuery, cosineAll, scale100, rankNorm100 } from "./semantic";
   import type { MapContract } from "../../src/schema";
 
@@ -13,13 +13,12 @@
   let data = $state<MapContract | null>(null);
   let selected = $state<number | null>(null);
   let hovered = $state<{ kind: "point"; i: number; x: number; y: number } | { kind: "ghost"; g: any; x: number; y: number } | null>(null);
-  let color = $state("cluster");
+  let color = $state("region");
   let size = $state("hub");
   let layout = $state<Layout>("mde");
   let xKey = $state("");
   let yKey = $state("");
   let zKey = $state("");
-  let fac = $state<Facet[]>([]);
   let handle = $state<MapHandle | null>(null);
   let showLabels = $state(true);
   let grain = $state(0);
@@ -50,6 +49,11 @@
   const dimList = $derived(data ? buildDimensions(data) : []);
   const propsOf = (d: Dimension): DimProps => dimProps[d.key] ?? defaultProps(d);
   const sizeGet = (dims: Dimension[], key: string) => { const d = dims.find((x) => x.key === key); return sizeAccessor(d, d ? propsOf(d) : { norm: "honest", invert: false }); };
+  // the active semantic query, as a query-kind dimension in the one registry (raw = its cosines). N queries later.
+  const queryDims = $derived.by((): Dimension[] => (queryActive && simRaw ? [{ key: QKEY, name: "⌕ " + semQuery.trim(), kind: "scalar", source: "query", raw: simRaw, bipolar: false, low: "unrelated", high: semQuery.trim() }] : []));
+  const allDims = $derived([...dimList, ...queryDims]);
+  const colorDim = $derived(color === "region" ? undefined : allDims.find((d) => d.key === color)); // undefined = the region clustering
+  const colorGet = (dims: Dimension[], key: string, assign: number[]) => { const d = dims.find((x) => x.key === key); return colorAccessor(d, d ? propsOf(d) : { norm: "honest", invert: false }, assign); };
   function setTheme(t: "dark" | "light", persist = true) { theme = t; document.documentElement.dataset.theme = t; if (persist) try { localStorage.setItem("eido-theme", t); } catch {} }
   function toggleTheme() { setTheme(theme === "dark" ? "light" : "dark"); }
   const hasCite = $derived(!!data?.cite?.some((e) => e.length));
@@ -73,7 +77,7 @@
     list.sort((a, b) => (deckSort === "hub" ? data!.hub[b] - data!.hub[a] : (data!.scores[deckSort]?.[b] ?? 0) - (data!.scores[deckSort]?.[a] ?? 0)));
     return list.slice(0, 2000);  // show the whole corpus (was 300 — which hid most cards + masked "unread only")
   });
-  const labelsOn = $derived(showLabels && color === "cluster");  // 3D now has proper billboarded region labels (isomorphic with 2D)
+  const labelsOn = $derived(showLabels && color === "region");  // 3D now has proper billboarded region labels (isomorphic with 2D)
   const nLevels = $derived(data?.counts?.length ?? 1);
   const assignment = $derived(data?.levels?.[grain] ?? data?.cluster ?? []);
   const curCount = $derived(data?.counts?.[grain] ?? data?.k ?? 0);
@@ -88,10 +92,10 @@
     if (pinned === c) { pinned = null; handle?.setHighlight(null); handle?.resetView(); }
     else { pinned = c; facetPin = null; handle?.setHighlight(c); handle?.fitToIndices(membersOf(c)); }
   }
-  const facetMembers = (v: string) => { const out: number[] = []; if (!curFacet || !data) return out; for (let i = 0; i < data.ids.length; i++) if (curFacet.get(i) === v) out.push(i); return out; };
+  const facetMembers = (v: string) => { const out: number[] = []; const d = colorDim; if (!d?.cat || !data) return out; for (let i = 0; i < data.ids.length; i++) if (d.cat(i) === v) out.push(i); return out; };
   function toggleFacetPin(v: string) {
     if (facetPin === v) { facetPin = null; handle?.setHighlightSet(null, null); handle?.resetView(); }
-    else { facetPin = v; pinned = null; const idx = facetMembers(v); handle?.setHighlightSet(idx, col(curFacet!.idx[v])); handle?.fitToIndices(idx); }
+    else { facetPin = v; pinned = null; const idx = facetMembers(v); handle?.setHighlightSet(idx, col(colorDim!.idx![v])); handle?.fitToIndices(idx); }
   }
   // switching the colour lens clears a stale facet isolate (a folder value means nothing under a different lens)
   let lastColorForFacet = color;
@@ -125,7 +129,7 @@
     const p = new URLSearchParams();
     const m = new URLSearchParams(location.search).get("map"); if (m) p.set("map", m);
     if (layout !== "mde") p.set("layout", layout);
-    if (color !== "cluster") p.set("color", color);
+    if (color !== "region") p.set("color", color);
     if (size !== "hub") p.set("size", size);
     if (data && grain !== (data.di ?? 0)) p.set("grain", String(grain));
     if (layout === "axes") { if (xKey) p.set("x", xKey); if (yKey) p.set("y", yKey); }
@@ -146,7 +150,7 @@
     // region + card depend on grain-derived state, so apply once the reactive graph has settled
     queueMicrotask(() => {
       const r = p.get("region"); if (r && !Number.isNaN(+r) && +r >= 0 && +r < curCount) togglePin(+r);
-      const fp = p.get("facet"); if (fp && curFacet && curFacet.ord.includes(fp)) toggleFacetPin(fp);
+      const fp = p.get("facet"); if (fp && colorDim?.ord?.includes(fp)) toggleFacetPin(fp);
       const card = p.get("card"); if (card && data) { const i = data.ids.indexOf(card); if (i >= 0) focusCard(i); }
     });
   }
@@ -177,8 +181,7 @@
   function mountMap(D: MapContract, opts?: { intro?: boolean }) {
     handle?.destroy();                                   // free the previous deck's GPU context before recreating
     selected = null; pinned = null; facetPin = null;      // per-corpus state doesn't carry across files
-    fac = facets(D);
-    injectMetaDims(D);   // scalar metaFields (length, citation impact…) become selectable dimensions on every channel
+    injectMetaDims(D);   // (transitional) scalar metaFields still injected for the un-migrated channels
     xKey = D.axes[0]?.key ?? "";
     yKey = D.axes[1]?.key ?? D.axes[0]?.key ?? "";
     zKey = D.axes[2]?.key ?? D.axes[0]?.key ?? "";
@@ -187,7 +190,7 @@
     status = "";
     if (opts?.intro) showIntro = true;                    // a freshly-opened file introduces itself
     handle = createMap(canvas, D, {
-      getColor: colorFor(D, color, fac, D.levels?.[grain] ?? D.cluster), getRadius: sizeGet(buildDimensions(D), size), layout, xKey, yKey, zKey, showLabels: labelsOn, grain, theme,
+      getColor: colorGet(buildDimensions(D), color, D.levels?.[grain] ?? D.cluster), getRadius: sizeGet(buildDimensions(D), size), layout, xKey, yKey, zKey, showLabels: labelsOn, grain, theme,
       onClick: (i) => focusCard(i < 0 ? null : i),
       onHover: (h, x, y) => (hovered = h == null ? null : { ...h, x, y }),
       onGrainChange: (g) => { grain = g; pinned = null; },
@@ -244,7 +247,7 @@
     data = D;
     handle?.injectScores(QKEY, null);
     queryActive = false; semQuery = ""; simMin = 0; simRaw = null; simRank = false;
-    if (color === QKEY) color = "cluster";
+    if (color === QKEY) color = "region";
     if (deckSort === QKEY) deckSort = "hub";
     if (xKey === QKEY) xKey = D.axes[0]?.key ?? "";
     if (yKey === QKEY) yKey = D.axes[1]?.key ?? "";
@@ -283,8 +286,8 @@
   });
 
   $effect(() => {
-    const l = layout, c = color, s = size, xk = xKey, yk = yKey, zk = zKey, sl = labelsOn, g = grain, a = assignment, co = citeOn, go = ghostsOn, th = theme, h = handle, d = data, f = fac;
-    if (h && d) h.update({ getColor: colorFor(d, c, f, a), getRadius: sizeGet(dimList, s), layout: l, xKey: xk, yKey: yk, zKey: zk, showLabels: sl, grain: g, citeOn: co, ghostsOn: go, theme: th });
+    const l = layout, c = color, s = size, xk = xKey, yk = yKey, zk = zKey, sl = labelsOn, g = grain, a = assignment, co = citeOn, go = ghostsOn, th = theme, h = handle, d = data, ad = allDims, dp = dimProps;
+    if (h && d) h.update({ getColor: colorGet(ad, c, a), getRadius: sizeGet(ad, s), layout: l, xKey: xk, yKey: yk, zKey: zk, showLabels: sl, grain: g, citeOn: co, ghostsOn: go, theme: th });
   });
   $effect(() => { const q = query, h = handle; if (h) h.setQuery(q); }); // search dims non-matching map points
 
@@ -328,8 +331,6 @@
     else h.setScrub(null, null);
   });
 
-  const curFacet = $derived(fac.find((f) => "meta:" + f.key === color));
-  const legendAxis = $derived(data?.axes.find((x) => x.key === color));
   const xAxis = $derived(data?.axes.find((a) => a.key === xKey));
   const yAxis = $derived(data?.axes.find((a) => a.key === yKey));
   const zAxis = $derived(data?.axes.find((a) => a.key === zKey));
@@ -399,8 +400,8 @@
         {#if weakAxes}<div class="mb-1.5 rounded-md bg-[var(--chip2)] px-2 py-1 text-[10px] leading-snug text-[var(--dim)]">~ {weakAxes > 1 ? "minor axes" : "a minor axis"} (under 2% variance) — position is thin, read it loosely</div>{/if}
       {/if}
       <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">color</span>
-        <select bind:value={color} title={legendAxis?.name ?? ""} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">
-          <option value="cluster">region</option>{#each fac as f}<option value={"meta:" + f.key}>{f.label}</option>{/each}{#each data.axes as a}<option value={a.key}>axis: {axl(a)}</option>{/each}
+        <select bind:value={color} title={colorDim?.name ?? "region"} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">
+          <option value="region">region</option>{#each allDims.filter((d) => d.kind === "categorical") as d}<option value={d.key}>{d.name}</option>{/each}{#each allDims.filter((d) => d.kind !== "categorical") as d}<option value={d.key}>{d.source === "axis" ? "axis: " + d.name : d.name}</option>{/each}
         </select></label>
       <label class="flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">size</span>
         <select bind:value={size} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">
@@ -427,7 +428,7 @@
       {/if}
       <div class="mt-2 flex gap-2">
         <button class="flex-1 rounded-md border border-[var(--hair2)] px-2 py-1 font-mono text-[11px] text-[var(--soft)] hover:bg-[var(--chip)]" onclick={() => (deckOpen = true)}>deck</button>
-        <button disabled={color !== "cluster"} title={color !== "cluster" ? "region labels show when coloured by region" : ""} class="flex-1 rounded-md border border-[var(--hair2)] px-2 py-1 font-mono text-[11px] disabled:opacity-40 disabled:cursor-not-allowed {showLabels && color === 'cluster' ? 'bg-[var(--chip)] text-[var(--ink)]' : 'text-[var(--faint)]'}" onclick={() => (showLabels = !showLabels)}>labels</button>
+        <button disabled={color !== "region"} title={color !== "region" ? "region labels show when coloured by region" : ""} class="flex-1 rounded-md border border-[var(--hair2)] px-2 py-1 font-mono text-[11px] disabled:opacity-40 disabled:cursor-not-allowed {showLabels && color === 'region' ? 'bg-[var(--chip)] text-[var(--ink)]' : 'text-[var(--faint)]'}" onclick={() => (showLabels = !showLabels)}>labels</button>
         <button class="flex-1 rounded-md border border-[var(--hair2)] px-2 py-1 font-mono text-[11px] text-[var(--soft)] hover:bg-[var(--chip)]" onclick={reset}>reset</button>
       </div>
       <input type="search" bind:value={query} placeholder="find a card…" class="mt-2 w-full rounded-md border border-[var(--hair2)] bg-[var(--field)] px-2 py-1.5 text-xs" />
@@ -459,18 +460,18 @@
     <div class="absolute bottom-3 right-3 flex max-h-[44vh] w-[min(13rem,62vw)] flex-col overflow-hidden rounded-xl border border-[var(--hair)] bg-[var(--panel)] p-2.5 text-xs backdrop-blur">
       <button class="flex w-full flex-none items-center gap-1 font-mono text-[10px] uppercase text-[var(--faint)] hover:text-[var(--ink)] {legendOpen ? 'mb-1.5' : ''}" onclick={() => (legendOpen = !legendOpen)} aria-expanded={legendOpen} aria-label="{legendOpen ? 'collapse' : 'expand'} legend">
         <span class="text-[9px]">{legendOpen ? "▾" : "▸"}</span>
-        <span class="truncate">{#if color === "cluster"}{curCount} regions{#if legendOpen}<span class="normal-case text-[var(--faint)]"> · click to isolate</span>{/if}{:else if curFacet}{curFacet.label} · {curFacet.ord.length}{#if legendOpen}<span class="normal-case text-[var(--faint)]"> · click to isolate</span>{/if}{:else if legendAxis}{legendAxis.name}{#if pct(legendAxis) != null}<span class="normal-case text-[var(--faint)]"> · {pct(legendAxis)}% variance{legendAxis.weak ? " (thin)" : ""}</span>{/if}{:else}legend{/if}</span>
+        <span class="truncate">{#if color === "region"}{curCount} regions{#if legendOpen}<span class="normal-case text-[var(--faint)]"> · click to isolate</span>{/if}{:else if colorDim?.kind === "categorical"}{colorDim.name} · {colorDim.ord?.length}{#if legendOpen}<span class="normal-case text-[var(--faint)]"> · click to isolate</span>{/if}{:else if colorDim}{colorDim.name}{#if colorDim.variance != null}<span class="normal-case text-[var(--faint)]"> · {Math.round(colorDim.variance * 100)}% variance{colorDim.weak ? " (thin)" : ""}</span>{/if}{:else}legend{/if}</span>
       </button>
       {#if legendOpen}
         <div class="min-h-0 overflow-auto">
-        {#if color === "cluster"}
+        {#if color === "region"}
           {#each curClusters as c}<div class="flex cursor-pointer items-center gap-2 py-1.5 hover:text-[var(--ink)] {pinned === c.c ? 'text-[var(--ink)] font-semibold' : ''}" role="button" tabindex="0" aria-label="isolate region {c.label}" aria-pressed={pinned === c.c} onmouseenter={() => { if (pinned === null) handle?.setHighlight(c.c); }} onmouseleave={() => { if (pinned === null) handle?.setHighlight(null); }} onclick={() => togglePin(c.c)} onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); togglePin(c.c); } }}><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(col(c.c))}"></span><span class="truncate" title={c.label}>{c.label} <span class="text-[var(--faint)]">{c.n}</span></span></div>{/each}
-        {:else if curFacet}
-          {#each curFacet.ord.slice(0, 16) as v}<div class="flex cursor-pointer items-center gap-2 py-1.5 hover:text-[var(--ink)] {facetPin === v ? 'text-[var(--ink)] font-semibold' : ''}" role="button" tabindex="0" aria-label="isolate {curFacet.label} {v}" aria-pressed={facetPin === v} onclick={() => toggleFacetPin(v)} onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleFacetPin(v); } }}><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(col(curFacet.idx[v]))}"></span><span class="truncate" title={v}>{v} <span class="text-[var(--faint)]">{curFacet.cnt[v]}</span></span></div>{/each}
-          {#if curFacet.ord.length > 16}<div class="text-[var(--faint)]">+{curFacet.ord.length - 16} more</div>{/if}
-        {:else if legendAxis}
-          <div class="flex items-center gap-2 py-0.5"><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(axisColor(0))}"></span>{legendAxis.low}</div>
-          <div class="flex items-center gap-2 py-0.5"><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(axisColor(1))}"></span>{legendAxis.high}</div>
+        {:else if colorDim?.kind === "categorical"}
+          {#each colorDim.ord!.slice(0, 16) as v}<div class="flex cursor-pointer items-center gap-2 py-1.5 hover:text-[var(--ink)] {facetPin === v ? 'text-[var(--ink)] font-semibold' : ''}" role="button" tabindex="0" aria-label="isolate {colorDim.name} {v}" aria-pressed={facetPin === v} onclick={() => toggleFacetPin(v)} onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleFacetPin(v); } }}><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(col(colorDim.idx![v]))}"></span><span class="truncate" title={v}>{v} <span class="text-[var(--faint)]">{colorDim.cnt![v]}</span></span></div>{/each}
+          {#if colorDim.ord!.length > 16}<div class="text-[var(--faint)]">+{colorDim.ord!.length - 16} more</div>{/if}
+        {:else if colorDim}
+          <div class="flex items-center gap-2 py-0.5"><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(axisColor(0))}"></span>{colorDim.low ?? "low"}</div>
+          <div class="flex items-center gap-2 py-0.5"><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(axisColor(1))}"></span>{colorDim.high ?? "high"}</div>
         {/if}
         </div>
       {/if}
