@@ -167,29 +167,46 @@
     if (color !== "region") p.set("color", color);
     if (size !== "hub") p.set("size", size);
     if (data && grain !== (data.di ?? 0)) p.set("grain", String(grain));
-    if (layout === "axes") { if (xKey) p.set("x", xKey); if (yKey) p.set("y", yKey); }
+    if (layout === "axes" || layout === "axes3d") { if (xKey) p.set("x", xKey); if (yKey) p.set("y", yKey); if (layout === "axes3d" && zKey) p.set("z", zKey); }
+    // per-dimension props the user changed (norm/invert): key.<h|r><0|1>, comma-joined
+    const dp = Object.entries(dimProps); if (dp.length) p.set("props", dp.map(([k, v]) => k + "." + (v.norm === "rank" ? "r" : "h") + (v.invert ? "1" : "0")).join(","));
+    // scrubber window (the range filter) — only when actually windowed
+    if (scrubLo !== null || scrubHi !== null) { if (scrubKey) p.set("sk", scrubKey); if (scrubLo !== null) p.set("slo", String(scrubLo)); if (scrubHi !== null) p.set("shi", String(scrubHi)); }
+    // active filters: region (cluster) · facet (categorical value) · find (text). Each is at-most-one by construction.
     if (pinned !== null) p.set("region", String(pinned));
     if (facetPin !== null) p.set("facet", facetPin);
+    const tf = filters.find((f) => f.kind === "text") as Extract<Filter, { kind: "text" }> | undefined; if (tf) p.set("find", tf.q);
+    for (const qq of queries) p.append("q", qq.text);   // query dims by text (re-embedded on load, best-effort)
     if (selected !== null && data) p.set("card", data.ids[selected]);
     const q = p.toString();
     return location.pathname + (q ? "?" + q : "");
   }
   function applyUrlState() {
     const p = new URLSearchParams(location.search);
-    const L = p.get("layout"); if (L === "mde" || L === "axes" || L === "orbit") layout = L;
+    const L = p.get("layout"); if (L === "mde" || L === "axes" || L === "orbit" || L === "axes3d") layout = L;
     const c = p.get("color"); if (c) { color = c; lastColorForFacet = c; }  // keep the facet-clear effect from firing on this restore
     const s = p.get("size"); if (s) size = s;
     const x = p.get("x"); if (x) xKey = x;
     const y = p.get("y"); if (y) yKey = y;
+    const z = p.get("z"); if (z) zKey = z;
     const g = p.get("grain"); if (g && !Number.isNaN(+g)) grain = Math.max(0, Math.min((data?.counts?.length ?? 1) - 1, Math.round(+g)));
-    // region + card depend on grain-derived state, so apply once the reactive graph has settled
+    // per-dimension props (norm/invert)
+    const props = p.get("props"); if (props) { const next: Record<string, DimProps> = {}; for (const e of props.split(",")) { const dot = e.lastIndexOf("."); const k = e.slice(0, dot), code = e.slice(dot + 1); if (k && code.length >= 2 && (code[0] === "r" || code[0] === "h")) next[k] = { norm: code[0] === "r" ? "rank" : "honest", invert: code[1] === "1" }; } dimProps = next; }
+    // scrubber window
+    const sk = p.get("sk"); if (sk) scrubKey = sk;
+    const slo = p.get("slo"); if (slo !== null && !Number.isNaN(+slo)) scrubLo = +slo;
+    const shi = p.get("shi"); if (shi !== null && !Number.isNaN(+shi)) scrubHi = +shi;
+    // re-embed query dimensions from their text (best-effort, background; won't block the restore or hang the app)
+    for (const t of p.getAll("q")) embedAndAdd(t, false);
+    // region + card + facet + find depend on grain-derived state, so apply once the reactive graph has settled
     queueMicrotask(() => {
       const r = p.get("region"); if (r && !Number.isNaN(+r) && +r >= 0 && +r < curCount) togglePin(+r);
       const fp = p.get("facet"); if (fp && colorDim?.ord?.includes(fp)) toggleFacetPin(fp);
+      const find = p.get("find"); if (find) onFind(find);
       const card = p.get("card"); if (card && data) { const i = data.ids.indexOf(card); if (i >= 0) focusCard(i); }
     });
   }
-  $effect(() => { void [layout, color, size, grain, xKey, yKey, pinned, selected]; if (urlReady) { try { history.replaceState(history.state, "", serializeUrl()); } catch {} } });
+  $effect(() => { void [layout, color, size, grain, xKey, yKey, zKey, pinned, selected, scrubKey, scrubLo, scrubHi, dimProps, filters, queries]; if (urlReady) { try { history.replaceState(history.state, "", serializeUrl()); } catch {} } });
 
   // focus-trap action (eid-vxm2): on open, move focus into the modal + keep Tab inside it (so keyboard
   // focus can't wander to the background controls behind the overlay); on close, return focus to the opener.
@@ -237,20 +254,21 @@
   // Semantic query: embed in-browser (same model that made the card vectors), cosine-rank, and append a
   // query-kind DIMENSION. It then appears in every channel menu (color/size/x/y/z/scrubber/deck-sort) like any
   // other dimension — no bespoke plumbing. N queries coexist. To hide low-similarity cards, put the query on the scrubber.
-  async function runQuery() {
-    const D = data; const q = semQuery.trim();
-    if (!D?.vectors || !q) return;
+  // embed a text query → append a query-kind dimension; returns its key (or null). grabColor: colour by it (the
+  // interactive payoff); URL-restore passes false so it doesn't steal a colour channel the URL already set.
+  async function embedAndAdd(q: string, grabColor: boolean): Promise<string | null> {
+    const D = data; if (!D?.vectors || !q) return null;
     querying = true; queryErr = "";
     try {
       const qv = await embedQuery(q, (D as any).derivedBy?.embedder?.id);
-      const raw = cosineAll(qv, D.vectors);
       const key = "q" + qN++;
-      queries = [...queries, { key, text: q, raw }];
-      semQuery = "";      // ready for the next query
-      color = key;        // immediate payoff: colour by the new query
-    } catch (e: any) { queryErr = String(e?.message ?? e); }
+      queries = [...queries, { key, text: q, raw: cosineAll(qv, D.vectors) }];
+      if (grabColor) color = key;
+      return key;
+    } catch (e: any) { queryErr = String(e?.message ?? e); return null; }
     finally { querying = false; }
   }
+  async function runQuery() { const q = semQuery.trim(); if (!q) return; semQuery = ""; await embedAndAdd(q, true); }
   // remove a query dimension; reset any channel that was pointing at it back to a default.
   function removeQuery(key: string) {
     queries = queries.filter((q) => q.key !== key);
