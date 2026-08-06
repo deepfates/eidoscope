@@ -1,12 +1,12 @@
-import type { MapData } from "./render.ts";
+import type { MapContract } from "./schema.ts";
 
 // The shareable artifact: a clean, pastable Markdown summary of a corpus — what it's about, the axes
 // it varies along, what to read next, and the frontier just outside it. Not the 3.5MB explorer; the
-// insight, in a form you can drop in a post. Reads only the MapData a run already produces.
+// insight, in a form you can drop in a post. Reads only the MapContract a run already produces.
 
 const fmtDate = (t?: number) => (t ? new Date(t).toISOString().slice(0, 10) : "");
 
-export function buildReport(D: MapData, name = "Corpus"): string {
+export function buildReport(D: MapContract, name = "Corpus"): string {
   const n = D.ids.length;
   const dates = (D.dates || []).filter((d): d is number => !!d).sort((a, b) => a - b);
   const span = dates.length ? `${fmtDate(dates[0])} → ${fmtDate(dates[dates.length - 1])}` : "";

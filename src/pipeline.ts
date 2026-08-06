@@ -5,7 +5,7 @@ import { cardCorpus, deckToJSONL, type Card } from "./card.ts";
 import { embedCards, projectAndCluster, projectionScores, rawProjectionScores, buildMetaFields } from "./map.ts";
 import { nameLevels } from "./regions.ts";
 import { provider } from "./provider.ts";
-import { renderHTML, type MapData } from "./render.ts";
+import { renderHTML } from "./render.ts";
 import { trajectory } from "./trajectory.ts";
 import { buildReport } from "./report.ts";
 import { fetchFrontier, buildGhosts } from "./frontier.ts";
@@ -65,7 +65,7 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
   });
 
   console.error(`[5/5] assembling map + rendering…`);
-  const D: MapData = {
+  const D: MapContract = {
     ids: deck.map((c) => c.id), titles: deck.map((c) => c.title), cores: deck.map((c) => c.core),
     notes: deck.map((c) => Object.fromEntries(axes.map((a) => [a.key, c.axes[a.key]?.note || ""]))),
     axes: axes.map((a) => ({ key: a.key, name: a.name, low: a.pole_low, high: a.pole_high, variance: a.var })),
@@ -99,20 +99,20 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
     if (arr.length !== nNodes) throw new Error(`emit invariant violated: ${name}.length=${arr.length} != ids.length=${nNodes} (a node-indexed array is misaligned)`);
   for (const key of Object.keys(D.scores)) if (D.scores[key].length !== nNodes) throw new Error(`emit invariant violated: scores.${key}.length=${D.scores[key].length} != ids.length=${nNodes}`);
   // provenance — so a passed-around file introduces itself (what corpus, from where, when, how big)
-  (D as any).provenance = { title: opts.name || "Corpus", source: opts.source, generated: Date.now(), count: D.ids.length };
+  D.provenance = { title: opts.name || "Corpus", source: opts.source, generated: Date.now(), count: D.ids.length };
   // v2: carry the card vectors (the re-interrogation substrate) + how the map was made. `embs` is exactly
   // what the layout was built on (card vectors by default, raw full-text under --embed raw), aligned to the
   // deck; geometryBasis records which — so the file can't misrepresent whether it went through the bottleneck.
-  if (embs?.length === nNodes) (D as any).vectors = embs;
-  (D as any).derivedBy = {
+  if (embs?.length === nNodes) D.vectors = embs;
+  D.derivedBy = {
     cardModel: CFG.model,
     embedder: { id: CFG.embedModel, dim: embs?.[0]?.length ?? 0, pooling: "mean", normalized: true },
     geometryBasis: useRaw ? "raw" : "card",
     generated: Date.now(),
   };
-  (D as any).metaFields = buildMetaFields(D as any);   // typed dimension manifest for the channel grammar
+  D.metaFields = buildMetaFields(D);   // typed dimension manifest for the channel grammar
   writeFileSync(join(outDir, "map-data.json"), JSON.stringify(D));
-  writeFileSync(join(outDir, eidoName), encodeMap(D as unknown as MapContract));   // the portable artifact (~5× smaller)
+  writeFileSync(join(outDir, eidoName), encodeMap(D));   // the portable artifact (~5× smaller)
   writeFileSync(join(outDir, "eidoscope.html"), renderHTML(D));
   const state = trajectory({ dates: deck.map((c) => c.date), cluster: D.cluster, scores: D.scores, axes: D.axes, clusters });
   if (state) writeFileSync(join(outDir, "STATE.md"), state);
@@ -130,7 +130,7 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
 // idempotent-ish: recompute every level's region names (contrastively) from the stored cores + scores,
 // rebuild the default-grain regions, and hand back an updated map to re-render. This is the "cache the
 // geometry, rename as needed" path — the labels are the one nondeterministic thing, kept out of the geometry.
-export async function relabelMap(D: MapData, opts: { llm?: any; sig?: any; concurrency?: number; cacheDir?: string; quiet?: boolean } = {}): Promise<MapData> {
+export async function relabelMap(D: MapContract, opts: { llm?: any; sig?: any; concurrency?: number; cacheDir?: string; quiet?: boolean } = {}): Promise<MapContract> {
   const llm = opts.llm ?? provider();
   const conc = opts.concurrency ?? Number(process.env.EIDOSCOPE_CONCURRENCY || 24);
   const levels = D.levels ?? [D.cluster], counts = D.counts ?? [D.k];

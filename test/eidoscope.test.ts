@@ -9,7 +9,7 @@ import { cardText, projectionScores, buildMetaFields } from "../src/map.ts";
 import { scoreRedundancy } from "../src/redundancy.ts";
 import { docArxiv, fetchFrontier } from "../src/frontier.ts";
 import { distinctiveTerms, distinctiveAxes, nameLevels } from "../src/regions.ts";
-import { renderHTML, type MapData } from "../src/render.ts";
+import { renderHTML } from "../src/render.ts";
 import { relabelMap } from "../src/pipeline.ts";
 import { encodeMap, decodeMap } from "../src/mapbin.ts";
 import type { MapContract } from "../src/schema.ts";
@@ -168,7 +168,7 @@ test("distinctiveAxes: ranks a region's most extreme axes with the pole it leans
 
 // A tiny synthetic map with a NESTED 2-level grain ladder: level0 has 2 regions, level1 splits the
 // first into two → 3 regions. Enough to exercise the whole viewer + relabel contract without an embedder.
-function synthMap(): MapData {
+function synthMap(): MapContract {
   const N = 6;
   const axes = [{ key: "a", name: "AxisA", low: "LowA", high: "HighA" }, { key: "b", name: "AxisB", low: "LowB", high: "HighB" }];
   return {

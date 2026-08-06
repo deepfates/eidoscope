@@ -3,23 +3,9 @@
 // two discovered axes (interpretable), and a draggable 3D orbit. Color by region or any axis,
 // size by influence, click a card for its neighbors. Frontier / deck-view / time are plugins.
 import { writeFileSync, readFileSync } from "node:fs";
+import type { MapContract } from "./schema.ts";
 
-export type MapData = {
-  ids: string[]; titles: string[]; cores: string[];
-  notes: Record<string, string>[];
-  axes: { key: string; name: string; low: string; high: string; weak?: boolean; variance?: number }[];
-  scores: Record<string, number[]>;
-  rawScores?: Record<string, number[]>;   // raw PCA projection per axis (honest-view substrate; optional)
-  xy: number[][]; xyz: number[][]; cluster: number[]; k: number; hub: number[]; nbr: number[][];
-  clusters: { c: number; n: number; label: string; cx: number; cy: number }[];
-  levels?: number[][]; counts?: number[];   // nested grain ladder for the region-granularity slider
-  levelLabels?: string[][]; levelBlurbs?: string[][]; di?: number;  // a name per region per grain level; di = default level
-  urls?: (string | undefined)[]; sources?: (string | undefined)[]; siteNames?: (string | undefined)[]; authors?: (string | undefined)[]; tags?: (string[] | undefined)[]; dates?: (number | undefined)[]; read?: (boolean | undefined)[];
-  cite?: number[][]; citec?: number[];  // intra-corpus citation edges + impact (frontier telescope)
-  ghosts?: { title: string; arxiv: string; url: string; n: number; core: string; xy: [number, number]; sim: number }[];
-};
-
-export function renderHTML(D: MapData): string {
+export function renderHTML(D: MapContract): string {
   // the immediate containing folder of a local file — the corpus's own organization, surfaced as a lens
   const folderOf = (u?: string) => { if (!u || !u.startsWith("file://")) return undefined; const p = u.slice(7).split("/").filter(Boolean); return p.length >= 2 ? decodeURIComponent(p[p.length - 2]).replace(/_/g, " ") : undefined; };
   const nodes = D.ids.map((id, i) => ({
