@@ -4,7 +4,7 @@
   import { createMap, type MapHandle, type Layout } from "./deckmap";
   import { col, axisColor } from "./encode";
   import { buildDimensions, sizeAccessor, colorAccessor, scores01, defaultProps, type Dimension, type DimProps } from "./dimensions";
-  import { embedQuery, cosineAll, scale100, rankNorm100 } from "./semantic";
+  import { embedQuery, cosineAll } from "./semantic";
   import type { MapContract } from "../../src/schema";
 
   let canvas: HTMLCanvasElement;
@@ -29,14 +29,13 @@
   let deckQ = $state("");
   let deckUnread = $state(false);
   let query = $state("");
-  let semQuery = $state("");                 // the semantic query (embedded); distinct from `query` (text filter)
+  let semQuery = $state("");                 // the query-box text (distinct from `query`, the substring find)
   let querying = $state(false);
   let queryErr = $state("");
-  let queryActive = $state(false);           // is a semantic-query axis (__q) currently injected?
-  let simMin = $state(0);                     // similarity-threshold filter (0..99) when a query is active
-  let simRaw = $state<number[] | null>(null); // raw cosines, kept so the rank-norm toggle re-scales w/o re-embedding
-  let simRank = $state(false);                // false = min-max (honest skew, default); true = rank-norm (uniform)
-  const QKEY = "__q";
+  // N semantic queries, each a first-class dimension: {key, text, raw cosines}. "+ query" appends one; it then
+  // shows up in every channel menu like any other dimension. Filtering by a query = putting it on the scrubber.
+  let queries = $state<{ key: string; text: string; raw: number[] }[]>([]);
+  let qN = 0;                                 // monotonic id source for stable query keys
   let showIntro = $state(false);
   let citeOn = $state(false);
   let ghostsOn = $state(false);
@@ -50,7 +49,7 @@
   const propsOf = (d: Dimension): DimProps => dimProps[d.key] ?? defaultProps(d);
   const sizeGet = (dims: Dimension[], key: string) => { const d = dims.find((x) => x.key === key); return sizeAccessor(d, d ? propsOf(d) : { norm: "honest", invert: false }); };
   // the active semantic query, as a query-kind dimension in the one registry (raw = its cosines). N queries later.
-  const queryDims = $derived.by((): Dimension[] => (queryActive && simRaw ? [{ key: QKEY, name: "⌕ " + semQuery.trim(), kind: "scalar", source: "query", raw: simRaw, bipolar: false, low: "unrelated", high: semQuery.trim() }] : []));
+  const queryDims = $derived.by((): Dimension[] => queries.map((q) => ({ key: q.key, name: "⌕ " + q.text, kind: "scalar", source: "query", raw: q.raw, bipolar: false, low: "unrelated", high: q.text })));
   const allDims = $derived([...dimList, ...queryDims]);
   const colorDim = $derived(color === "region" ? undefined : allDims.find((d) => d.key === color)); // undefined = the region clustering
   const colorGet = (dims: Dimension[], key: string, assign: number[]) => { const d = dims.find((x) => x.key === key); return colorAccessor(d, d ? propsOf(d) : { norm: "honest", invert: false }, assign); };
@@ -79,7 +78,9 @@
     const q = deckQ.trim().toLowerCase();
     if (q) list = list.filter((i) => data!.titles[i].toLowerCase().includes(q) || data!.cores[i].toLowerCase().includes(q));
     if (deckUnread && hasRead) list = list.filter((i) => data!.read![i] !== true);
-    list.sort((a, b) => (deckSort === "hub" ? data!.hub[b] - data!.hub[a] : (data!.scores[deckSort]?.[b] ?? 0) - (data!.scores[deckSort]?.[a] ?? 0)));
+    const sd = allDims.find((x) => x.key === deckSort);   // sort by any scalar dimension (influence, length, axis, query…)
+    const sv = sd && sd.kind !== "categorical" ? scores01(sd, propsOf(sd)) : null;
+    if (sv) list.sort((a, b) => (sv[b] ?? 0) - (sv[a] ?? 0));
     return list.slice(0, 2000);  // show the whole corpus (was 300 — which hid most cards + masked "unread only")
   });
   const labelsOn = $derived(showLabels && color === "region");  // 3D now has proper billboarded region labels (isomorphic with 2D)
@@ -186,7 +187,6 @@
   function mountMap(D: MapContract, opts?: { intro?: boolean }) {
     handle?.destroy();                                   // free the previous deck's GPU context before recreating
     selected = null; pinned = null; facetPin = null;      // per-corpus state doesn't carry across files
-    injectMetaDims(D);   // (transitional) scalar metaFields still injected for the un-migrated channels
     xKey = D.axes[0]?.key ?? "";
     yKey = D.axes[1]?.key ?? D.axes[0]?.key ?? "";
     zKey = D.axes[2]?.key ?? D.axes[0]?.key ?? "";
@@ -205,57 +205,33 @@
     (window as any).__eidoProject = (xy: number[]) => handle?.project(xy);
     (window as any).__eidoPick = (x: number, y: number) => handle?.pickAt(x, y);
   }
-  // Turn each scalar metaField (length, citation impact…) into a scored dimension in D.scores + a lightweight
-  // pseudo-axis in D.axes, so it flows through EVERY channel (color/size/x/y/z) via the existing accessors —
-  // the same synthetic-dimension trick the semantic query uses, applied at load. Monotonic (metric ramp, not
-  // bipolar). Min-max scaled (honest). Idempotent. Skips discovered axes (already scored) and hub (own control).
-  function injectMetaDims(D: MapContract) {
-    for (const mf of D.metaFields ?? []) {
-      if (mf.type !== "scalar" || mf.source.startsWith("axis:") || mf.key === "hub" || D.scores[mf.key]) continue;
-      const vals = metaVals(D, mf.source);
-      if (!vals.some((v) => typeof v === "number")) continue;
-      D.scores[mf.key] = scale100(vals.map((v) => (typeof v === "number" ? v : 0)));
-      (D.axes as any[]).push({ key: mf.key, name: mf.label, low: "low", high: "high", pc: 0, weak: false, monotonic: true });
-    }
-  }
-  // (Re)scale the kept raw cosines into __q's 0..100 scores per the rank-norm toggle, and push them to both the
-  // colorFor closure (data.scores) and deckmap's geometry (injectScores). Called on query and on toggle flip.
-  function applyScale() {
-    const D = data; if (!D || !simRaw) return;
-    const s100 = simRank ? rankNorm100(simRaw) : scale100(simRaw);
-    D.scores[QKEY] = s100; data = D;
-    handle?.injectScores(QKEY, s100);
-  }
-  // The semantic-query keystone: embed the query in-browser (same model that made the card vectors), cosine-rank
-  // the cards, and inject the result as a synthetic axis (__q). Because color/size/x/y dropdowns iterate
-  // data.axes and colorFor/sizeFor/pos() read data.scores, the query is instantly usable on EVERY channel.
+  // Semantic query: embed in-browser (same model that made the card vectors), cosine-rank, and append a
+  // query-kind DIMENSION. It then appears in every channel menu (color/size/x/y/z/scrubber/deck-sort) like any
+  // other dimension — no bespoke plumbing. N queries coexist. To hide low-similarity cards, put the query on the scrubber.
   async function runQuery() {
     const D = data; const q = semQuery.trim();
     if (!D?.vectors || !q) return;
     querying = true; queryErr = "";
     try {
       const qv = await embedQuery(q, (D as any).derivedBy?.embedder?.id);
-      simRaw = cosineAll(qv, D.vectors);
-      D.axes = [...D.axes.filter((a) => a.key !== QKEY), { key: QKEY, name: "⌕ " + q, low: "unrelated", high: q, pc: 0, weak: false, monotonic: true } as any];
-      data = D;                       // proxy mutation → dropdowns + colorFor closure pick it up
-      applyScale();                   // sets D.scores[__q] (min-max or rank-norm) + feeds deckmap's geometry
-      queryActive = true;
-      color = QKEY;                   // immediate payoff: colour the map by similarity to the query
-      deckSort = QKEY;                // …and the deck becomes semantic search results
+      const raw = cosineAll(qv, D.vectors);
+      const key = "q" + qN++;
+      queries = [...queries, { key, text: q, raw }];
+      semQuery = "";      // ready for the next query
+      color = key;        // immediate payoff: colour by the new query
     } catch (e: any) { queryErr = String(e?.message ?? e); }
     finally { querying = false; }
   }
-  function clearQuery() {
-    const D = data; if (!D) return;
-    delete D.scores[QKEY];
-    D.axes = D.axes.filter((a) => a.key !== QKEY);
-    data = D;
-    handle?.injectScores(QKEY, null);
-    queryActive = false; semQuery = ""; simMin = 0; simRaw = null; simRank = false;
-    if (color === QKEY) color = "region";
-    if (deckSort === QKEY) deckSort = "hub";
-    if (xKey === QKEY) xKey = D.axes[0]?.key ?? "";
-    if (yKey === QKEY) yKey = D.axes[1]?.key ?? "";
+  // remove a query dimension; reset any channel that was pointing at it back to a default.
+  function removeQuery(key: string) {
+    queries = queries.filter((q) => q.key !== key);
+    if (color === key) color = "region";
+    if (size === key) size = "uniform";
+    if (deckSort === key) deckSort = "hub";
+    if (scrubKey === key) scrubKey = "";
+    if (xKey === key) xKey = data?.axes[0]?.key ?? "";
+    if (yKey === key) yKey = data?.axes[1]?.key ?? "";
+    if (zKey === key) zKey = data?.axes[2]?.key ?? "";
   }
   async function openFile(file: File) {
     try {
@@ -304,13 +280,6 @@
   let scrubHi = $state<number | null>(null);  // window upper bound; null = field max (both null = show everything)
   let scrubKey = $state("");
   const fmtDate = (ms: number) => new Date(ms).toISOString().slice(0, 7);
-  // resolve a scalar/temporal metaField's source to its per-card numeric values
-  const metaVals = (D: MapContract, src: string): (number | undefined)[] => {
-    if (src === "derived:length") return (D.cores ?? []).map((c) => (c || "").length);
-    if (src.startsWith("axis:")) return D.scores[src.slice(5)] ?? [];
-    if (src.startsWith("col:")) return ((D as any)[src.slice(4)] as (number | undefined)[]) ?? [];
-    return [];
-  };
   const scrubFields = $derived(allDims.filter((d) => d.kind === "scalar" || d.kind === "temporal"));  // registry
   $effect(() => { if (!scrubKey && scrubFields.length) scrubKey = (scrubFields.find((d) => d.kind === "temporal") ?? scrubFields[0]).key; });
   const scrubField = $derived(scrubFields.find((d) => d.key === scrubKey));
@@ -324,12 +293,10 @@
   // scrubLo/scrubHi stay null = "show everything" until dragged (they READ `?? min/max`, WRITE only on input,
   // so they never write a default back on mount — the race that emptied the map on load).
   $effect(() => {
-    const h = handle, r = scrubRange, vs = scrubVals, lo = scrubLo, hi = scrubHi, sc = data?.scores?.[QKEY];
+    const h = handle, r = scrubRange, vs = scrubVals, lo = scrubLo, hi = scrubHi;
     if (!h) return;
-    // one scrub channel: an active semantic query's similarity threshold takes precedence (dissolve the
-    // unrelated), else the chosen field's WINDOW [lo,hi] shows only cards in the band, else show everything.
-    if (queryActive && sc && simMin > 0) h.setScrub((i) => sc[i], [simMin, 100]);
-    else if (r && vs && ((lo != null && lo > r[0]) || (hi != null && hi < r[1]))) h.setScrub((i) => (typeof vs[i] === "number" ? (vs[i] as number) : r[0] - 1), [lo ?? r[0], hi ?? r[1]]);
+    // the ONE scrubber: window the chosen dimension's raw values to [lo,hi] (a query put here = "hide low-similarity")
+    if (r && vs && ((lo != null && lo > r[0]) || (hi != null && hi < r[1]))) h.setScrub((i) => (typeof vs[i] === "number" ? (vs[i] as number) : r[0] - 1), [lo ?? r[0], hi ?? r[1]]);
     else h.setScrub(null, null);
   });
 
@@ -404,7 +371,7 @@
         </select></label>
       <label class="flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">size</span>
         <select bind:value={size} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">
-          <option value="uniform">uniform</option>{#each dimList.filter((d) => d.kind === "scalar") as d}<option value={d.key}>{d.name}</option>{/each}
+          <option value="uniform">uniform</option>{#each allDims.filter((d) => d.kind === "scalar") as d}<option value={d.key}>{d.name}</option>{/each}
         </select></label>
       {#if nLevels > 1}
         <label class="mt-2 flex items-center gap-2 text-xs">
@@ -433,19 +400,17 @@
       <input type="search" bind:value={query} placeholder="find a card…" class="mt-2 w-full rounded-md border border-[var(--hair2)] bg-[var(--field)] px-2 py-1.5 text-xs" />
       {#if data?.vectors}
         <div class="mt-2 flex gap-1">
-          <input bind:value={semQuery} onkeydown={(e) => e.key === "Enter" && runQuery()} placeholder="semantic query…" disabled={querying} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-2 py-1.5 text-xs" />
-          <button onclick={runQuery} disabled={querying || !semQuery.trim()} title="embed & rank the corpus by meaning" class="flex-none rounded-md border border-[var(--hair2)] px-2.5 py-1 font-mono text-[11px] {queryActive ? 'bg-[var(--accent)] text-white' : 'text-[var(--soft)] hover:bg-[var(--chip)]'}">{querying ? "…" : "⌕"}</button>
-          {#if queryActive}<button onclick={clearQuery} title="clear query" class="flex-none rounded-md border border-[var(--hair2)] px-2 py-1 font-mono text-[11px] text-[var(--faint)] hover:bg-[var(--chip)]">✕</button>{/if}
+          <input bind:value={semQuery} onkeydown={(e) => e.key === "Enter" && runQuery()} placeholder="+ semantic axis…" disabled={querying} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-2 py-1.5 text-xs" />
+          <button onclick={runQuery} disabled={querying || !semQuery.trim()} title="embed & add a query dimension you can place on any channel" class="flex-none rounded-md border border-[var(--hair2)] px-2.5 py-1 font-mono text-[11px] text-[var(--soft)] hover:bg-[var(--chip)]">{querying ? "…" : "⌕"}</button>
         </div>
         {#if queryErr}<div class="mt-1 text-[10px] text-red-400">{queryErr}</div>{/if}
-        {#if queryActive}
-          <label class="mt-1 flex items-center gap-2 text-[10px] text-[var(--faint)]">
-            <span class="w-9 flex-none font-mono">sim ≥</span>
-            <input type="range" min="0" max="99" value={simMin} oninput={(e) => (simMin = +e.currentTarget.value)} class="min-w-0 flex-1 accent-[var(--accent)]" aria-label="hide cards below this similarity to the query" />
-            <span class="w-6 flex-none text-right font-mono">{simMin}</span>
-          </label>
-          <button onclick={() => { simRank = !simRank; applyScale(); }} title={simRank ? "rank-normalized: even spread (matches the discovered axes)" : "honest: true similarity, most cards pile at unrelated"} class="mt-1 w-full rounded-md border border-[var(--hair2)] px-2 py-1 font-mono text-[10px] {simRank ? 'bg-[var(--chip)] text-[var(--ink)]' : 'text-[var(--faint)]'}">scale: {simRank ? "rank-norm (even)" : "honest (min-max)"}</button>
-        {/if}
+        {#each queryDims as qd}
+          <div class="mt-1 flex items-center gap-1 rounded-md bg-[var(--chip2)] px-2 py-1 text-[10px]">
+            <span class="min-w-0 flex-1 truncate font-mono text-[var(--dim)]" title={qd.name}>{qd.name}</span>
+            <button onclick={() => (color = qd.key)} title="colour by this query" class="flex-none font-mono text-[var(--faint)] hover:text-[var(--ink)]">●</button>
+            <button onclick={() => removeQuery(qd.key)} title="remove query" class="flex-none font-mono text-[var(--faint)] hover:text-[var(--ink)]">✕</button>
+          </div>
+        {/each}
       {/if}
       {#if hasCite || hasGhosts}
         <div class="mt-2 flex gap-2">
@@ -532,7 +497,7 @@
         <span class="font-mono text-[10px] text-[var(--faint)]">{deckList.length} cards</span>
         <label class="flex items-center gap-1 text-xs"><span class="font-mono text-[10px] text-[var(--faint)]">sort</span>
           <select bind:value={deckSort} class="rounded-md border border-[var(--hair2)] bg-[var(--card)] px-1.5 py-1 text-xs">
-            <option value="hub">influence</option>{#each allDims.filter((d) => d.kind !== "categorical") as d}<option value={d.key}>{d.name}</option>{/each}
+            {#each allDims.filter((d) => d.kind !== "categorical") as d}<option value={d.key}>{d.name}</option>{/each}
           </select></label>
         {#if hasRead}<button class="rounded-md border border-[var(--hair2)] px-2 py-1 font-mono text-[11px] {deckUnread ? 'bg-[var(--chip)] text-[var(--ink)]' : 'text-[var(--faint)]'}" onclick={() => (deckUnread = !deckUnread)}>unread only</button>{/if}
         <input bind:value={deckQ} placeholder="filter…" class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--card)] px-2 py-1 text-xs" />
