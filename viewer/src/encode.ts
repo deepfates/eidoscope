@@ -52,10 +52,14 @@ export function colorFor(D: MapContract, mode: string, fac: Facet[], assign?: nu
   return (i) => axisColor((D.scores[mode]?.[i] ?? 50) / 100);
 }
 
-// radius accessor for a mode: "uniform" | "hub" | "<axisKey>"
+// radius accessor for a mode: "uniform" | "hub" | "<axisKey>". Discovered axes are BIPOLAR (both poles are
+// "strong"), so size grows from the centre |score-50|. A dimension flagged `monotonic` (a metric like length,
+// or a semantic-query similarity) ramps low→high instead — big = more, small = less.
 export function sizeFor(D: MapContract, mode: string): (i: number) => number {
   const maxHub = Math.max(1, ...D.hub);
   if (mode === "uniform") return () => 2.6;
   if (mode === "hub") return (i) => 1.5 + 3.4 * Math.sqrt((D.hub[i] || 0) / maxHub);
+  const mono = (D.axes.find((a) => a.key === mode) as any)?.monotonic;
+  if (mono) return (i) => 1.5 + 3.4 * ((D.scores[mode]?.[i] ?? 0) / 100);
   return (i) => 1.5 + (3 * Math.abs((D.scores[mode]?.[i] ?? 50) - 50)) / 50;
 }

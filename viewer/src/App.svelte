@@ -171,6 +171,7 @@
     handle?.destroy();                                   // free the previous deck's GPU context before recreating
     selected = null; pinned = null; facetPin = null;      // per-corpus state doesn't carry across files
     fac = facets(D);
+    injectMetaDims(D);   // scalar metaFields (length, citation impact…) become selectable dimensions on every channel
     xKey = D.axes[0]?.key ?? "";
     yKey = D.axes[1]?.key ?? D.axes[0]?.key ?? "";
     zKey = D.axes[2]?.key ?? D.axes[0]?.key ?? "";
@@ -188,6 +189,19 @@
     (window as any).__eido = () => { const d = handle?.debug(); return { grain, k: curCount, layout, color, pin: pinned, facetPin, focus: selected, detail: selected !== null, deckOpen, cite: citeOn, ghosts: ghostsOn, theme, hover: hovered ? hovered.kind : null, zoom: d?.zoom ?? 0, labels: d?.labels ?? 0, regions: d?.regions ?? 0, rot: d?.rot ?? null, rotX: d?.rotX ?? null, target: d?.target ?? null, span3: d?.span3 ?? null }; };
     (window as any).__eidoProject = (xy: number[]) => handle?.project(xy);
     (window as any).__eidoPick = (x: number, y: number) => handle?.pickAt(x, y);
+  }
+  // Turn each scalar metaField (length, citation impact…) into a scored dimension in D.scores + a lightweight
+  // pseudo-axis in D.axes, so it flows through EVERY channel (color/size/x/y/z) via the existing accessors —
+  // the same synthetic-dimension trick the semantic query uses, applied at load. Monotonic (metric ramp, not
+  // bipolar). Min-max scaled (honest). Idempotent. Skips discovered axes (already scored) and hub (own control).
+  function injectMetaDims(D: MapContract) {
+    for (const mf of D.metaFields ?? []) {
+      if (mf.type !== "scalar" || mf.source.startsWith("axis:") || mf.key === "hub" || D.scores[mf.key]) continue;
+      const vals = metaVals(D, mf.source);
+      if (!vals.some((v) => typeof v === "number")) continue;
+      D.scores[mf.key] = scale100(vals.map((v) => (typeof v === "number" ? v : 0)));
+      (D.axes as any[]).push({ key: mf.key, name: mf.label, low: "low", high: "high", pc: 0, weak: false, monotonic: true });
+    }
   }
   // (Re)scale the kept raw cosines into __q's 0..100 scores per the rank-norm toggle, and push them to both the
   // colorFor closure (data.scores) and deckmap's geometry (injectScores). Called on query and on toggle flip.
@@ -207,7 +221,7 @@
     try {
       const qv = await embedQuery(q, (D as any).derivedBy?.embedder?.id);
       simRaw = cosineAll(qv, D.vectors);
-      D.axes = [...D.axes.filter((a) => a.key !== QKEY), { key: QKEY, name: "⌕ " + q, low: "unrelated", high: q, pc: 0, weak: false } as any];
+      D.axes = [...D.axes.filter((a) => a.key !== QKEY), { key: QKEY, name: "⌕ " + q, low: "unrelated", high: q, pc: 0, weak: false, monotonic: true } as any];
       data = D;                       // proxy mutation → dropdowns + colorFor closure pick it up
       applyScale();                   // sets D.scores[__q] (min-max or rank-norm) + feeds deckmap's geometry
       queryActive = true;
