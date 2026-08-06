@@ -45,6 +45,9 @@ export function decodeContainer(buf: Uint8Array): MapContract {
 
   const scores: Record<string, number[]> = {};
   const sc = get("scores"); meta.axes.forEach((a: any, ai: number) => { scores[a.key] = Array.from({ length: n }, (_, i) => sc[ai * n + i]); });
+  // OPTIONAL raw PCA projection per axis (honest-view substrate). Absent in older files → axes stay rank-only.
+  let rawScores: Record<string, number[]> | undefined;
+  if (meta.buffers.some((b: BufSpec) => b.key === "rawScores")) { const rs = get("rawScores"); rawScores = {}; meta.axes.forEach((a: any, ai: number) => { rawScores![a.key] = Array.from({ length: n }, (_, i) => rs[ai * n + i]); }); }
 
   // v2 carried card vectors (f16): the substrate for in-app semantic query / custom axes. Decoded to number[][].
   let vectors: number[][] | undefined;
@@ -58,7 +61,7 @@ export function decodeContainer(buf: Uint8Array): MapContract {
   return {
     vectors,
     version: meta.version, provenance: meta.provenance, derivedBy: meta.derivedBy, metaFields: meta.metaFields, ids: meta.ids, titles: meta.titles, cores: meta.cores, notes: meta.notes,
-    axes: meta.axes, scores, xy: unflat(get("xy"), 2), xyz: unflat(get("xyz"), 3),
+    axes: meta.axes, scores, rawScores, xy: unflat(get("xy"), 2), xyz: unflat(get("xyz"), 3),
     cluster: Array.from(get("cluster")), k: meta.k, di: meta.di,
     levels: meta.hasLevels ? unragged(get("levels_v"), get("levels_o")) : undefined, counts: meta.counts,
     levelLabels: meta.levelLabels, levelBlurbs: meta.levelBlurbs, clusters: meta.clusters,

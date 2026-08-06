@@ -1,6 +1,7 @@
 node_modules/
 cache-*/
 # run outputs (the deck + map are user artifacts, not source)
+out/
 deck.jsonl
 deck-sample.jsonl
 map-data.json

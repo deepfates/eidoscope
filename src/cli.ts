@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
-// eidoscope <folder> [--limit N]     run on any folder of .md/.txt files
+// eidoscope <folder> [--limit N]     run on any folder of .md/.txt files → out/<slug>/<slug>.eido
+// eidoscope <folder> --out <dir>     write the output bundle to <dir> instead of out/<slug>/
 // eidoscope --fixture                run on the readwise fixture (precomputed embeddings)
 // eidoscope <folder> --frontier      also pull the Semantic Scholar citation frontier (arxiv corpora)
 // eidoscope <folder> --embed raw     build the map from raw full-text instead of cards (A/B the bottleneck)
@@ -45,4 +46,4 @@ if (args.includes("--fixture")) {
 }
 const name = args.includes("--fixture") ? "Readwise library" : (dir?.split("/").filter(Boolean).pop() || "Corpus");
 const embed = val("--embed") === "raw" ? "raw" : "card";
-await run(docs, embeddings, { frontier: args.includes("--frontier"), name, source: dir, embed });
+await run(docs, embeddings, { frontier: args.includes("--frontier"), name, source: dir, embed, out: val("--out") });

@@ -75,6 +75,12 @@ export function encodeMap(D: MapContract): Uint8Array {
   const sc = new Float32Array(D.axes.length * n);
   D.axes.forEach((a, ai) => { const col = D.scores[a.key] || []; for (let i = 0; i < n; i++) sc[ai * n + i] = col[i] ?? 50; });
   bufs.push({ key: "scores", arr: sc, type: "f32" });
+  // OPTIONAL raw PCA projection per axis (axis-major, same layout as scores) — the honest-view substrate.
+  if (D.rawScores && D.axes.every((a) => D.rawScores![a.key])) {
+    const rs = new Float32Array(D.axes.length * n);
+    D.axes.forEach((a, ai) => { const col = D.rawScores![a.key]; for (let i = 0; i < n; i++) rs[ai * n + i] = col[i] ?? 0; });
+    bufs.push({ key: "rawScores", arr: rs, type: "f32" });
+  }
   // ragged / optional
   const nb = ragged(D.nbr); bufs.push({ key: "nbr_v", arr: nb.vals, type: "i32" }, { key: "nbr_o", arr: nb.offs, type: "i32" });
   if (D.levels) { const lv = ragged(D.levels); bufs.push({ key: "levels_v", arr: lv.vals, type: "i32" }, { key: "levels_o", arr: lv.offs, type: "i32" }); }
@@ -149,6 +155,8 @@ export function decodeMap(gz: Uint8Array): MapContract {
   const sparse = <T>(a: (T | null)[] | undefined) => (a ? a.map((x) => (x === null ? undefined : x)) : a);
   const scores: Record<string, number[]> = {};
   const sc = get("scores"); meta.axes.forEach((a: any, ai: number) => { scores[a.key] = Array.from({ length: n }, (_, i) => sc[ai * n + i]); });
+  let rawScores: Record<string, number[]> | undefined;
+  if (meta.buffers.some((b: any) => b.key === "rawScores")) { const rs = get("rawScores"); rawScores = {}; meta.axes.forEach((a: any, ai: number) => { rawScores![a.key] = Array.from({ length: n }, (_, i) => rs[ai * n + i]); }); }
   const nbr = unragged(get("nbr_v"), get("nbr_o"));
   const levels = meta.hasLevels ? unragged(get("levels_v"), get("levels_o")) : undefined;
   const cite = meta.hasCite ? unragged(get("cite_v"), get("cite_o")) : undefined;
@@ -156,7 +164,7 @@ export function decodeMap(gz: Uint8Array): MapContract {
 
   return {
     version: meta.version, provenance: meta.provenance, derivedBy: meta.derivedBy, metaFields: meta.metaFields, ids: meta.ids, titles: meta.titles, cores: meta.cores, notes: meta.notes,
-    axes: meta.axes, scores, xy: unflat(get("xy"), 2), xyz: unflat(get("xyz"), 3),
+    axes: meta.axes, scores, rawScores, xy: unflat(get("xy"), 2), xyz: unflat(get("xyz"), 3),
     cluster: Array.from(get("cluster")), k: meta.k, di: meta.di, levels, counts: meta.counts,
     levelLabels: meta.levelLabels, levelBlurbs: meta.levelBlurbs, clusters: meta.clusters,
     hub: Array.from(get("hub")), nbr, cite, citec: meta.citec, vectors,

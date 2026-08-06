@@ -9,6 +9,7 @@ export type MapData = {
   notes: Record<string, string>[];
   axes: { key: string; name: string; low: string; high: string; weak?: boolean; variance?: number }[];
   scores: Record<string, number[]>;
+  rawScores?: Record<string, number[]>;   // raw PCA projection per axis (honest-view substrate; optional)
   xy: number[][]; xyz: number[][]; cluster: number[]; k: number; hub: number[]; nbr: number[][];
   clusters: { c: number; n: number; label: string; cx: number; cy: number }[];
   levels?: number[][]; counts?: number[];   // nested grain ladder for the region-granularity slider

@@ -215,6 +215,22 @@ test("mapbin: binary codec round-trips the contract losslessly and is much small
   expect(back.siteNames).toEqual(D.siteNames);                      // and their labels
   expect(back.provenance).toEqual(D.provenance);                    // provenance (so a file introduces itself) survives
   expect(bin.byteLength).toBeLessThan(JSON.stringify(D).length);    // smaller than the JSON form
+  expect(back.rawScores).toBeUndefined();                          // absent when the map carries no raw projections
+});
+
+test("mapbin: OPTIONAL rawScores (raw PCA projection) round-trips per axis — the honest-view substrate", () => {
+  const base: MapContract = {
+    ids: ["a", "b", "c"], titles: ["A", "B", "C"], cores: ["c", "c", "c"], notes: [{}, {}, {}],
+    axes: [{ key: "x", name: "X", low: "lo", high: "hi" }, { key: "y", name: "Y", low: "lo", high: "hi" }],
+    scores: { x: [0, 50, 100], y: [100, 0, 50] },
+    rawScores: { x: [-0.51, 0.02, 0.57], y: [0.44, -0.6, 0.1] },    // true magnitudes (can be negative) behind the ranks
+    xy: [[0, 0], [0, 0], [0, 0]], xyz: [[0, 0, 0], [0, 0, 0], [0, 0, 0]],
+    cluster: [0, 0, 1], k: 2, hub: [1, 1, 1], nbr: [[1], [0], [1]],
+    clusters: [{ c: 0, n: 2, label: "p" }, { c: 1, n: 1, label: "q" }],
+  };
+  const back = decodeMap(encodeMap(base));
+  expect(back.rawScores).toBeDefined();
+  for (const k of ["x", "y"]) for (let i = 0; i < 3; i++) expect(back.rawScores![k][i]).toBeCloseTo(base.rawScores![k][i], 4);
 });
 
 test("mapbin v2: carries f16 card vectors + derivedBy, preserves ranking, and stays back/forward-compatible", () => {

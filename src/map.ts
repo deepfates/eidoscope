@@ -51,6 +51,13 @@ export function projectionScores(projections: number[][], axes: { key: string; p
   return Object.fromEntries(axes.map((a) => [a.key, rank(projections.map((row) => row[a.pc - 1]))]));
 }
 
+// The SAME PCA projections without the rank step — the raw, true-magnitude coordinate on each axis. Rank
+// (above) gives the readable even-spread default; raw lets the viewer show the honest skew (where docs pile
+// vs. spread). Carried alongside `scores` so "honest ⇄ rank" on an axis is a real toggle, not a stub.
+export function rawProjectionScores(projections: number[][], axes: { key: string; pc: number }[]): Record<string, number[]> {
+  return Object.fromEntries(axes.map((a) => [a.key, projections.map((row) => row[a.pc - 1])]));
+}
+
 const textHash = (s: string) => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0; return h.toString(36); };
 
 // Embed a batch of texts by CHUNK-POOLING: split each into word chunks (so nothing beyond the

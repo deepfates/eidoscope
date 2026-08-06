@@ -74,6 +74,8 @@ export type MapContract = {
   // the discovered structure
   axes: AxisDef[];
   scores: Record<string, number[]>;        // axisKey -> per-node rank-normalized 0..100 position
+  rawScores?: Record<string, number[]>;    // axisKey -> per-node RAW PCA projection (optional; lets the viewer
+                                           // offer an "honest" min-max view of an axis, not just the even-spread rank)
 
   // geometry (Float32 on the wire): 2D map, 3D orbit
   xy: number[][];

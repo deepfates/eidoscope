@@ -1,7 +1,8 @@
-import { writeFileSync } from "node:fs";
+import { writeFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { discoverAxes, type Axis } from "./axes.ts";
 import { cardCorpus, deckToJSONL, type Card } from "./card.ts";
-import { embedCards, projectAndCluster, projectionScores, buildMetaFields } from "./map.ts";
+import { embedCards, projectAndCluster, projectionScores, rawProjectionScores, buildMetaFields } from "./map.ts";
 import { nameLevels } from "./regions.ts";
 import { provider } from "./provider.ts";
 import { renderHTML, type MapData } from "./render.ts";
@@ -15,8 +16,14 @@ import { loadFixture, type Doc } from "./corpus.ts";
 
 // The full instrument, end to end: docs (+embeddings) -> discover axes -> card -> embed cards ->
 // project + cluster -> name regions -> deck.jsonl + map-data.json + eidoscope.html.
-export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?: boolean; name?: string; source?: string; embed?: "card" | "raw" } = {}) {
+export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?: boolean; name?: string; source?: string; embed?: "card" | "raw"; out?: string } = {}) {
   const llm = provider();
+  // Every corpus gets its OWN self-describing output directory + `<slug>.eido` — the .eido is a portable,
+  // addressable L-space you hand around, so mapping two corpora must never clobber a shared `map.eido`.
+  const slug = (opts.name || "corpus").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "corpus";
+  const outDir = opts.out || join("out", slug);
+  mkdirSync(outDir, { recursive: true });
+  const eidoName = slug + ".eido";
   console.error(`\n[1/5] discovering axes from ${docs.length} docs…`);
   const { axes, realDims, projections } = await discoverAxes(embeddings, docs.map((d) => d.title.slice(0, 64)), { llm });
   console.error(`  ${axes.length} axes surfaced (${realDims} dims above the noise floor)`);
@@ -25,8 +32,8 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
   console.error(`[2/5] carding ${docs.length} docs over ${axes.length} axes…`);
   const conc = Number(process.env.EIDOSCOPE_CONCURRENCY || 48); // measured sweet spot (~8.7 cards/s; throughput collapses past ~64)
   const deck = await cardCorpus(docs, axes, { llm, concurrency: conc, cache: "." }); // cardCorpus prints its own two-phase progress
-  writeFileSync("deck.jsonl", deckToJSONL(deck));
-  console.error(`  ${deck.length} cards -> deck.jsonl`);
+  writeFileSync(join(outDir, "deck.jsonl"), deckToJSONL(deck));
+  console.error(`  ${deck.length} cards -> ${join(outDir, "deck.jsonl")}`);
 
   // The map geometry comes from EITHER the cards (concept-bottleneck: restatement + placements as two
   // pooled vectors, the default) OR the raw full-text embeddings already computed for axis discovery
@@ -45,6 +52,7 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
   // distinct (over-used terms + extreme axes), the LLM only phrases it. Deduped across levels + cached.
   console.error(`[4/5] naming regions across ${counts.length} grain levels (${counts.join("·")}; default ${k})…`);
   const scores = projectionScores(projections, axes);
+  const rawScores = rawProjectionScores(projections, axes);   // true-magnitude coords → viewer "honest" axis toggle
   const axLite = axes.map((a) => ({ key: a.key, name: a.name, low: a.pole_low, high: a.pole_high }));
   const { labels: levelLabels, blurbs: levelBlurbs, regionsByLevel } = await nameLevels(
     levels, counts, deck.map((c) => c.title), deck.map((c) => c.core), scores, axLite, { llm, concurrency: conc, cache: "." });
@@ -61,7 +69,7 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
     ids: deck.map((c) => c.id), titles: deck.map((c) => c.title), cores: deck.map((c) => c.core),
     notes: deck.map((c) => Object.fromEntries(axes.map((a) => [a.key, c.axes[a.key]?.note || ""]))),
     axes: axes.map((a) => ({ key: a.key, name: a.name, low: a.pole_low, high: a.pole_high, variance: a.var })),
-    scores,
+    scores, rawScores,
     xy, xyz, cluster, k, di, hub, nbr, clusters, levels, counts, levelLabels, levelBlurbs,
     urls: deck.map((c) => c.url || (c.path ? "file://" + c.path : undefined)),
     sources: deck.map((c) => c.source), siteNames: deck.map((c) => c.siteName),
@@ -103,16 +111,17 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
     generated: Date.now(),
   };
   (D as any).metaFields = buildMetaFields(D as any);   // typed dimension manifest for the channel grammar
-  writeFileSync("map-data.json", JSON.stringify(D));
-  writeFileSync("map.eido", encodeMap(D as unknown as MapContract));   // binary wire format for the deck.gl viewer (~5× smaller)
-  writeFileSync("eidoscope.html", renderHTML(D));
+  writeFileSync(join(outDir, "map-data.json"), JSON.stringify(D));
+  writeFileSync(join(outDir, eidoName), encodeMap(D as unknown as MapContract));   // the portable artifact (~5× smaller)
+  writeFileSync(join(outDir, "eidoscope.html"), renderHTML(D));
   const state = trajectory({ dates: deck.map((c) => c.date), cluster: D.cluster, scores: D.scores, axes: D.axes, clusters });
-  if (state) writeFileSync("STATE.md", state);
-  writeFileSync("REPORT.md", buildReport(D, opts.name || "Corpus"));
-  console.error(`\n✅ ${deck.length} cards · ${axes.length} axes · ${k} regions`);
-  console.error(`   → open  eidoscope.html   (the interactive map)`);
-  console.error(`   → read  REPORT.md        (the shareable summary${state ? " + STATE.md trajectory" : ""})`);
-  console.error(`   → data  deck.jsonl · map-data.json`);
+  if (state) writeFileSync(join(outDir, "STATE.md"), state);
+  writeFileSync(join(outDir, "REPORT.md"), buildReport(D, opts.name || "Corpus"));
+  console.error(`\n✅ ${deck.length} cards · ${axes.length} axes · ${k} regions  →  ${outDir}/`);
+  console.error(`   → map   ${join(outDir, eidoName)}   (the portable L-space; open in the viewer)`);
+  console.error(`   → open  ${join(outDir, "eidoscope.html")}   (self-contained interactive map)`);
+  console.error(`   → read  ${join(outDir, "REPORT.md")}        (shareable summary${state ? " + STATE.md trajectory" : ""})`);
+  console.error(`   → data  ${join(outDir, "deck.jsonl")} · ${join(outDir, "map-data.json")}`);
   return D;
 }
 

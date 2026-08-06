@@ -63,7 +63,10 @@ export function buildDimensions(D: MapContract): Dimension[] {
   const dims: Dimension[] = [];
   // only the DISCOVERED axes — skip the injected metadata/query pseudo-axes (flagged `monotonic`) the old path
   // still pushes into D.axes during migration; this module owns metadata + queries itself.
-  for (const a of D.axes) if (!(a as any).monotonic) dims.push({ key: a.key, name: a.name, kind: "scalar", source: "axis", raw: D.scores[a.key], bipolar: true, fixedNorm: true, low: (a as any).low, high: (a as any).high, variance: (a as any).variance, weak: (a as any).weak });
+  // Prefer the RAW PCA projection when the file carries it: then honest (true magnitude) AND rank (even spread)
+  // are both real, so the norm toggle works on axes. Older files carry only the rank-normed scores → fixedNorm
+  // (rank is the only recoverable view). Default props keep axes on rank either way (readable geometry).
+  for (const a of D.axes) if (!(a as any).monotonic) { const raw = D.rawScores?.[a.key]; dims.push({ key: a.key, name: a.name, kind: "scalar", source: "axis", raw: raw ?? D.scores[a.key], bipolar: true, fixedNorm: !raw, low: (a as any).low, high: (a as any).high, variance: (a as any).variance, weak: (a as any).weak }); }
   dims.push({ key: "hub", name: "influence", kind: "scalar", source: "meta", raw: D.hub, bipolar: false });
   if (D.citec?.some((x) => typeof x === "number")) dims.push({ key: "citec", name: "citation impact", kind: "scalar", source: "meta", raw: D.citec as number[], bipolar: false });
   dims.push({ key: "length", name: "length", kind: "scalar", source: "meta", raw: D.cores.map((c) => (c || "").length), bipolar: false });
