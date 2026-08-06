@@ -19,8 +19,7 @@ export type MapHandle = {
   setFocus: (i: number | null) => void;
   setHighlight: (c: number | null) => void;
   setHighlightSet: (idx: number[] | null, color: RGB | null) => void;
-  setQuery: (q: string) => void;
-  setScrub: (get: ((i: number) => number) | null, range: [number, number] | null) => void;  // channel-grammar scrubber
+  setFilterMask: (mask: ArrayLike<number> | null) => void;  // unified filter: 1 = passes all active filters, 0 = hidden
   injectScores: (key: string, arr: number[] | null) => void;  // add/remove a dynamic scalar dimension (e.g. a semantic-query axis) into the geometry's own scores
   fitToIndices: (idx: number[]) => void;
   resetView: () => void;
@@ -50,15 +49,16 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   // deckmap is a renderer — it no longer resolves axis values itself. Fallback to the raw-score ax() if absent.
   let getX = init.getX, getY = init.getY, getZ = init.getZ;
   let posSig = init.posSig ?? "";
-  let colorVer = 0, sizeVer = 0, posVer = 0, scrubVer = 0;
-  let scrubGet: ((i: number) => number) | null = null;   // the scrubbed dimension's per-node value (channel-grammar scrubber)
-  let scrubRange: [number, number] | null = null;         // active [lo,hi]; null = pass everything
+  let colorVer = 0, sizeVer = 0, posVer = 0, filterVer = 0;
+  // Unified filter: App computes one intersection mask (1 = passes ALL active filters, 0 = hidden) from the
+  // shared activeFilters (facet membership + region + text + scrubber range). deck's GPU DataFilterExtension
+  // culls the 0s — one path for every filter, so stacking them just ANDs into this mask.
+  let filterMask: ArrayLike<number> | null = null;
   const dataFilter = new DataFilterExtension({ filterSize: 1 });
   let focus: number | null = null, fSet: Set<number> | null = null;
   let highlight: number | null = null;
   let highlightSet: Set<number> | null = null;   // isolate an arbitrary set (a facet value, e.g. a folder), not just a cluster
   let highlightSetColor: RGB = [255, 255, 255];
-  let queryMatch: Set<number> | null = null;
   let citeOn = init.citeOn ?? false, ghostsOn = init.ghostsOn ?? false;
   let clickTimer: ReturnType<typeof setTimeout> | null = null;  // single-click card-open, cancelled by a double-click (drill)
   let suppressClickUntil = 0;  // wall-clock deadline set by dblclick so a trailing deck onClick can't open a card (timestamp, not a timer — Date.now() isn't throttled like setTimeout in a hidden tab)
@@ -143,8 +143,9 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     return placed;
   };
   const dimSet = () => (focus != null ? fSet : highlightSet ? highlightSet : highlight != null ? new Set(members[highlight]) : null);
-  // a point dims if excluded by the active focus/highlight isolate OR by the search query
-  const isDim = (index: number) => { const ds = dimSet(); if (ds && !ds.has(index)) return true; if (queryMatch && !queryMatch.has(index)) return true; return false; };
+  // a point dims (soft emphasis) if excluded by the active focus/highlight preview. (Filtering is a HARD hide
+  // via the DataFilterExtension mask, a separate concern — text search is now a filter, not a dim.)
+  const isDim = (index: number) => { const ds = dimSet(); return ds ? !ds.has(index) : false; };
 
   // 3D uses deck.gl's OWN default OrbitController — drag rotates, scroll zooms — the battle-tested interaction
   // for a point cloud. No custom wheel-dolly, no bounds clamp, no dragMode override (those were blind patches
@@ -164,15 +165,14 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     getFillColor: (_: any, { index }: any) => { const c = getColor(index); return (isDim(index) ? [c[0], c[1], c[2], 28] : [c[0], c[1], c[2], 255]) as any; },
     getRadius: (_: any, { index }: any) => getRadius(index),
     radiusUnits: "pixels", radiusMinPixels: 1.2, billboard: true,
-    // channel-grammar scrubber: GPU range-filter on a scalar/temporal dimension (filtered-out points also go
-    // non-pickable). filterSoftRange fades points near the edges instead of popping. Wide-open when no scrub.
+    // unified filter: GPU cull of any point the intersection mask marks 0 (filtered-out points also go
+    // non-pickable). No mask = pass everything ([1,1] range with a constant 1 keeps all points in).
     extensions: [dataFilter],
-    getFilterValue: (_: any, { index }: any) => (scrubGet ? scrubGet(index) : 0),
-    filterRange: scrubRange ?? [-1e30, 1e30],
-    filterSoftRange: scrubRange ? [scrubRange[0] + (scrubRange[1] - scrubRange[0]) * 0.04, scrubRange[1] - (scrubRange[1] - scrubRange[0]) * 0.04] : undefined,
+    getFilterValue: (_: any, { index }: any) => (filterMask ? filterMask[index] : 1),
+    filterRange: filterMask ? [0.5, 1.5] : [-1e30, 1e30],
     pickable: true, autoHighlight: n < 4000, highlightColor: [255, 255, 255, 180],
     transitions: reduce ? undefined : { getPosition: { duration: 700, easing: easeCubicInOut } },
-    updateTriggers: { getFillColor: colorVer, getRadius: [sizeVer, posVer], getPosition: posVer, getFilterValue: scrubVer },
+    updateTriggers: { getFillColor: colorVer, getRadius: [sizeVer, posVer], getPosition: posVer, getFilterValue: filterVer },
   });
   const spokesLayer = () => new LineLayer({
     id: "spokes", data: focus == null ? [] : (D.nbr[focus] || []).map((j) => ({ j })),
@@ -341,17 +341,12 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     setFocus: (i) => { focus = i; fSet = i == null ? null : new Set<number>([i, ...(D.nbr[i] || [])]); colorVer++; paint(); },
     setHighlight: (c) => { highlight = c; highlightSet = null; colorVer++; paint(); },
     setHighlightSet: (idx, color) => { highlightSet = idx && idx.length ? new Set(idx) : null; if (color) highlightSetColor = color; highlight = null; colorVer++; paint(); },
-    setQuery: (q) => {
-      const s = q.trim().toLowerCase();
-      queryMatch = !s ? null : new Set<number>(D.ids.map((_, i) => i).filter((i) => D.titles[i].toLowerCase().includes(s) || D.cores[i].toLowerCase().includes(s)));
-      colorVer++; paint();
-    },
     fitToIndices: (idx) => fit(idx),
     debug: () => ({ zoom: (deck.getViewports?.()?.[0] as any)?.zoom ?? viewState?.zoom ?? 0, labels: decluttered().length, regions: members.filter((m) => m.length).length, grain, rot: viewState?.rotationOrbit ?? null, rotX: viewState?.rotationX ?? null, target: viewState?.target ?? null, span3 }),
     project: (worldXY) => { const vp = (deck as any).getViewports?.()[0]; return vp ? vp.project([worldXY[0], worldXY[1], 0]).slice(0, 2) : [0, 0]; },
     pickAt: (x, y) => { const o = (deck as any).pickObject?.({ x, y, radius: 8 }); return o ? { layer: o.layer?.id ?? null, url: o.object?.url ?? null, index: o.index ?? -1 } : null; },
     resetView: () => { viewState = home(layout); deck.setProps({ viewState }); },
-    setScrub: (get, range) => { scrubGet = get; scrubRange = range; scrubVer++; paint(); },
+    setFilterMask: (mask) => { filterMask = mask; filterVer++; paint(); },
     // A semantic-query axis is injected AFTER createMap, so deckmap's own D.scores must be updated (pos() reads
     // it directly). null removes it. Bump pos+color so the position/gradient recompute.
     injectScores: (key, arr) => { if (arr) (D as any).scores[key] = arr; else delete (D as any).scores[key]; posVer++; colorVer++; paint(); },

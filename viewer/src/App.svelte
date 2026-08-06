@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
   import { loadMap, mapUrl, decodeEido } from "./loader";
   import { createMap, type MapHandle, type Layout } from "./deckmap";
   import { col, axisColor } from "./encode";
@@ -45,6 +45,13 @@
   // THE DIMENSION REGISTRY (grammar unification): one list of dimensions all channels draw from. Migrating
   // channels onto it one at a time — `size` first. dimProps holds per-dimension user overrides (norm/invert).
   let dimProps = $state<Record<string, DimProps>>({});
+  // UNIFIED FILTER: one declarative list (facet membership · region cluster · text search). The scrubber range
+  // is folded into the same intersection mask below. Declarative (not predicates) so it serializes and diffs.
+  type Filter =
+    | { kind: "cat"; key: string; label: string; value: string }   // categorical dimension = value
+    | { kind: "region"; key: "region"; label: string; cluster: number } // cluster at the current grain
+    | { kind: "text"; key: "text"; label: string; q: string };      // title/body substring
+  let filters = $state<Filter[]>([]);
   const dimList = $derived(data ? buildDimensions(data) : []);
   const propsOf = (d: Dimension): DimProps => dimProps[d.key] ?? defaultProps(d);
   const sizeGet = (dims: Dimension[], key: string) => { const d = dims.find((x) => x.key === key); return sizeAccessor(d, d ? propsOf(d) : { norm: "honest", invert: false }); };
@@ -109,18 +116,25 @@
     return Array.from({ length: k }, (_, c) => ({ c, label: labels?.[c] ?? data!.clusters[c]?.label ?? "region " + c, n: cnt[c] }));
   });
   const membersOf = (c: number) => { const out: number[] = []; assignment.forEach((v, i) => { if (v === c) out.push(i); }); return out; };
+  // Region isolate = a hard filter on the cluster at the current grain (keeps `pinned` for legend styling/hover).
   function togglePin(c: number) {
-    if (pinned === c) { pinned = null; handle?.setHighlight(null); handle?.resetView(); }
-    else { pinned = c; facetPin = null; handle?.setHighlight(c); handle?.fitToIndices(membersOf(c)); }
+    const i = filters.findIndex((f) => f.kind === "region" && f.cluster === c);
+    if (i >= 0) { filters = filters.filter((_, j) => j !== i); pinned = null; handle?.resetView(); }
+    else { filters = [...filters.filter((f) => f.kind !== "region"), { kind: "region", key: "region", label: curClusters.find((x) => x.c === c)?.label ?? "region " + c, cluster: c }]; pinned = c; handle?.fitToIndices(membersOf(c)); }
   }
   const facetMembers = (v: string) => { const out: number[] = []; const d = colorDim; if (!d?.cat || !data) return out; for (let i = 0; i < data.ids.length; i++) if (d.cat(i) === v) out.push(i); return out; };
+  // Facet isolate = a hard filter on the colour dimension's value (keeps `facetPin` for legend styling).
   function toggleFacetPin(v: string) {
-    if (facetPin === v) { facetPin = null; handle?.setHighlightSet(null, null); handle?.resetView(); }
-    else { facetPin = v; pinned = null; const idx = facetMembers(v); handle?.setHighlightSet(idx, col(colorDim!.idx![v])); handle?.fitToIndices(idx); }
+    const key = colorDim?.key; if (!key) return;
+    const i = filters.findIndex((f) => f.kind === "cat" && f.key === key && f.value === v);
+    if (i >= 0) { filters = filters.filter((_, j) => j !== i); facetPin = null; handle?.resetView(); }
+    else { filters = [...filters.filter((f) => !(f.kind === "cat" && f.key === key)), { kind: "cat", key, label: v, value: v }]; facetPin = v; handle?.fitToIndices(facetMembers(v)); }
   }
-  // switching the colour lens clears a stale facet isolate (a folder value means nothing under a different lens)
+  function removeFilter(f: Filter) { filters = filters.filter((x) => x !== f); if (f.kind === "region") pinned = null; if (f.kind === "cat") facetPin = null; if (f.kind === "text") query = ""; }
+  function clearFilters() { filters = []; pinned = null; facetPin = null; query = ""; scrubLo = null; scrubHi = null; }
+  // switching the colour lens drops stale facet filters (a folder value means nothing under a different lens)
   let lastColorForFacet = color;
-  $effect(() => { const c = color; if (c !== lastColorForFacet) { lastColorForFacet = c; if (facetPin !== null) { facetPin = null; handle?.setHighlightSet(null, null); } } });
+  $effect(() => { const c = color; if (c !== lastColorForFacet) { lastColorForFacet = c; const cur = untrack(() => colorDim?.key); untrack(() => { const next = filters.filter((f) => f.kind !== "cat" || f.key === cur); if (next.length !== filters.length) { filters = next; facetPin = null; } }); } });
 
   const pct = (a: any) => (a?.variance != null ? Math.round(a.variance * 100) : null);
   // axis label with its STRENGTH up front (variance %, ~ for weak) — the % stays visible even when the
@@ -140,7 +154,7 @@
       .sort((x, y) => Math.abs(y.s - 50) - Math.abs(x.s - 50)).slice(0, 3) : [];
 
   function focusCard(i: number | null) { selected = i; handle?.setFocus(i); }
-  function reset() { focusCard(null); pinned = null; facetPin = null; handle?.setHighlight(null); handle?.setHighlightSet(null, null); grain = data?.di ?? 0; handle?.resetView(); }
+  function reset() { focusCard(null); clearFilters(); handle?.setHighlight(null); grain = data?.di ?? 0; handle?.resetView(); }
 
   // deep-linkable view state (eid-yxqu): the URL always mirrors the current view, so any view — or a
   // specific card — is a shareable link and a reload restores it. replaceState (not push) so it doesn't
@@ -216,7 +230,7 @@
       onGrainChange: (g) => { grain = g; pinned = null; },
     });
     // read-only introspection seam for the integration suite (drives the REAL built app, asserts real state)
-    (window as any).__eido = () => { const d = handle?.debug(); return { grain, k: curCount, layout, color, pin: pinned, facetPin, focus: selected, detail: selected !== null, deckOpen, cite: citeOn, ghosts: ghostsOn, theme, hover: hovered ? hovered.kind : null, zoom: d?.zoom ?? 0, labels: d?.labels ?? 0, regions: d?.regions ?? 0, rot: d?.rot ?? null, rotX: d?.rotX ?? null, target: d?.target ?? null, span3: d?.span3 ?? null }; };
+    (window as any).__eido = () => { const d = handle?.debug(); return { grain, k: curCount, layout, color, pin: pinned, facetPin, focus: selected, detail: selected !== null, deckOpen, cite: citeOn, ghosts: ghostsOn, theme, hover: hovered ? hovered.kind : null, zoom: d?.zoom ?? 0, labels: d?.labels ?? 0, regions: d?.regions ?? 0, rot: d?.rot ?? null, rotX: d?.rotX ?? null, target: d?.target ?? null, span3: d?.span3 ?? null, filters: chips.map((c) => c.label), visible: filterMask ? filterMask.reduce((a, v) => a + v, 0) : (data?.ids.length ?? 0) }; };
     (window as any).__eidoProject = (xy: number[]) => handle?.project(xy);
     (window as any).__eidoPick = (x: number, y: number) => handle?.pickAt(x, y);
   }
@@ -286,7 +300,8 @@
     void dp; // dimProps in deps so a norm/invert change re-pushes the accessors
     if (h && d) h.update({ getColor: colorGet(ad, c, a), getRadius: sizeGet(ad, s), getX: posGet(ad, xk), getY: posGet(ad, yk), getZ: posGet(ad, zk), posSig: ps, layout: l, xKey: xk, yKey: yk, zKey: zk, showLabels: sl, grain: g, citeOn: co, ghostsOn: go, theme: th });
   });
-  $effect(() => { const q = query, h = handle; if (h) h.setQuery(q); }); // search dims non-matching map points
+  // text search = a filter (hard hide), synced from the find box below via onFind — no separate deck path.
+  function onFind(v: string) { query = v; const q = v.trim(); const others = filters.filter((f) => f.kind !== "text"); filters = q ? [...others, { kind: "text", key: "text", label: "“" + q + "”", q }] : others; }
 
   // SCRUBBER (channel grammar): ONE slider that reveals cards cumulatively along ANY scalar/temporal field —
   // date, length, influence, citation impact, or a discovered axis — chosen from D.metaFields, via deck's GPU
@@ -307,12 +322,37 @@
   });
   // scrubLo/scrubHi stay null = "show everything" until dragged (they READ `?? min/max`, WRITE only on input,
   // so they never write a default back on mount — the race that emptied the map on load).
-  $effect(() => {
-    const h = handle, r = scrubRange, vs = scrubVals, lo = scrubLo, hi = scrubHi;
-    if (!h) return;
-    // the ONE scrubber: window the chosen dimension's raw values to [lo,hi] (a query put here = "hide low-similarity")
-    if (r && vs && ((lo != null && lo > r[0]) || (hi != null && hi < r[1]))) h.setScrub((i) => (typeof vs[i] === "number" ? (vs[i] as number) : r[0] - 1), [lo ?? r[0], hi ?? r[1]]);
-    else h.setScrub(null, null);
+  // The scrubber is a RANGE FILTER on the scrubbed dimension: when windowed, it contributes a test to the same
+  // intersection mask as the discrete (facet/region/text) filters — one filter primitive, one deck path.
+  const scrubTest = $derived.by((): ((i: number) => boolean) | null => {
+    const r = scrubRange, vs = scrubVals, lo = scrubLo, hi = scrubHi;
+    if (!r || !vs) return null;
+    if (!((lo != null && lo > r[0]) || (hi != null && hi < r[1]))) return null; // wide open = no filter
+    const L = lo ?? r[0], H = hi ?? r[1];
+    return (i) => { const v = vs[i]; return typeof v === "number" && v >= L && v <= H; };
+  });
+  // Build a per-filter test from the declarative record (categorical membership / region cluster / substring).
+  function filterTest(f: Filter): (i: number) => boolean {
+    if (!data) return () => true;
+    if (f.kind === "text") { const s = f.q.toLowerCase(), T = data.titles, C = data.cores; return (i) => T[i].toLowerCase().includes(s) || C[i].toLowerCase().includes(s); }
+    if (f.kind === "region") { const a = assignment; return (i) => a[i] === f.cluster; }
+    const d = allDims.find((x) => x.key === f.key); if (!d?.cat) return () => true; return (i) => d.cat!(i) === f.value;
+  }
+  // THE intersection mask: 1 = passes EVERY active filter (discrete + scrubber), 0 = hidden. null = nothing active.
+  const filterMask = $derived.by((): Uint8Array | null => {
+    if (!data) return null;
+    const tests = filters.map(filterTest); const st = scrubTest; if (st) tests.push(st);
+    if (!tests.length) return null;
+    const n = data.ids.length, m = new Uint8Array(n);
+    for (let i = 0; i < n; i++) m[i] = tests.every((t) => t(i)) ? 1 : 0;
+    return m;
+  });
+  $effect(() => { const h = handle, m = filterMask; if (h) h.setFilterMask(m); });  // push the mask (pure derived → no write-loop)
+  // Active filters as removable chips (the scrubber window is one too, so clear/remove works uniformly).
+  const chips = $derived.by((): { label: string; remove: () => void }[] => {
+    const out = filters.map((f) => ({ label: f.label, remove: () => removeFilter(f) }));
+    if (scrubTest && scrubField) out.push({ label: scrubField.name + " window", remove: () => { scrubLo = null; scrubHi = null; } });
+    return out;
   });
 
   const hint = $derived(layout === "axes" ? "positioned by where each card projects on the two axes" : layout === "axes3d" ? "three axes on x/y/z · drag to rotate · scroll to zoom" : layout === "orbit" ? "drag to rotate · scroll to zoom" : "proximity = similarity · tap a card");
@@ -426,7 +466,15 @@
         <button disabled={color !== "region"} title={color !== "region" ? "region labels show when coloured by region" : ""} class="flex-1 rounded-md border border-[var(--hair2)] px-2 py-1 font-mono text-[11px] disabled:opacity-40 disabled:cursor-not-allowed {showLabels && color === 'region' ? 'bg-[var(--chip)] text-[var(--ink)]' : 'text-[var(--faint)]'}" onclick={() => (showLabels = !showLabels)}>labels</button>
         <button class="flex-1 rounded-md border border-[var(--hair2)] px-2 py-1 font-mono text-[11px] text-[var(--soft)] hover:bg-[var(--chip)]" onclick={reset}>reset</button>
       </div>
-      <input type="search" bind:value={query} placeholder="find a card…" class="mt-2 w-full rounded-md border border-[var(--hair2)] bg-[var(--field)] px-2 py-1.5 text-xs" />
+      <input type="search" value={query} oninput={(e) => onFind(e.currentTarget.value)} placeholder="find a card…" class="mt-2 w-full rounded-md border border-[var(--hair2)] bg-[var(--field)] px-2 py-1.5 text-xs" />
+      {#if chips.length}
+        <div class="mt-2 flex flex-wrap items-center gap-1">
+          {#each chips as chip}
+            <button onclick={chip.remove} title="remove filter" class="flex items-center gap-1 rounded-full border border-[var(--hair2)] bg-[var(--chip)] px-2 py-0.5 font-mono text-[10px] text-[var(--soft)] hover:text-[var(--ink)]"><span class="max-w-[9rem] truncate">{chip.label}</span> <span class="text-[var(--faint)]">✕</span></button>
+          {/each}
+          {#if chips.length > 1}<button onclick={clearFilters} title="clear all filters" class="rounded-full px-2 py-0.5 font-mono text-[10px] text-[var(--faint)] hover:text-[var(--ink)]">clear all</button>{/if}
+        </div>
+      {/if}
       {#if data?.vectors}
         <div class="mt-2 flex gap-1">
           <input bind:value={semQuery} onkeydown={(e) => e.key === "Enter" && runQuery()} placeholder="+ semantic axis…" disabled={querying} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-2 py-1.5 text-xs" />
