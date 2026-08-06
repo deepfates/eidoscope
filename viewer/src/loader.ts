@@ -36,7 +36,7 @@ export function decodeContainer(buf: Uint8Array): MapContract {
     const s: BufSpec | undefined = meta.buffers.find((b: BufSpec) => b.key === key);
     if (!s) throw new Error(`eidoscope: required buffer '${key}' missing from map payload`);
     const start = buf.byteOffset + base + s.offset, ab = buf.buffer.slice(start, start + s.length * (WIDTH[s.type] ?? 4));
-    return s.type === "f32" ? new Float32Array(ab) : new Int32Array(ab); // f16 (vectors) is not read here yet — custom-axes will read the raw buffer directly
+    return s.type === "f32" ? new Float32Array(ab) : new Int32Array(ab); // f16 vectors are decoded separately below (semantic-query substrate)
   };
   const n: number = meta.n;
   const unflat = (a: ArrayLike<number>, w: number) => Array.from({ length: n }, (_, i) => Array.from({ length: w }, (_, j) => a[i * w + j]));

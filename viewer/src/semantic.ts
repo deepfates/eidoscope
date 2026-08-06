@@ -24,7 +24,6 @@ async function extractor(id: string): Promise<any> {
   return extractorP;
 }
 
-export function embedderReady(): boolean { return extractorP != null; }
 
 // Embed one query → unit-normalized Float32Array (384 dims for MiniLM).
 export async function embedQuery(text: string, embedderId = "Xenova/all-MiniLM-L6-v2"): Promise<Float32Array> {

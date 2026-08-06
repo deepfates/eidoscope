@@ -142,16 +142,6 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   // a point dims if excluded by the active focus/highlight isolate OR by the search query
   const isDim = (index: number) => { const ds = dimSet(); if (ds && !ds.has(index)) return true; if (queryMatch && !queryMatch.has(index)) return true; return false; };
 
-  // PROBE (eid-6vgy): first-person fly-through instead of orbit. FirstPersonView is normally geospatial;
-  // this tests whether it renders our CARTESIAN xyz cloud with a bare `position` viewState (no lng/lat).
-  // deck's FirstPersonController moves a hardcoded 20 world units per step (MOVEMENT_SPEED, from source) —
-  // built for geospatial scenes. Our umap cloud is only ~span3 units across, so the default overshoots ~5×.
-  // Calibrate the NATIVE controls to the cloud instead of scaling data or hand-rolling movement: arrow-key
-  // moveSpeed ≈ span3/12 (linear, predictable), and a gentle scrollZoom.speed so a wheel tick nudges, not leaps.
-  // The controller is set at the DECK level (per-view controller props are ignored when the Deck has one),
-  // so it must be layout-aware and updated on every switch. In fly mode, calibrate the NATIVE controls to
-  // the small cloud: arrow-key moveSpeed ≈ span3/12, gentle scrollZoom, no inertia (momentum flung the tiny
-  // cloud off-screen). 2D keeps pan/pinch-zoom.
   // 3D uses deck.gl's OWN default OrbitController — drag rotates, scroll zooms — the battle-tested interaction
   // for a point cloud. No custom wheel-dolly, no bounds clamp, no dragMode override (those were blind patches
   // that fought each other). Just sensible defaults; we can add deliberate motion later, seeing it work.
