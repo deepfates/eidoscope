@@ -311,14 +311,10 @@
     if (src.startsWith("col:")) return ((D as any)[src.slice(4)] as (number | undefined)[]) ?? [];
     return [];
   };
-  const scrubFields = $derived.by(() => {
-    const mf = (data?.metaFields ?? []).filter((m) => m.type === "scalar" || m.type === "temporal");
-    if (mf.length) return mf;
-    return (data?.dates ?? []).some((d) => typeof d === "number") ? [{ key: "date", label: "date", type: "temporal", source: "col:dates" } as any] : [];
-  });
-  $effect(() => { if (!scrubKey && scrubFields.length) scrubKey = (scrubFields.find((f) => f.type === "temporal") ?? scrubFields[0]).key; });
-  const scrubField = $derived(scrubFields.find((f) => f.key === scrubKey));
-  const scrubVals = $derived.by(() => (data && scrubField ? metaVals(data, scrubField.source) : null));
+  const scrubFields = $derived(allDims.filter((d) => d.kind === "scalar" || d.kind === "temporal"));  // registry
+  $effect(() => { if (!scrubKey && scrubFields.length) scrubKey = (scrubFields.find((d) => d.kind === "temporal") ?? scrubFields[0]).key; });
+  const scrubField = $derived(scrubFields.find((d) => d.key === scrubKey));
+  const scrubVals = $derived(scrubField?.raw ?? null);  // window on the dimension's raw values (dates/counts/scores)
   const scrubRange = $derived.by((): [number, number] | null => {
     if (!scrubVals) return null;
     let lo = Infinity, hi = -Infinity;
@@ -420,12 +416,12 @@
       {#if scrubFields.length && scrubRange && scrubField}
         <div class="mt-2">
           <div class="mb-1 flex items-center gap-2 text-xs">
-            <select bind:value={scrubKey} onchange={() => { scrubLo = null; scrubHi = null; }} title="which scalar/temporal field the scrubber windows" class="w-[72px] flex-none rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1 py-1 font-mono text-[10px] text-[var(--faint)]">{#each scrubFields as f}<option value={f.key}>{f.label}</option>{/each}</select>
-            <span class="min-w-0 flex-1 truncate text-right font-mono text-[9px] text-[var(--faint)]">{scrubField.type === "temporal" ? fmtDate(scrubLo ?? scrubRange[0]) + " – " + fmtDate(scrubHi ?? scrubRange[1]) : Math.round(scrubLo ?? scrubRange[0]) + " – " + Math.round(scrubHi ?? scrubRange[1])}</span>
+            <select bind:value={scrubKey} onchange={() => { scrubLo = null; scrubHi = null; }} title="which scalar/temporal dimension the scrubber windows" class="w-[72px] flex-none rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1 py-1 font-mono text-[10px] text-[var(--faint)]">{#each scrubFields as f}<option value={f.key}>{f.name}</option>{/each}</select>
+            <span class="min-w-0 flex-1 truncate text-right font-mono text-[9px] text-[var(--faint)]">{scrubField.kind === "temporal" ? fmtDate(scrubLo ?? scrubRange[0]) + " – " + fmtDate(scrubHi ?? scrubRange[1]) : Math.round(scrubLo ?? scrubRange[0]) + " – " + Math.round(scrubHi ?? scrubRange[1])}</span>
           </div>
           <div class="relative flex h-4 w-full items-center">
-            <input type="range" min={scrubRange[0]} max={scrubRange[1]} step={(scrubRange[1] - scrubRange[0]) / 240} value={scrubLo ?? scrubRange[0]} oninput={(e) => (scrubLo = Math.min(+e.currentTarget.value, scrubHi ?? scrubRange[1]))} class="dual absolute inset-0 w-full appearance-none bg-transparent accent-[var(--accent)]" aria-label="window lower bound ({scrubField.label})" />
-            <input type="range" min={scrubRange[0]} max={scrubRange[1]} step={(scrubRange[1] - scrubRange[0]) / 240} value={scrubHi ?? scrubRange[1]} oninput={(e) => (scrubHi = Math.max(+e.currentTarget.value, scrubLo ?? scrubRange[0]))} class="dual absolute inset-0 w-full appearance-none bg-transparent accent-[var(--accent)]" aria-label="window upper bound ({scrubField.label})" />
+            <input type="range" min={scrubRange[0]} max={scrubRange[1]} step={(scrubRange[1] - scrubRange[0]) / 240} value={scrubLo ?? scrubRange[0]} oninput={(e) => (scrubLo = Math.min(+e.currentTarget.value, scrubHi ?? scrubRange[1]))} class="dual absolute inset-0 w-full appearance-none bg-transparent accent-[var(--accent)]" aria-label="window lower bound ({scrubField.name})" />
+            <input type="range" min={scrubRange[0]} max={scrubRange[1]} step={(scrubRange[1] - scrubRange[0]) / 240} value={scrubHi ?? scrubRange[1]} oninput={(e) => (scrubHi = Math.max(+e.currentTarget.value, scrubLo ?? scrubRange[0]))} class="dual absolute inset-0 w-full appearance-none bg-transparent accent-[var(--accent)]" aria-label="window upper bound ({scrubField.name})" />
           </div>
         </div>
       {/if}
