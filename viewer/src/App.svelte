@@ -479,9 +479,9 @@
   {#if hovered && data && selected === null}
     <div class="pointer-events-none absolute z-10 max-w-xs rounded-lg border border-[var(--hair)] bg-[var(--panel)] p-2.5 text-xs shadow-xl backdrop-blur" style="left:{Math.min(hovered.x + 14, window.innerWidth - 280)}px; top:{Math.min(hovered.y + 14, window.innerHeight - 120)}px">
       {#if hovered.kind === "point"}
-        <div class="mb-1 font-bold">{data.titles[hovered.i]}</div>
-        <div class="mb-1 line-clamp-2 text-[var(--dim)]">{data.cores[hovered.i].slice(0, 140)}</div>
-        <div class="font-mono text-[10px] text-[var(--faint)]">hub {data.hub[hovered.i]} · {topAxes(hovered.i).map((t) => t.n + " " + t.s).join(" · ")}</div>
+        <div class="mb-1 flex items-center gap-1.5 font-mono text-[10px] text-[var(--faint)]"><span class="h-2 w-2 flex-none rounded-sm" style="background:{rgb(col(assignment[hovered.i]))}"></span><span class="truncate">{regionOf(hovered.i)}</span></div>
+        <div class="mb-1 font-bold leading-snug">{data.titles[hovered.i]}</div>
+        <div class="line-clamp-2 text-[var(--dim)]">{data.cores[hovered.i].slice(0, 140)}</div>
       {:else}
         <div class="mb-1 font-bold">{hovered.g.title}</div>
         <div class="font-mono text-[10px] text-[var(--faint)]">frontier paper · cited {hovered.g.n}× in this corpus{hovered.g.arxiv ? " · arXiv:" + hovered.g.arxiv : ""}</div>
