@@ -265,25 +265,43 @@
   });
   $effect(() => { const q = query, h = handle; if (h) h.setQuery(q); }); // search dims non-matching map points
 
-  // TIME SCRUBBER (first channel-grammar scrubber): reveal cards cumulatively by date via deck's GPU
-  // DataFilterExtension (filterSoftRange fades the leading edge). Only shown when the corpus carries dates.
-  let scrubT = $state<number | null>(null);
-  const dateRange = $derived.by((): [number, number] | null => {
-    const ds = (data?.dates ?? []).filter((d): d is number => typeof d === "number");
-    return ds.length >= 2 ? [Math.min(...ds), Math.max(...ds)] : null;
-  });
+  // SCRUBBER (channel grammar): ONE slider that reveals cards cumulatively along ANY scalar/temporal field —
+  // date, length, influence, citation impact, or a discovered axis — chosen from D.metaFields, via deck's GPU
+  // DataFilterExtension. Falls back to a date scrubber for pre-metaFields (v1) files.
+  let scrubT = $state<number | null>(null);   // threshold; null = show everything (never writes min back on mount)
+  let scrubKey = $state("");
   const fmtDate = (ms: number) => new Date(ms).toISOString().slice(0, 7);
-  // scrubT stays null = "show everything" until the user actually drags. The slider READS `scrubT ?? max` and
-  // only WRITES on real input, so it can never write its default (min) back on mount — that race emptied the
-  // map on load. No init effect needed: null → setScrub(null) below → full corpus.
+  // resolve a scalar/temporal metaField's source to its per-card numeric values
+  const metaVals = (D: MapContract, src: string): (number | undefined)[] => {
+    if (src === "derived:length") return (D.cores ?? []).map((c) => (c || "").length);
+    if (src.startsWith("axis:")) return D.scores[src.slice(5)] ?? [];
+    if (src.startsWith("col:")) return ((D as any)[src.slice(4)] as (number | undefined)[]) ?? [];
+    return [];
+  };
+  const scrubFields = $derived.by(() => {
+    const mf = (data?.metaFields ?? []).filter((m) => m.type === "scalar" || m.type === "temporal");
+    if (mf.length) return mf;
+    return (data?.dates ?? []).some((d) => typeof d === "number") ? [{ key: "date", label: "date", type: "temporal", source: "col:dates" } as any] : [];
+  });
+  $effect(() => { if (!scrubKey && scrubFields.length) scrubKey = (scrubFields.find((f) => f.type === "temporal") ?? scrubFields[0]).key; });
+  const scrubField = $derived(scrubFields.find((f) => f.key === scrubKey));
+  const scrubVals = $derived.by(() => (data && scrubField ? metaVals(data, scrubField.source) : null));
+  const scrubRange = $derived.by((): [number, number] | null => {
+    if (!scrubVals) return null;
+    let lo = Infinity, hi = -Infinity;
+    for (const v of scrubVals) if (typeof v === "number") { if (v < lo) lo = v; if (v > hi) hi = v; }
+    return hi > lo ? [lo, hi] : null;
+  });
+  // scrubT stays null = "show everything" until dragged. The slider READS `scrubT ?? max` and only WRITES on
+  // real input, so it can't write its default back on mount (the race that emptied the map on load).
   $effect(() => {
-    const h = handle, dr = dateRange, t = scrubT, ds = data?.dates, sc = data?.scores?.[QKEY];
+    const h = handle, r = scrubRange, vs = scrubVals, t = scrubT, sc = data?.scores?.[QKEY];
     if (!h) return;
-    // one scrub channel; when a semantic query is active its similarity threshold takes it (dissolve the
-    // unrelated, keep the neighbourhood), else fall back to the time scrubber, else show everything.
+    // one scrub channel: an active semantic query's similarity threshold takes precedence (dissolve the
+    // unrelated), else the chosen scalar/temporal field reveals cumulatively, else show everything.
     if (queryActive && sc && simMin > 0) h.setScrub((i) => sc[i], [simMin, 100]);
-    else if (dr && ds && t != null && t < dr[1]) h.setScrub((i) => (typeof ds[i] === "number" ? (ds[i] as number) : dr[0] - 1), [dr[0], t]);
-    else h.setScrub(null, null);   // slid to the end (or no dates) → show everything
+    else if (r && vs && t != null && t < r[1]) h.setScrub((i) => (typeof vs[i] === "number" ? (vs[i] as number) : r[0] - 1), [r[0], t]);
+    else h.setScrub(null, null);
   });
 
   const curFacet = $derived(fac.find((f) => "meta:" + f.key === color));
@@ -366,11 +384,11 @@
           <span class="w-6 flex-none text-right font-mono text-[10px] text-[var(--faint)]">{curCount}</span>
         </label>
       {/if}
-      {#if dateRange}
+      {#if scrubFields.length && scrubRange && scrubField}
         <label class="mt-2 flex items-center gap-2 text-xs">
-          <span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">time</span>
-          <input type="range" min={dateRange[0]} max={dateRange[1]} step={(dateRange[1] - dateRange[0]) / 240} value={scrubT ?? dateRange[1]} oninput={(e) => (scrubT = +e.currentTarget.value)} class="min-w-0 flex-1 accent-[var(--accent)]" aria-label="reveal cards up to this date" />
-          <span class="w-[52px] flex-none text-right font-mono text-[9px] text-[var(--faint)]">{fmtDate(scrubT ?? dateRange[1])}</span>
+          <select bind:value={scrubKey} onchange={() => (scrubT = null)} title="which scalar/temporal field the scrubber reveals along" class="w-[76px] flex-none rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1 py-1 font-mono text-[10px] text-[var(--faint)]">{#each scrubFields as f}<option value={f.key}>{f.label}</option>{/each}</select>
+          <input type="range" min={scrubRange[0]} max={scrubRange[1]} step={(scrubRange[1] - scrubRange[0]) / 240} value={scrubT ?? scrubRange[1]} oninput={(e) => (scrubT = +e.currentTarget.value)} class="min-w-0 flex-1 accent-[var(--accent)]" aria-label="reveal cards up to this {scrubField.label} value" />
+          <span class="w-[52px] flex-none text-right font-mono text-[9px] text-[var(--faint)]">{scrubField.type === "temporal" ? fmtDate(scrubT ?? scrubRange[1]) : Math.round(scrubT ?? scrubRange[1])}</span>
         </label>
       {/if}
       <div class="mt-2 flex gap-2">
