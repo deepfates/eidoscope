@@ -18,9 +18,7 @@ export type MapHandle = {
   update: (o: Partial<Opts>) => void;
   setFocus: (i: number | null) => void;
   setHighlight: (c: number | null) => void;
-  setHighlightSet: (idx: number[] | null, color: RGB | null) => void;
   setFilterMask: (mask: ArrayLike<number> | null) => void;  // unified filter: 1 = passes all active filters, 0 = hidden
-  injectScores: (key: string, arr: number[] | null) => void;  // add/remove a dynamic scalar dimension (e.g. a semantic-query axis) into the geometry's own scores
   fitToIndices: (idx: number[]) => void;
   resetView: () => void;
   destroy: () => void;
@@ -57,8 +55,6 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   const dataFilter = new DataFilterExtension({ filterSize: 1 });
   let focus: number | null = null, fSet: Set<number> | null = null;
   let highlight: number | null = null;
-  let highlightSet: Set<number> | null = null;   // isolate an arbitrary set (a facet value, e.g. a folder), not just a cluster
-  let highlightSetColor: RGB = [255, 255, 255];
   let citeOn = init.citeOn ?? false, ghostsOn = init.ghostsOn ?? false;
   let clickTimer: ReturnType<typeof setTimeout> | null = null;  // single-click card-open, cancelled by a double-click (drill)
   let suppressClickUntil = 0;  // wall-clock deadline set by dblclick so a trailing deck onClick can't open a card (timestamp, not a timer — Date.now() isn't throttled like setTimeout in a hidden tab)
@@ -142,7 +138,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     for (const d of placed as any[]) { const sx = W / 2 + (d.p[0] - tx) * scale, vw = (d.label.length * charPx) / 2 + 4; d.dx = sx - vw < 6 ? 6 - (sx - vw) : sx + vw > W - 6 ? (W - 6) - (sx + vw) : 0; }
     return placed;
   };
-  const dimSet = () => (focus != null ? fSet : highlightSet ? highlightSet : highlight != null ? new Set(members[highlight]) : null);
+  const dimSet = () => (focus != null ? fSet : highlight != null ? new Set(members[highlight]) : null);
   // a point dims (soft emphasis) if excluded by the active focus/highlight preview. (Filtering is a HARD hide
   // via the DataFilterExtension mask, a separate concern — text search is now a filter, not a dim.)
   const isDim = (index: number) => { const ds = dimSet(); return ds ? !ds.has(index) : false; };
@@ -182,16 +178,16 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   });
   const hullPts = (): number[][] | null => {
     if (is3d(layout)) return null;
-    const idx = highlightSet ? [...highlightSet] : highlight != null ? members[highlight] : null;
+    const idx = highlight != null ? members[highlight] : null;
     return idx && idx.length >= 3 ? hull2d(idx.map((i) => pos(i))) : null;
   };
-  const hullColor = (): RGB => (highlightSet ? highlightSetColor : col(highlight ?? 0));
+  const hullColor = (): RGB => col(highlight ?? 0);
   const hullLayer = () => { const h = hullPts(); return new PolygonLayer({
     id: "hull",
     data: h ? [h] : [],
     getPolygon: (d: any) => d, stroked: true, filled: true,
     getFillColor: [...hullColor(), 22] as any, getLineColor: [...hullColor(), 150] as any, getLineWidth: 1.5, lineWidthUnits: "pixels",
-    updateTriggers: { data: [highlight, highlightSet, posVer], getFillColor: [highlight, highlightSet], getLineColor: [highlight, highlightSet] },
+    updateTriggers: { data: [highlight, posVer], getFillColor: [highlight], getLineColor: [highlight] },
   }); };
   const labelLayer = () => new TextLayer({
     id: "labels",
@@ -237,7 +233,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     updateTriggers: { getLineColor: themeVer },
   });
   const layers = () => [
-    ...(highlight != null || highlightSet ? [hullLayer()] : []),
+    ...(highlight != null ? [hullLayer()] : []),
     ...(citeOn && D.cite ? [citeLayer()] : []),
     ...(focus != null ? [spokesLayer()] : []),
     pointsLayer(),
@@ -339,17 +335,13 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
       paint();
     },
     setFocus: (i) => { focus = i; fSet = i == null ? null : new Set<number>([i, ...(D.nbr[i] || [])]); colorVer++; paint(); },
-    setHighlight: (c) => { highlight = c; highlightSet = null; colorVer++; paint(); },
-    setHighlightSet: (idx, color) => { highlightSet = idx && idx.length ? new Set(idx) : null; if (color) highlightSetColor = color; highlight = null; colorVer++; paint(); },
+    setHighlight: (c) => { highlight = c; colorVer++; paint(); },
     fitToIndices: (idx) => fit(idx),
     debug: () => ({ zoom: (deck.getViewports?.()?.[0] as any)?.zoom ?? viewState?.zoom ?? 0, labels: decluttered().length, regions: members.filter((m) => m.length).length, grain, rot: viewState?.rotationOrbit ?? null, rotX: viewState?.rotationX ?? null, target: viewState?.target ?? null, span3 }),
     project: (worldXY) => { const vp = (deck as any).getViewports?.()[0]; return vp ? vp.project([worldXY[0], worldXY[1], 0]).slice(0, 2) : [0, 0]; },
     pickAt: (x, y) => { const o = (deck as any).pickObject?.({ x, y, radius: 8 }); return o ? { layer: o.layer?.id ?? null, url: o.object?.url ?? null, index: o.index ?? -1 } : null; },
     resetView: () => { viewState = home(layout); deck.setProps({ viewState }); },
     setFilterMask: (mask) => { filterMask = mask; filterVer++; paint(); },
-    // A semantic-query axis is injected AFTER createMap, so deckmap's own D.scores must be updated (pos() reads
-    // it directly). null removes it. Bump pos+color so the position/gradient recompute.
-    injectScores: (key, arr) => { if (arr) (D as any).scores[key] = arr; else delete (D as any).scores[key]; posVer++; colorVer++; paint(); },
     destroy: () => deck.finalize(),
   };
 }
