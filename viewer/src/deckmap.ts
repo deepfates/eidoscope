@@ -42,7 +42,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   const n = D.ids.length;
   const reduce = typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;  // a11y: no motion
   let { getColor, getRadius, layout, xKey, yKey, showLabels, grain } = init;
-  let colorVer = 0, sizeVer = 0, posVer = 0, flyVer = 0, scrubVer = 0;
+  let colorVer = 0, sizeVer = 0, posVer = 0, scrubVer = 0;
   let scrubGet: ((i: number) => number) | null = null;   // the scrubbed dimension's per-node value (channel-grammar scrubber)
   let scrubRange: [number, number] | null = null;         // active [lo,hi]; null = pass everything
   const dataFilter = new DataFilterExtension({ filterSize: 1 });
@@ -147,31 +147,24 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   // so it must be layout-aware and updated on every switch. In fly mode, calibrate the NATIVE controls to
   // the small cloud: arrow-key moveSpeed ≈ span3/12, gentle scrollZoom, no inertia (momentum flung the tiny
   // cloud off-screen). 2D keeps pan/pinch-zoom.
-  // 3D fly params, LIVE-TUNABLE via window.__fly (then call window.__eidoRetune()) so the options can be
-  // explored in a real browser without rebuilding. move is a multiplier (base ≈ span3-relative). unit
-  // 'pixels' = constant-size dots (like stars); 'common' = world-size (perspective near-bigger depth cue).
-  // defaults chosen by real-browser exploration (see eid-6vgy): pixels not 'common' (common is sub-pixel under
-  // FirstPersonView), dots sized up so they're visible from outside and big when you fly in, move≈10 (cross the
-  // cloud in ~3 scroll ticks, not sluggish), billboarded region labels ON (isomorphic landmarks).
-  // World-size dots ('common') under OrbitView perspective: near dots grow, far dots shrink — the depth cue
-  // that makes the dive read as *moving through* a constellation (verified in-browser, spike/one-camera-dolly).
-  const flyDefaults = { unit: "common" as "pixels" | "common", dotMul: 3, commonScale: 0.02, dotMin: 2, fovy: 55, move: 6, labels: true };
-  const flyCfg = (): typeof flyDefaults => ({ ...flyDefaults, ...(typeof window !== "undefined" ? (window as any).__fly : null) });
   // OrbitController: drag rotates around target, pinch zooms. We DISABLE scrollZoom and handle the wheel
   // ourselves (dolly target along the view ray — the dive) so scroll flies IN instead of scaling the scene.
   const controllerFor = (l: Layout) => l === "orbit"
     ? { doubleClickZoom: false, inertia: false, scrollZoom: false }
     : { doubleClickZoom: false, inertia: true };
-  const view = () => (layout === "orbit" ? new OrbitView({ id: "orbit", fovy: flyCfg().fovy, orbitAxis: "Z" }) : new OrthographicView({ id: "ortho", flipY: false }));
+  const FOVY = 50;  // OrbitView perspective; positions get the perspective/parallax, the dot itself does not
+  const view = () => (layout === "orbit" ? new OrbitView({ id: "orbit", fovy: FOVY, orbitAxis: "Z" }) : new OrthographicView({ id: "ortho", flipY: false }));
 
-  const pointsLayer = () => { const fc = flyCfg(); const orbit = layout === "orbit"; return new ScatterplotLayer({
+  // A dot is ONE thing in every view: a pixel-radius disc sized by getRadius(), with the same min-pixel floor.
+  // 2D and 3D differ only in the PROJECTION of its position (orthographic vs perspective) — never the dot. Depth
+  // in 3D reads from motion parallax + occlusion as you orbit/dive, not from resizing dots (that was an ad-hoc
+  // world-unit regime that made 3D dots ~4× the 2D ones — an isomorphism break). billboard keeps discs facing you.
+  const pointsLayer = () => new ScatterplotLayer({
     id: "points", data: { length: n },
     getPosition: (_: any, { index }: any) => pos(index) as any,
     getFillColor: (_: any, { index }: any) => { const c = getColor(index); return (isDim(index) ? [c[0], c[1], c[2], 28] : [c[0], c[1], c[2], 255]) as any; },
-    // 2D: pixel radius (constant screen size). 3D: tunable — 'pixels' = constant (stars) or 'common' = world
-    // size (perspective near-bigger). Bigger dots + a min-pixel floor so far points stay visible.
-    getRadius: (_: any, { index }: any) => (orbit ? getRadius(index) * (fc.unit === "common" ? fc.commonScale : fc.dotMul) : getRadius(index)),
-    radiusUnits: orbit ? fc.unit : "pixels", radiusMinPixels: orbit ? fc.dotMin : 1.2, billboard: true,
+    getRadius: (_: any, { index }: any) => getRadius(index),
+    radiusUnits: "pixels", radiusMinPixels: 1.2, billboard: true,
     // channel-grammar scrubber: GPU range-filter on a scalar/temporal dimension (filtered-out points also go
     // non-pickable). filterSoftRange fades points near the edges instead of popping. Wide-open when no scrub.
     extensions: [dataFilter],
@@ -180,8 +173,8 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     filterSoftRange: scrubRange ? [scrubRange[0] + (scrubRange[1] - scrubRange[0]) * 0.04, scrubRange[1] - (scrubRange[1] - scrubRange[0]) * 0.04] : undefined,
     pickable: true, autoHighlight: n < 4000, highlightColor: [255, 255, 255, 180],
     transitions: reduce ? undefined : { getPosition: { duration: 700, easing: easeCubicInOut } },
-    updateTriggers: { getFillColor: colorVer, getRadius: [sizeVer, posVer, layout, flyVer], getPosition: posVer, getFilterValue: scrubVer },
-  }); };
+    updateTriggers: { getFillColor: colorVer, getRadius: [sizeVer, posVer], getPosition: posVer, getFilterValue: scrubVer },
+  });
   const spokesLayer = () => new LineLayer({
     id: "spokes", data: focus == null ? [] : (D.nbr[focus] || []).map((j) => ({ j })),
     getSourcePosition: () => pos(focus as number) as any, getTargetPosition: (d: any) => pos(d.j) as any,
@@ -249,7 +242,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     ...(focus != null ? [spokesLayer()] : []),
     pointsLayer(),
     ...(ghostsOn && D.ghosts ? [ghostLayer()] : []),
-    ...(showLabels && (layout !== "orbit" || flyCfg().labels) ? [layout === "orbit" ? label3dLayer() : labelLayer()] : []),
+    ...(showLabels ? [layout === "orbit" ? label3dLayer() : labelLayer()] : []),
   ];
 
   let viewState: any = home(layout);
@@ -284,8 +277,6 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     getCursor: ({ isDragging, isHovering }: any) => (isDragging ? "grabbing" : isHovering ? "pointer" : "grab"),
   });
 
-  // exploration hook: set window.__fly = {…} in the console, then __eidoRetune() re-applies view+controller+layers
-  if (typeof window !== "undefined") (window as any).__eidoRetune = () => { flyVer++; deck.setProps({ views: [view()], controller: controllerFor(layout) }); paint(); };
 
   const fit = (idx: number[]) => {
     if (!idx.length) return;
@@ -336,7 +327,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     // Magnitude-scaled: a normal wheel notch (~100 deltaY) crosses a meaningful slice of the cloud, so ~4–5
     // notches take you from examine to inside. deltaY is clamped so a flung trackpad can't teleport.
     const dy = Math.max(-120, Math.min(120, w.deltaY || 0));
-    const step = span3 * 0.0026 * (flyCfg().move / 6) * dy;  // wheel-down (deltaY>0) = dive forward
+    const step = span3 * 0.0026 * dy;  // wheel-down (deltaY>0) = dive forward; ~5 notches cross into the cloud
     const m = span3 * 0.5;
     const clamp = (v: number, lo: number, hi: number) => Math.max(lo - m, Math.min(hi + m, v));
     viewState = { ...viewState, target: [

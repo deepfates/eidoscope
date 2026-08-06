@@ -225,7 +225,9 @@
     return ds.length >= 2 ? [Math.min(...ds), Math.max(...ds)] : null;
   });
   const fmtDate = (ms: number) => new Date(ms).toISOString().slice(0, 7);
-  $effect(() => { if (dateRange && scrubT === null) scrubT = dateRange[1]; });   // init full (no filtering)
+  // scrubT stays null = "show everything" until the user actually drags. The slider READS `scrubT ?? max` and
+  // only WRITES on real input, so it can never write its default (min) back on mount — that race emptied the
+  // map on load. No init effect needed: null → setScrub(null) below → full corpus.
   $effect(() => {
     const h = handle, dr = dateRange, t = scrubT, ds = data?.dates;
     if (!h) return;
@@ -316,7 +318,7 @@
       {#if dateRange}
         <label class="mt-2 flex items-center gap-2 text-xs">
           <span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">time</span>
-          <input type="range" min={dateRange[0]} max={dateRange[1]} step={(dateRange[1] - dateRange[0]) / 240} bind:value={scrubT} class="min-w-0 flex-1 accent-[var(--accent)]" aria-label="reveal cards up to this date" />
+          <input type="range" min={dateRange[0]} max={dateRange[1]} step={(dateRange[1] - dateRange[0]) / 240} value={scrubT ?? dateRange[1]} oninput={(e) => (scrubT = +e.currentTarget.value)} class="min-w-0 flex-1 accent-[var(--accent)]" aria-label="reveal cards up to this date" />
           <span class="w-[52px] flex-none text-right font-mono text-[9px] text-[var(--faint)]">{fmtDate(scrubT ?? dateRange[1])}</span>
         </label>
       {/if}
