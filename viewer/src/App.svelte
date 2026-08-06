@@ -434,9 +434,13 @@
         {#if d && (d.kind === "scalar" || d.kind === "temporal")}
           {@const p = propsOf(d)}
           <span class="flex flex-none gap-0.5">
-            <button onclick={() => setProp(d, { norm: p.norm === "rank" ? "honest" : "rank" })} disabled={d.fixedNorm}
-              title={d.fixedNorm ? "discovered axes are stored rank-normalized; honest needs raw PCA projections (not emitted yet)" : p.norm === "rank" ? "rank-normalized: even spread — click for honest (true magnitudes; the skew shows)" : "honest: true magnitudes — click for rank (even spread)"}
-              class="rounded border border-[var(--hair2)] px-1 py-0.5 font-mono text-[9px] disabled:opacity-40 {p.norm === 'rank' ? 'text-[var(--faint)]' : 'bg-[var(--chip)] text-[var(--ink)]'}">{p.norm === "rank" ? "rank" : "honest"}</button>
+            <!-- discovered axes are rank-normalized positions by design (even, readable spread); norm isn't a
+                 user choice there, so only metrics/queries get the honest⇄rank toggle. invert applies to all. -->
+            {#if !d.fixedNorm}
+              <button onclick={() => setProp(d, { norm: p.norm === "rank" ? "honest" : "rank" })}
+                title={p.norm === "rank" ? "rank-normalized: even spread — click for honest (true magnitudes; the skew shows)" : "honest: true magnitudes — click for rank (even spread)"}
+                class="rounded border border-[var(--hair2)] px-1 py-0.5 font-mono text-[9px] {p.norm === 'rank' ? 'text-[var(--faint)]' : 'bg-[var(--chip)] text-[var(--ink)]'}">{p.norm === "rank" ? "rank" : "honest"}</button>
+            {/if}
             <button onclick={() => setProp(d, { invert: !p.invert })}
               title={p.invert ? "inverted (high↔low) — click to restore" : "invert this dimension (high↔low)"}
               class="rounded border border-[var(--hair2)] px-1 py-0.5 font-mono text-[9px] {p.invert ? 'bg-[var(--chip)] text-[var(--ink)]' : 'text-[var(--faint)]'}">⇅</button>
