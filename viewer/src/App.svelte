@@ -2,7 +2,8 @@
   import { onMount } from "svelte";
   import { loadMap, mapUrl, decodeEido } from "./loader";
   import { createMap, type MapHandle, type Layout } from "./deckmap";
-  import { facets, colorFor, sizeFor, col, axisColor, type Facet } from "./encode";
+  import { facets, colorFor, col, axisColor, type Facet } from "./encode";
+  import { buildDimensions, sizeAccessor, defaultProps, type Dimension, type DimProps } from "./dimensions";
   import { embedQuery, cosineAll, scale100, rankNorm100 } from "./semantic";
   import type { MapContract } from "../../src/schema";
 
@@ -43,6 +44,12 @@
   let theme = $state<"dark" | "light">("dark");
   let panelOpen = $state(true);   // control panel + legend collapse on small screens so the map is the hero
   let legendOpen = $state(true);
+  // THE DIMENSION REGISTRY (grammar unification): one list of dimensions all channels draw from. Migrating
+  // channels onto it one at a time — `size` first. dimProps holds per-dimension user overrides (norm/invert).
+  let dimProps = $state<Record<string, DimProps>>({});
+  const dimList = $derived(data ? buildDimensions(data) : []);
+  const propsOf = (d: Dimension): DimProps => dimProps[d.key] ?? defaultProps(d);
+  const sizeGet = (dims: Dimension[], key: string) => { const d = dims.find((x) => x.key === key); return sizeAccessor(d, d ? propsOf(d) : { norm: "honest", invert: false }); };
   function setTheme(t: "dark" | "light", persist = true) { theme = t; document.documentElement.dataset.theme = t; if (persist) try { localStorage.setItem("eido-theme", t); } catch {} }
   function toggleTheme() { setTheme(theme === "dark" ? "light" : "dark"); }
   const hasCite = $derived(!!data?.cite?.some((e) => e.length));
@@ -180,7 +187,7 @@
     status = "";
     if (opts?.intro) showIntro = true;                    // a freshly-opened file introduces itself
     handle = createMap(canvas, D, {
-      getColor: colorFor(D, color, fac, D.levels?.[grain] ?? D.cluster), getRadius: sizeFor(D, size), layout, xKey, yKey, zKey, showLabels: labelsOn, grain, theme,
+      getColor: colorFor(D, color, fac, D.levels?.[grain] ?? D.cluster), getRadius: sizeGet(buildDimensions(D), size), layout, xKey, yKey, zKey, showLabels: labelsOn, grain, theme,
       onClick: (i) => focusCard(i < 0 ? null : i),
       onHover: (h, x, y) => (hovered = h == null ? null : { ...h, x, y }),
       onGrainChange: (g) => { grain = g; pinned = null; },
@@ -277,7 +284,7 @@
 
   $effect(() => {
     const l = layout, c = color, s = size, xk = xKey, yk = yKey, zk = zKey, sl = labelsOn, g = grain, a = assignment, co = citeOn, go = ghostsOn, th = theme, h = handle, d = data, f = fac;
-    if (h && d) h.update({ getColor: colorFor(d, c, f, a), getRadius: sizeFor(d, s), layout: l, xKey: xk, yKey: yk, zKey: zk, showLabels: sl, grain: g, citeOn: co, ghostsOn: go, theme: th });
+    if (h && d) h.update({ getColor: colorFor(d, c, f, a), getRadius: sizeGet(dimList, s), layout: l, xKey: xk, yKey: yk, zKey: zk, showLabels: sl, grain: g, citeOn: co, ghostsOn: go, theme: th });
   });
   $effect(() => { const q = query, h = handle; if (h) h.setQuery(q); }); // search dims non-matching map points
 
@@ -397,7 +404,7 @@
         </select></label>
       <label class="flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">size</span>
         <select bind:value={size} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">
-          <option value="uniform">uniform</option><option value="hub">influence (hub)</option>{#each data.axes as a}<option value={a.key}>{axl(a)}</option>{/each}
+          <option value="uniform">uniform</option>{#each dimList.filter((d) => d.kind === "scalar") as d}<option value={d.key}>{d.name}</option>{/each}
         </select></label>
       {#if nLevels > 1}
         <label class="mt-2 flex items-center gap-2 text-xs">
