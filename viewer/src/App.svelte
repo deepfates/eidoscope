@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
+  import RangeSlider from "svelte-range-slider-pips";
   import { loadMap, mapUrl, decodeEido } from "./loader";
   import { createMap, type MapHandle, type Layout } from "./deckmap";
   import { col, axisColor } from "./encode";
@@ -131,7 +132,7 @@
     else { filters = [...filters.filter((f) => !(f.kind === "cat" && f.key === key)), { kind: "cat", key, label: v, value: v }]; facetPin = v; handle?.fitToIndices(facetMembers(v)); }
   }
   function removeFilter(f: Filter) { filters = filters.filter((x) => x !== f); if (f.kind === "region") pinned = null; if (f.kind === "cat") facetPin = null; if (f.kind === "text") query = ""; }
-  function clearFilters() { filters = []; pinned = null; facetPin = null; query = ""; scrubLo = null; scrubHi = null; }
+  function clearFilters() { filters = []; pinned = null; facetPin = null; query = ""; resetScrub(); }
   // switching the colour lens drops stale facet filters (a folder value means nothing under a different lens)
   let lastColorForFacet = color;
   $effect(() => { const c = color; if (c !== lastColorForFacet) { lastColorForFacet = c; const cur = untrack(() => colorDim?.key); untrack(() => { const next = filters.filter((f) => f.kind !== "cat" || f.key === cur); if (next.length !== filters.length) { filters = next; facetPin = null; } }); } });
@@ -194,8 +195,10 @@
     const props = p.get("props"); if (props) { const next: Record<string, DimProps> = {}; for (const e of props.split(",")) { const dot = e.lastIndexOf("."); const k = e.slice(0, dot), code = e.slice(dot + 1); if (k && code.length >= 2 && (code[0] === "r" || code[0] === "h")) next[k] = { norm: code[0] === "r" ? "rank" : "honest", invert: code[1] === "1" }; } dimProps = next; }
     // scrubber window
     const sk = p.get("sk"); if (sk) scrubKey = sk;
-    const slo = p.get("slo"); if (slo !== null && !Number.isNaN(+slo)) scrubLo = +slo;
-    const shi = p.get("shi"); if (shi !== null && !Number.isNaN(+shi)) scrubHi = +shi;
+    const slo = p.get("slo"), shi = p.get("shi");
+    if (slo !== null && !Number.isNaN(+slo)) scrubLo = +slo;
+    if (shi !== null && !Number.isNaN(+shi)) scrubHi = +shi;
+    if (slo !== null || shi !== null) scrubNonce++;   // remount the slider so its thumbs show the restored window
     // re-embed query dimensions from their text (best-effort, background; won't block the restore or hang the app)
     for (const t of p.getAll("q")) embedAndAdd(t, false);
     // region + card + facet + find depend on grain-derived state, so apply once the reactive graph has settled
@@ -327,6 +330,11 @@
   let scrubLo = $state<number | null>(null);  // window lower bound; null = field min
   let scrubHi = $state<number | null>(null);  // window upper bound; null = field max (both null = show everything)
   let scrubKey = $state("");
+  // svelte-range-slider-pips mutates its `values` array in place, which Svelte 5's bind-bridge doesn't write
+  // back — so bind:values can't capture drags. Instead the slider is one-way (values from scrubLo/Hi) with an
+  // on:change writer, and this nonce force-REMOUNTS it on any external reset so the thumbs re-read fresh state.
+  let scrubNonce = $state(0);
+  function resetScrub() { scrubLo = null; scrubHi = null; scrubNonce++; }
   const fmtDate = (ms: number) => new Date(ms).toISOString().slice(0, 7);
   const scrubFields = $derived(allDims.filter((d) => d.kind === "scalar" || d.kind === "temporal"));  // registry
   $effect(() => { if (!scrubKey && scrubFields.length) scrubKey = (scrubFields.find((d) => d.kind === "temporal") ?? scrubFields[0]).key; });
@@ -369,7 +377,7 @@
   // Active filters as removable chips (the scrubber window is one too, so clear/remove works uniformly).
   const chips = $derived.by((): { label: string; remove: () => void }[] => {
     const out = filters.map((f) => ({ label: f.label, remove: () => removeFilter(f) }));
-    if (scrubTest && scrubField) out.push({ label: scrubField.name + " window", remove: () => { scrubLo = null; scrubHi = null; } });
+    if (scrubTest && scrubField) out.push({ label: scrubField.name + " window", remove: resetScrub });
     return out;
   });
 
@@ -470,12 +478,14 @@
       {#if scrubFields.length && scrubRange && scrubField}
         <div class="mt-2">
           <div class="mb-1 flex items-center gap-2 text-xs">
-            <select bind:value={scrubKey} onchange={() => { scrubLo = null; scrubHi = null; }} title="which scalar/temporal dimension the scrubber windows" class="w-[72px] flex-none rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1 py-1 font-mono text-[10px] text-[var(--faint)]">{#each scrubFields as f}<option value={f.key}>{f.name}</option>{/each}</select>
+            <select bind:value={scrubKey} onchange={resetScrub} title="which scalar/temporal dimension the scrubber windows" class="w-[72px] flex-none rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1 py-1 font-mono text-[10px] text-[var(--faint)]">{#each scrubFields as f}<option value={f.key}>{f.name}</option>{/each}</select>
             <span class="min-w-0 flex-1 truncate text-right font-mono text-[9px] text-[var(--faint)]">{scrubField.kind === "temporal" ? fmtDate(scrubLo ?? scrubRange[0]) + " – " + fmtDate(scrubHi ?? scrubRange[1]) : Math.round(scrubLo ?? scrubRange[0]) + " – " + Math.round(scrubHi ?? scrubRange[1])}</span>
           </div>
-          <div class="relative flex h-4 w-full items-center">
-            <input type="range" min={scrubRange[0]} max={scrubRange[1]} step={(scrubRange[1] - scrubRange[0]) / 240} value={scrubLo ?? scrubRange[0]} oninput={(e) => (scrubLo = Math.min(+e.currentTarget.value, scrubHi ?? scrubRange[1]))} class="dual absolute inset-0 w-full appearance-none bg-transparent accent-[var(--accent)]" aria-label="window lower bound ({scrubField.name})" />
-            <input type="range" min={scrubRange[0]} max={scrubRange[1]} step={(scrubRange[1] - scrubRange[0]) / 240} value={scrubHi ?? scrubRange[1]} oninput={(e) => (scrubHi = Math.max(+e.currentTarget.value, scrubLo ?? scrubRange[0]))} class="dual absolute inset-0 w-full appearance-none bg-transparent accent-[var(--accent)]" aria-label="window upper bound ({scrubField.name})" />
+          <div class="scrub">
+            {#key scrubNonce}
+              <RangeSlider range id="scrubber" min={scrubRange[0]} max={scrubRange[1]} step={(scrubRange[1] - scrubRange[0]) / 240} values={[scrubLo ?? scrubRange[0], scrubHi ?? scrubRange[1]]}
+                on:change={(e) => { const [lo, hi] = e.detail.values; scrubLo = lo > scrubRange![0] ? lo : null; scrubHi = hi < scrubRange![1] ? hi : null; }} />
+            {/key}
           </div>
         </div>
       {/if}
@@ -638,10 +648,8 @@
 </div>
 
 <style>
-  /* dual-thumb range: the two inputs overlap to share one track; only the thumbs take pointer events so BOTH
-     are draggable (the top input would otherwise swallow clicks meant for the bottom one's thumb). */
-  .dual { pointer-events: none; }
-  .dual::-webkit-slider-thumb { pointer-events: auto; }
-  .dual::-moz-range-thumb { pointer-events: auto; }
-  .dual::-webkit-slider-runnable-track { background: transparent; }
+  /* theme svelte-range-slider-pips (the dual-thumb scrubber) to the app tokens — one battle-tested widget
+     replaces the hand-rolled two-overlapping-inputs + pointer-events hack. :global reaches its scoped nodes. */
+  .scrub :global(.rangeSlider) { margin: 4px 2px; height: 5px; background: var(--chip2); --range-handle-inactive: var(--accent); --range-handle: var(--accent); --range-handle-focus: var(--accent); --range-range: var(--accent); }
+  .scrub :global(.rangeSlider .rangeHandle .rangeNub) { box-shadow: 0 0 0 1px var(--panel); }
 </style>
