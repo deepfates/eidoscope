@@ -87,7 +87,6 @@
   function toggleTheme() { setTheme(theme === "dark" ? "light" : "dark"); }
   const hasCite = $derived(!!data?.cite?.some((e) => e.length));
   const hasGhosts = $derived(!!data?.ghosts?.length);
-  const sizeLabel = $derived(size === "hub" ? "influence" : size === "uniform" ? "uniform" : "axis");
   // history-synced overlays (eid-fktf): opening an overlay pushes a history entry, so Back — and the
   // mobile back gesture — closes the topmost one (the only intuitive way to escape deck/detail on a phone).
   let overlayPushed = false;
@@ -580,7 +579,6 @@
     </div>
 
     {#if selected === null && !deckOpen}
-      <div class="pointer-events-none absolute bottom-3 right-56 hidden font-mono text-[10px] text-[var(--faint)] min-[980px]:block">{data.ids.length} cards · {layout} · {sizeLabel}</div>
     {/if}
   {/if}
 
