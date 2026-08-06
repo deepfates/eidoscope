@@ -46,9 +46,21 @@ export function cosineAll(query: Float32Array, vectors: number[][]): number[] {
 
 // Min–max scale similarities into 0..100 RELATIVE TO THIS SET (the thesis: compared to each other, not a
 // vacuum). Uses the full visual range; if the corpus barely contains the query, the whole band is low/flat.
+// This is the HONEST default: the skew is information (most of a library is unrelated to any given query).
 export function scale100(sims: number[]): number[] {
   let lo = Infinity, hi = -Infinity;
   for (const s of sims) { if (s < lo) lo = s; if (s > hi) hi = s; }
   const r = hi - lo || 1;
   return sims.map((s) => ((s - lo) / r) * 100);
+}
+
+// Rank-normalize into a uniform 0..100 (same transform the discovered axes use). Discards the magnitude of
+// the gaps, keeping only order — an even spread. Opt-in via the toggle to line a query axis up against the
+// discovered ones (or to de-pile a skewed distribution); NOT the default, because it hides the true skew.
+export function rankNorm100(sims: number[]): number[] {
+  const n = sims.length;
+  const order = sims.map((_, i) => i).sort((a, b) => sims[a] - sims[b]);
+  const out = new Array<number>(n);
+  order.forEach((oi, r) => { out[oi] = n > 1 ? (100 * r) / (n - 1) : 50; });
+  return out;
 }

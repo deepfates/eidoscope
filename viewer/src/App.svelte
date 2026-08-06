@@ -3,7 +3,7 @@
   import { loadMap, mapUrl, decodeEido } from "./loader";
   import { createMap, type MapHandle, type Layout } from "./deckmap";
   import { facets, colorFor, sizeFor, col, axisColor, type Facet } from "./encode";
-  import { embedQuery, cosineAll, scale100 } from "./semantic";
+  import { embedQuery, cosineAll, scale100, rankNorm100 } from "./semantic";
   import type { MapContract } from "../../src/schema";
 
   let canvas: HTMLCanvasElement;
@@ -33,6 +33,8 @@
   let queryErr = $state("");
   let queryActive = $state(false);           // is a semantic-query axis (__q) currently injected?
   let simMin = $state(0);                     // similarity-threshold filter (0..99) when a query is active
+  let simRaw = $state<number[] | null>(null); // raw cosines, kept so the rank-norm toggle re-scales w/o re-embedding
+  let simRank = $state(false);                // false = min-max (honest skew, default); true = rank-norm (uniform)
   const QKEY = "__q";
   let showIntro = $state(false);
   let citeOn = $state(false);
@@ -185,6 +187,14 @@
     (window as any).__eidoProject = (xy: number[]) => handle?.project(xy);
     (window as any).__eidoPick = (x: number, y: number) => handle?.pickAt(x, y);
   }
+  // (Re)scale the kept raw cosines into __q's 0..100 scores per the rank-norm toggle, and push them to both the
+  // colorFor closure (data.scores) and deckmap's geometry (injectScores). Called on query and on toggle flip.
+  function applyScale() {
+    const D = data; if (!D || !simRaw) return;
+    const s100 = simRank ? rankNorm100(simRaw) : scale100(simRaw);
+    D.scores[QKEY] = s100; data = D;
+    handle?.injectScores(QKEY, s100);
+  }
   // The semantic-query keystone: embed the query in-browser (same model that made the card vectors), cosine-rank
   // the cards, and inject the result as a synthetic axis (__q). Because color/size/x/y dropdowns iterate
   // data.axes and colorFor/sizeFor/pos() read data.scores, the query is instantly usable on EVERY channel.
@@ -194,11 +204,10 @@
     querying = true; queryErr = "";
     try {
       const qv = await embedQuery(q, (D as any).derivedBy?.embedder?.id);
-      const s100 = scale100(cosineAll(qv, D.vectors));
-      D.scores[QKEY] = s100;
+      simRaw = cosineAll(qv, D.vectors);
       D.axes = [...D.axes.filter((a) => a.key !== QKEY), { key: QKEY, name: "⌕ " + q, low: "unrelated", high: q, pc: 0, weak: false } as any];
       data = D;                       // proxy mutation → dropdowns + colorFor closure pick it up
-      handle?.injectScores(QKEY, s100); // …and deckmap's own scores (pos() reads those) so it works as an AXIS too
+      applyScale();                   // sets D.scores[__q] (min-max or rank-norm) + feeds deckmap's geometry
       queryActive = true;
       color = QKEY;                   // immediate payoff: colour the map by similarity to the query
       deckSort = QKEY;                // …and the deck becomes semantic search results
@@ -211,7 +220,7 @@
     D.axes = D.axes.filter((a) => a.key !== QKEY);
     data = D;
     handle?.injectScores(QKEY, null);
-    queryActive = false; semQuery = ""; simMin = 0;
+    queryActive = false; semQuery = ""; simMin = 0; simRaw = null; simRank = false;
     if (color === QKEY) color = "cluster";
     if (deckSort === QKEY) deckSort = "hub";
     if (xKey === QKEY) xKey = D.axes[0]?.key ?? "";
@@ -383,6 +392,7 @@
             <input type="range" min="0" max="99" value={simMin} oninput={(e) => (simMin = +e.currentTarget.value)} class="min-w-0 flex-1 accent-[var(--accent)]" aria-label="hide cards below this similarity to the query" />
             <span class="w-6 flex-none text-right font-mono">{simMin}</span>
           </label>
+          <button onclick={() => { simRank = !simRank; applyScale(); }} title={simRank ? "rank-normalized: even spread (matches the discovered axes)" : "honest: true similarity, most cards pile at unrelated"} class="mt-1 w-full rounded-md border border-[var(--hair2)] px-2 py-1 font-mono text-[10px] {simRank ? 'bg-[var(--chip)] text-[var(--ink)]' : 'text-[var(--faint)]'}">scale: {simRank ? "rank-norm (even)" : "honest (min-max)"}</button>
         {/if}
       {/if}
       {#if hasCite || hasGhosts}
