@@ -88,11 +88,9 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   for (const [x, y, z] of D.xyz) { if (x < bb3.minX) bb3.minX = x; if (x > bb3.maxX) bb3.maxX = x; if (y < bb3.minY) bb3.minY = y; if (y > bb3.maxY) bb3.maxY = y; if (z < bb3.minZ) bb3.minZ = z; if (z > bb3.maxZ) bb3.maxZ = z; }
   const c3 = [(bb3.minX + bb3.maxX) / 2, (bb3.minY + bb3.maxY) / 2, (bb3.minZ + bb3.maxZ) / 2];
   const span3 = Math.max(bb3.maxX - bb3.minX, bb3.maxY - bb3.minY, bb3.maxZ - bb3.minZ) || 2;
-  // SPIKE (one-camera dive): ONE OrbitView for 3D. `target` is the world point at the viewport centre and
-  // rotation happens AROUND it, so parking target at the cloud centroid = "examine from outside" and dollying
-  // target forward along the view ray = "fly among the concepts" — same view class, same viewState, one mental
-  // map. zoom stays fixed (no balloon-inflation); scroll translates target (see the wheel handler below).
-  const orbitFit = Math.log2((vp * 0.6) / span3);  // 2^zoom common-px per world unit → fit span3 into ~60% of the viewport
+  // 3D home: an OrbitView parked at the cloud centroid, framed to fill ~60% of the viewport, with a gentle tilt
+  // so it reads as 3D. deck's default OrbitController takes it from there (drag-rotate, scroll-zoom).
+  const orbitFit = Math.log2((vp * 0.6) / span3);  // 2^zoom px per world unit → fit span3 into ~60% of the viewport
   const home = (l: Layout): any => l === "orbit"
     ? { target: c3, zoom: orbitFit, rotationX: 22, rotationOrbit: 0, minZoom: orbitFit - 4, maxZoom: orbitFit + 8 }  // examine: anchored at the centroid, slight tilt
     : l === "axes"
@@ -147,15 +145,13 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   // so it must be layout-aware and updated on every switch. In fly mode, calibrate the NATIVE controls to
   // the small cloud: arrow-key moveSpeed ≈ span3/12, gentle scrollZoom, no inertia (momentum flung the tiny
   // cloud off-screen). 2D keeps pan/pinch-zoom.
-  // OrbitController with dragMode:'pan' so a plain drag PANS (grab-and-move), same as the 2D map — one gesture,
-  // one meaning across views. Rotation is demoted to the modifier drag (hold shift), so the disorienting
-  // swing-around-an-invisible-pivot is opt-in, not the default. We DISABLE scrollZoom and handle the wheel
-  // ourselves (dolly target along the view ray — the dive) so scroll flies IN instead of scaling the scene.
+  // 3D uses deck.gl's OWN default OrbitController — drag rotates, scroll zooms — the battle-tested interaction
+  // for a point cloud. No custom wheel-dolly, no bounds clamp, no dragMode override (those were blind patches
+  // that fought each other). Just sensible defaults; we can add deliberate motion later, seeing it work.
   const controllerFor = (l: Layout) => l === "orbit"
-    ? { doubleClickZoom: false, inertia: false, scrollZoom: false, dragMode: "pan" as const }
+    ? true
     : { doubleClickZoom: false, inertia: true };
-  const FOVY = 50;  // OrbitView perspective; positions get the perspective/parallax, the dot itself does not
-  const view = () => (layout === "orbit" ? new OrbitView({ id: "orbit", fovy: FOVY, orbitAxis: "Z" }) : new OrthographicView({ id: "ortho", flipY: false }));
+  const view = () => (layout === "orbit" ? new OrbitView({ id: "orbit" }) : new OrthographicView({ id: "ortho", flipY: false }));
 
   // A dot is ONE thing in every view: a pixel-radius disc sized by getRadius(), with the same min-pixel floor.
   // 2D and 3D differ only in the PROJECTION of its position (orthographic vs perspective) — never the dot. Depth
@@ -308,38 +304,6 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     const info = (deck as any).pickObject({ x: (e as MouseEvent).offsetX, y: (e as MouseEvent).offsetY, radius: 8 });
     if (info && info.layer?.id === "points" && info.index >= 0) drill(info.index);
   });
-  // SPIKE — the dive: in 3D, the wheel dollies `target` along the view ray instead of zooming. We get the ray
-  // direction from the viewport's own unproject (near→far through screen centre), so it's exact in world space
-  // regardless of orbitAxis/rotation. Moving target translates the whole rig forward (camera = target + fixed
-  // offset), so dots get CLOSER as you enter the cloud without changing screen size (no balloon). Target is
-  // clamped to the cloud's bounds + a margin, so you physically cannot fly off into the void — the anchor that
-  // orbit had, kept while flying. Wheel-down = forward (into the cloud); wheel-up = back out to examine.
-  canvas.addEventListener("wheel", (e) => {
-    if (layout !== "orbit") return;
-    const w = e as WheelEvent; w.preventDefault();
-    const vp: any = deck.getViewports?.()?.[0]; if (!vp) return;
-    const t = viewState.target as number[];
-    // Dive toward the CURSOR (unproject the mouse ray near→far), so you go where you're looking, not just to
-    // screen centre. The ray is exact world-space regardless of orbitAxis/rotation.
-    const ox = w.offsetX ?? vp.width / 2, oy = w.offsetY ?? vp.height / 2;
-    const p0 = vp.unproject([ox, oy, 0]);
-    const p1 = vp.unproject([ox, oy, 1]);
-    let fx = p1[0] - p0[0], fy = p1[1] - p0[1], fz = p1[2] - p0[2];
-    const len = Math.hypot(fx, fy, fz) || 1; fx /= len; fy /= len; fz /= len;
-    // Magnitude-scaled: a normal wheel notch (~100 deltaY) crosses a meaningful slice of the cloud, so ~4–5
-    // notches take you from examine to inside. deltaY is clamped so a flung trackpad can't teleport.
-    const dy = Math.max(-120, Math.min(120, w.deltaY || 0));
-    const step = span3 * 0.0026 * dy;  // wheel-down (deltaY>0) = dive forward; ~5 notches cross into the cloud
-    const m = span3 * 0.5;
-    const clamp = (v: number, lo: number, hi: number) => Math.max(lo - m, Math.min(hi + m, v));
-    viewState = { ...viewState, target: [
-      clamp(t[0] + fx * step, bb3.minX, bb3.maxX),
-      clamp(t[1] + fy * step, bb3.minY, bb3.maxY),
-      clamp(t[2] + fz * step, bb3.minZ, bb3.maxZ),
-    ] };
-    deck.setProps({ viewState });  // 3D labels are billboarded → they re-render with the camera automatically
-  }, { passive: false });
-
   return {
     update: (o) => {
       if (o.getColor) { getColor = o.getColor; colorVer++; }

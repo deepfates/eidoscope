@@ -239,7 +239,7 @@
   const legendAxis = $derived(data?.axes.find((x) => x.key === color));
   const xAxis = $derived(data?.axes.find((a) => a.key === xKey));
   const yAxis = $derived(data?.axes.find((a) => a.key === yKey));
-  const hint = $derived(layout === "axes" ? "positioned by where each card projects on the two axes" : layout === "orbit" ? "drag to pan · shift-drag to rotate · scroll to dive" : "proximity = similarity · tap a card");
+  const hint = $derived(layout === "axes" ? "positioned by where each card projects on the two axes" : layout === "orbit" ? "drag to rotate · scroll to zoom" : "proximity = similarity · tap a card");
   const prov = $derived(data?.provenance);   // so a passed-around file introduces itself
   const provDate = (g?: number) => (g ? new Date(g).toISOString().slice(0, 10) : "");
   $effect(() => { try { document.title = prov?.title ? `${prov.title} · eidoscope 🔭` : "eidoscope 🔭"; } catch {} });
