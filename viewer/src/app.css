@@ -57,3 +57,9 @@ button:focus-visible, select:focus-visible, input:focus-visible, a:focus-visible
   box-shadow: 0 12px 32px -8px rgb(0 0 0 / 0.45);
   color: var(--color-base-content);
 }
+
+/* legend rows are the isolate control — the verb appears on hover/focus so the visible name matches
+   the accessible one (aria-label "isolate <thing>"), instead of the affordance being invisible. */
+.isolate-cue { transition: opacity 120ms ease; }
+li:hover > button > .isolate-cue,
+button:focus-visible > .isolate-cue { opacity: 0.55; }

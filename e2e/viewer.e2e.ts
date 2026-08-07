@@ -140,7 +140,7 @@ try {
   ok(s.grain === 3 && s.k === 24, `grain → finest (24) — grain=${s.grain} k=${s.k}`);
 
   // 3. LABELS REVEAL ON ZOOM (the drift we fixed): at finest grain, fit view decluttts; zooming in reveals more
-  await btn(/^reset$/).click(); await p.waitForTimeout(200); await setGrain(3); await p.waitForTimeout(200);
+  await btn(/^reset view$/).click(); await p.waitForTimeout(200); await setGrain(3); await p.waitForTimeout(200);
   const fit = await st(); const lFit = fit.labels;
   const [cx, cy] = await proj([0, 0]);
   await p.mouse.move(cx, cy); // wheel targets whatever's under the cursor — put it over the canvas
@@ -151,7 +151,7 @@ try {
   ok(zm.labels > lFit, `zooming in reveals more region labels — fit=${lFit} → zoom=${zm.labels}`);
 
   // 4. THE REGRESSION: legend-click isolates + zooms but must NOT change grain; re-click releases
-  await btn(/^reset$/).click(); await p.waitForTimeout(200); s = await st(); const g0 = s.grain, z0 = s.zoom;
+  await btn(/^reset view$/).click(); await p.waitForTimeout(200); s = await st(); const g0 = s.grain, z0 = s.zoom;
   await menu("color");   // the legend IS the colour picker's popover now
   const legendItem = p.locator('button[aria-label^="isolate region"]').first();
   await legendItem.click(); await p.waitForTimeout(200); s = await st();
@@ -163,7 +163,7 @@ try {
   await closeMenus();
 
   // 5. drill via map double-click steps grain finer (and does NOT open a card)
-  await btn(/^reset$/).click(); await p.waitForTimeout(200); const gd = (await st()).grain;
+  await btn(/^reset view$/).click(); await p.waitForTimeout(200); const gd = (await st()).grain;
   await p.mouse.dblclick(cx, cy); await p.waitForTimeout(400); s = await st();
   ok(s.grain > gd, `double-click drills one step finer — grain ${gd}→${s.grain}`);
   // NOTE: the "drill must not ALSO open a card" debounce is real (real-device dblclick fires deck.onClick
@@ -171,13 +171,13 @@ try {
   // it here would pass vacuously — deliberately NOT asserted rather than give false confidence.
 
   // 6. tap/click a card → detail panel (exact node-0 pixel via project; desktop click shares this onClick path)
-  await btn(/^reset$/).click(); await p.waitForTimeout(200);
+  await btn(/^reset view$/).click(); await p.waitForTimeout(200);
   const [nx, ny] = await proj([0, 0]);
   await p.touchscreen.tap(nx, ny); await p.waitForTimeout(1200); s = await st();  // long: the 220ms card-open timer is throttled to ~1s in a headless tab
   ok(s.detail === true && s.focus === 0, `tapping a card opens its detail panel — detail=${s.detail} focus=${s.focus}`);
 
   // 8. FRONTIER: cite + ghost toggles flip; hovering a ghost reports 'ghost' (not a wrong card); click → arXiv
-  await btn(/^reset$/).click(); await p.waitForTimeout(200);
+  await btn(/^reset view$/).click(); await p.waitForTimeout(200);
   await menu("layout"); await p.click('[data-opt="bar:overlay:cite"]'); await p.waitForTimeout(150);
   await menu("layout"); await p.click('[data-opt="bar:overlay:ghosts"]'); await p.waitForTimeout(200); await closeMenus(); s = await st();
   ok(s.cite === true && s.ghosts === true, `cite + frontier toggles flip on — cite=${s.cite} ghosts=${s.ghosts}`);
@@ -191,7 +191,7 @@ try {
   ok(!!pick && pick.layer === "ghosts" && /arxiv\.org\/abs\/2101\.00001/.test(pick.url), `a ghost is click-pickable at its pixel and carries its arXiv url (→ opens on click) — pick=${JSON.stringify(pick)}`);
 
   // 9. THEME toggle flips data-theme + persists
-  await btn(/^reset$/).click(); await p.waitForTimeout(150);
+  await btn(/^reset view$/).click(); await p.waitForTimeout(150);
   const t0 = (await st()).theme;
   await p.locator('button[aria-label="toggle light or dark theme"]').click(); await p.waitForTimeout(150);
   let ts = await st();
@@ -222,7 +222,7 @@ try {
   await menu("theme"); await p.click('[data-opt="bar:theme:black"]'); await p.waitForTimeout(150); await closeMenus();
 
   // 10. DECK shows the whole corpus (was capped at 300) + unread-only filters
-  await btn(/^reset$/).click(); await p.waitForTimeout(150);
+  await btn(/^reset view$/).click(); await p.waitForTimeout(150);
   await btn(/^deck$/).click(); await p.waitForTimeout(200);
   const all = await p.locator("[data-deck-card]").count();
   ok(all === 90, `deck lists the whole corpus (90 cards, not capped) — got ${all}`);
@@ -232,18 +232,18 @@ try {
   await p.keyboard.press("Escape"); await p.waitForTimeout(100);
 
   // 11. reset clears everything back to defaults
-  await btn(/^reset$/).click(); await p.waitForTimeout(250); s = await st();
+  await btn(/^reset view$/).click(); await p.waitForTimeout(250); s = await st();
   ok(s.grain === 2 && s.pin === null && s.focus === null && s.detail === false, `reset restores default grain + clears pin/focus/detail — ${JSON.stringify({ grain: s.grain, pin: s.pin, focus: s.focus, detail: s.detail })}`);
 
   // 11b. HISTORY: browser Back closes an open overlay (the mobile-escape fix, eid-fktf)
-  await btn(/^reset$/).click(); await p.waitForTimeout(150);
+  await btn(/^reset view$/).click(); await p.waitForTimeout(150);
   await btn(/^deck$/).click(); await p.waitForTimeout(200);
   ok((await st()).deckOpen === true, "deck opens (pushes history)");
   await p.goBack(); await p.waitForTimeout(300);
   ok((await st()).deckOpen === false, "browser Back closes the deck — mobile back gesture escapes the modal (eid-fktf)");
 
   // 11c. DEEP-LINK: view state mirrors to the URL, and a link restores it (incl. a specific card) — eid-yxqu
-  await btn(/^reset$/).click(); await p.waitForTimeout(150);
+  await btn(/^reset view$/).click(); await p.waitForTimeout(150);
   await setControl("layout", "axes"); await setGrain(0); await p.waitForTimeout(250);
   let url = new URL(p.url());
   ok(url.searchParams.get("layout") === "axes" && url.searchParams.get("grain") === "0", `view state mirrors to URL — ${url.search}`);
@@ -268,7 +268,7 @@ try {
   await p.goto(`${base}/index.html`); await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
   await btn(/explore/i).click().catch(() => {}); await p.waitForTimeout(150);
   await setControl("color", "author"); await p.waitForTimeout(250);  // dimension KEY (the registry replaced the old meta: prefix)
-  const facetRow = p.locator('button[aria-label^="isolate source"]').first();   // the colour popover stays open after the pick
+  const facetRow = p.locator('button[aria-label^="isolate author"]').first();   // the colour popover stays open after the pick
   await facetRow.click(); await p.waitForTimeout(250);
   let fs = await st();
   ok(fs.facetPin != null, `clicking a facet legend row isolates that value — facetPin=${JSON.stringify(fs.facetPin)}`);
@@ -281,7 +281,7 @@ try {
   await p.goto(`${base}/index.html`); await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
   await btn(/explore/i).click().catch(() => {}); await p.waitForTimeout(150);
   await btn(/^deck$/).click(); await p.waitForTimeout(250);
-  await p.locator('input[placeholder="filter…"]').fill("Doc 2.29");   // unique to the bare last card
+  await p.locator('input[placeholder="find in list…"]').fill("Doc 2.29");   // unique to the bare last card
   await p.waitForTimeout(250);
   await p.locator("[data-deck-card]").first().click(); await p.waitForTimeout(350);
   const bare = await p.evaluate(() => {

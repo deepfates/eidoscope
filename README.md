@@ -102,12 +102,12 @@ with a live visible-count, a docked **reading pane** (cards and regions), and a 
 (black/light defaults + more; the theme rides the shareable URL) — on mobile the toolbar and pane
 become bottom sheets.
 
-- **layout**: neighbor map · **axis scatter** (any dimensions on x/y) · **3D space** (the neighbor map in 3D, drag to rotate) · **3D axis scatter** (any dimensions on x/y/z) — the camera stays continuous across 2D↔3D
-- **color** by region, any metadata, any axis, or a query · **size** likewise (default: influence) — the color menu doubles as the legend (click a row to isolate)
-- **filters** compose: isolate a region or folder, text-find, scrub any scalar dimension — active filters show as chips, one click to clear
+- **layout**: neighbor map · **axis scatter** (any dimensions on x/y) · **3D neighbor map** (the neighbor map in 3D, drag to rotate) · **3D axis scatter** (any dimensions on x/y/z) — the camera stays continuous across 2D↔3D
+- **color** by region, any metadata, or any axis (including the ones you add with **+ axis**) · **size** likewise (default: influence) — the color menu doubles as the legend (click a row to isolate)
+- **filters** compose: isolate a region or folder, **find**, **window** any scalar or temporal dimension — active filters show as chips, one click to clear
 - **grain** slider — the nested region ladder from continents to towns; on-map labels declutter and *reveal as you zoom*, like a real map
 - **tap a card** → its restatement, where it sits on each axis (ranked by extremity), nearest neighbors, and links to **both** the reader and the **original source** (so a shared map opens even without the reader login)
-- **deck** — the whole corpus as a sortable/filterable list: the accessible, screen-reader parallel to the canvas
+- **deck** — the whole corpus as a sortable list with its own **find in list**: the accessible, screen-reader parallel to the canvas
 - **frontier** (`--frontier` corpora) — intra-corpus **citation edges** + **ghost** papers (cited but not in the corpus), placed near the work citing them, sized by citation count, click → arXiv
 - **theme** light/dark, keyboard-operable throughout, `prefers-reduced-motion` honored
 - **trajectory** (`STATE.md`) — where the corpus's attention moved over time (needs dated docs)

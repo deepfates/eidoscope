@@ -43,10 +43,14 @@ const folderOf = (u?: string) => { if (!u || !u.startsWith("file://")) return un
 // resolve `source` to values. Older (v1) files carry no manifest, so LEGACY_FIELDS below reproduces exactly
 // what the viewer used to hardcode — same keys, same names — and is used as the fallback.
 //
-// Display names: the viewer keeps its own established labels for the keys it already showed (a manifest label
-// must not silently rename a user-visible control); unknown keys use the manifest's label verbatim.
-const NAME_OVERRIDE: Record<string, string> = { author: "source", site: "source site", folder: "folder", tags: "tag", date: "date", hub: "influence", citec: "citation impact", length: "length" };
-const nameOf = (f: MetaField) => NAME_OVERRIDE[f.key] ?? f.label;
+// Display names come STRAIGHT FROM THE MANIFEST. They used to be pinned by a NAME_OVERRIDE table so that
+// consuming the manifest could not silently rename a user-visible control; the naming rulings (docs/COMMANDS.md
+// §3) settled every label, the pipeline's buildMetaFields now emits the settled ones, and the pin is gone —
+// the file's own declaration is the single source of a dimension's name.
+// The one exception is a MIGRATION, not a pin: .eido files written before the rulings carry the two labels
+// that the rulings changed. Rewrite those two strings so an old file doesn't show a name we've retired.
+const RENAMED: Record<string, string> = { "author / source": "author", tags: "tag" };
+const nameOf = (f: MetaField) => RENAMED[f.label] ?? f.label;
 
 // Resolve one MetaField.source to a per-card accessor. `col:<field>` reads the named parallel column;
 // `derived:<k>` is something the viewer computes (folder from urls, length from cores).
@@ -92,9 +96,9 @@ const LEGACY_FIELDS: MetaField[] = [
   { key: "length", label: "length", type: "scalar", source: "derived:length" },
   { key: "date", label: "date", type: "temporal", source: "col:dates" },
   { key: "folder", label: "folder", type: "categorical", source: "derived:folder" },
-  { key: "author", label: "author / source", type: "categorical", source: "col:authors" },
+  { key: "author", label: "author", type: "categorical", source: "col:authors" },
   { key: "site", label: "source site", type: "categorical", source: "col:siteNames" },
-  { key: "tags", label: "tags", type: "categorical", multi: true, source: "col:tags" },
+  { key: "tags", label: "tag", type: "categorical", multi: true, source: "col:tags" },
 ];
 
 // Build the static dimension registry from the loaded map. The region clustering is NOT a dimension: it's the

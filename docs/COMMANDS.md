@@ -24,7 +24,7 @@ slot), `dimension` (one per-card field), `corpus` (the filter set), `card`, `cam
 | 2 | `intro.dismiss` | *dismiss* the welcome · view | "explore →" button | — | intro closes; remembered in `localStorage` | n | Tab→Enter, Escape | reappears for a newly opened file |
 | 3 | `corpus.open` | *load* a corpus · view | drop a `.eido` on the window | file | whole viewer remounts on the new corpus, intro shown | via `?map=` / `?url=` | n | reload |
 | **Layout — where cards are placed** |
-| 4 | `layout.set` | *set* layout · view | `layout ▾` menu (4 items) | `mde \| axes \| orbit \| axes3d` | points re-lay-out; the button states the current layout | `?layout=` | Tab→Enter | `layout → neighbor map` |
+| 4 | `layout.set` | *set* layout · view | `layout ▾` menu (4 items: neighbor map · axis scatter · **3D neighbor map** · 3D axis scatter) | `mde \| axes \| orbit \| axes3d` | points re-lay-out; the button states the current layout | `?layout=` | Tab→Enter | `layout → neighbor map` |
 | 5 | `overlay.toggle` | *toggle* an overlay · view | `layout ▾` menu (cite edges, frontier) | — | citation edges / ghost papers drawn | **n** | Tab→Enter | same item |
 | 6 | `axis.set` | *put* a dimension on x/y/z · channel | `axes ▾` popover selects (scatter layouts only) | dimension key | points move; pole labels at the map edges change | `?x= ?y= ?z=` | Tab→select | pick another |
 | 7 | `dim.norm` | *set* honest⇄rank · dimension | `axes ▾` buttons; the "scale" section of the color / size / time popovers | `honest \| rank` | the dimension's spread changes **everywhere it is placed at once** | `?props=k.h0` | Tab→Enter | the other value |
@@ -32,38 +32,38 @@ slot), `dimension` (one per-card field), `corpus` (the filter set), `card`, `cam
 | **Encoding — what cards look like** |
 | 9 | `color.set` | *put* a dimension on colour · channel | `color ▾` popover, "color by" list; the ● button on a query chip | dimension key or `region` | every point recolours; the legend above becomes that dimension's legend | `?color=` | Tab→Enter | `color → region` |
 | 10 | `size.set` | *put* a dimension on size · channel | `size ▾` popover | dimension key or `uniform` | point radii change | `?size=` | Tab→Enter | `size → uniform` |
-| 11 | `grain.set` | *set* clustering grain · view | slider inside the `color ▾` popover — **only when colour = region** | 0…nLevels-1 | regions merge/split; the count next to the slider and in the toolbar updates | `?grain=` | Tab→arrows | `reset` |
-| 12 | `labels.toggle` | *toggle* region labels · chrome | `labels` button (disabled off the region lens, with a tooltip saying why) | — | region names appear/disappear on the map | **n** | Tab→Enter | same button |
+| 11 | `grain.set` | *set* clustering grain · view | slider inside the `color ▾` popover — **only when colour = region** | 0…nLevels-1 | regions merge/split; the count next to the slider and in the toolbar updates | `?grain=` | Tab→arrows | `reset view` |
+| 12 | `labels.toggle` | *toggle* region labels · chrome | `region labels` button (disabled off the region lens, with a tooltip saying why) | — | region names appear/disappear on the map | **n** | Tab→Enter | same button |
 | **Selecting — narrowing the corpus** |
-| 13 | `region.isolate` | *isolate* one region · corpus | click a legend row under colour = region | cluster id | non-members hidden, camera flies to the set, chip appears, `N / M cards` updates, region detail pane opens | `?region=` | Tab→Enter | click again · chip ✕ · `reset` |
-| 14 | `facet.isolate` | *isolate* one categorical value · corpus | click a legend row under a categorical colour lens | value | same as above, for that value | `?facet=` | Tab→Enter | click again · chip ✕ · `reset` |
-| 15 | `find.set` | *filter* by substring · corpus | the `⌕ find a card…` input | text | non-matching cards hidden, chip `"…"`, `N / M cards` updates | `?find=` | type | empty the box · chip ✕ · `reset` |
-| 16 | `scrub.field` | *choose* which dimension the window applies to · channel | select inside the `time ▾` popover | dimension key | the slider re-ranges; any existing window is cleared | `?sk=` | Tab→select | pick another |
-| 17 | `scrub.window` | *window* a scalar/temporal range · corpus | dual-thumb slider in `time ▾` | lo, hi | out-of-range cards hidden, chip `<dim> window` | `?slo= ?shi=` | Tab→arrows | `clear window` · chip ✕ · `reset` |
+| 13 | `region.isolate` | *isolate* one region · corpus | click a legend row under colour = region (the row shows `isolate` / `release` on hover or focus) | cluster id | non-members hidden, camera flies to the set, chip appears, `N / M cards` updates, region detail pane opens | `?region=` | Tab→Enter | click again · chip ✕ · `reset view` |
+| 14 | `facet.isolate` | *isolate* one categorical value · corpus | click a legend row under a categorical colour lens (same visible `isolate` cue) | value | same as above, for that value | `?facet=` | Tab→Enter | click again · chip ✕ · `reset view` |
+| 15 | `find.set` | *filter* by substring · corpus | the `⌕ find a card…` input | text | non-matching cards hidden, chip `"…"`, `N / M cards` updates | `?find=` | type | empty the box · chip ✕ · `reset view` |
+| 16 | `scrub.field` | *choose* which dimension the window applies to · channel | select inside the `window ▾` popover | dimension key | the slider re-ranges; any existing window is cleared | `?sk=` | Tab→select | pick another |
+| 17 | `scrub.window` | *window* a scalar/temporal range · corpus | dual-thumb slider in `window <dim> ▾` | lo, hi | out-of-range cards hidden, chip `<dim> window` | `?slo= ?shi=` | Tab→arrows | `clear` · chip ✕ · `reset view` |
 | 18 | `filter.remove` | *remove* one filter · corpus | click a chip | the filter | that constraint lifts | (its param drops) | Tab→Enter | re-apply |
-| 19 | `filter.clearAll` | *remove* every filter · corpus | `clear all` (only shown with ≥2 chips) | — | all constraints lift | (params drop) | Tab→Enter | — |
+| 19 | `filter.clearAll` | *remove* every filter · corpus | `clear all filters` (only shown with ≥2 chips) | — | all constraints lift | (params drop) | Tab→Enter | — |
 | **Interrogating — asking the corpus a question** |
-| 20 | `query.add` | *create* a semantic dimension · view | `+ query ▾` popover → `⌕` / Enter | text | a new dimension appears in **every** channel menu; badge count increments. **Nothing on the map moves** (see M-D1) | `?q=` (repeatable) | type + Enter | the ✕ on the query chip |
-| 21 | `query.remove` | *delete* a semantic dimension · view | ✕ on the query chip | key | every channel holding it falls back to its default | (param drops) | Tab→Enter | re-add |
+| 20 | `query.add` | *create* a semantic dimension · view | `+ axis ▾` popover → `add` / Enter | text | a new dimension appears in **every** channel menu; badge count increments. **Nothing on the map moves** (see M-D1) | `?q=` (repeatable) | type + Enter | the ✕ on the query chip |
+| 21 | `query.remove` | *delete* a semantic dimension · view | ✕ on the axis chip | key | every channel holding it falls back to its default | (param drops) | Tab→Enter | re-add |
 | **Reading — the cards themselves** |
 | 22 | `card.open` | *open* one card · card | click a point; click a deck row; click a neighbour in the detail pane | index | detail pane docks right (bottom sheet on phones): restatement, axis placements, neighbours, source links | `?card=` | via the deck | ✕ · Escape · Back |
 | 23 | `card.hover` | *preview* one card · card | hover a point | — | tooltip: region, title, first ~140 chars | n | **n** | move away |
-| 24 | `region.drill` | *descend* into a region · view | **double-click a point** | index | grain steps finer (≤3 levels) until the region splits; camera fits the sub-region | (via `?grain=`) | **n** | `reset` |
+| 24 | `region.drill` | *descend* into a region · view | **double-click a point** | index | grain steps finer (≤3 levels) until the region splits; camera fits the sub-region | (via `?grain=`) | **n** | `reset view` |
 | 25 | `deck.open` | *list* the corpus · view | `deck` button (desktop + phone) | — | modal list of every card — the screen-reader-accessible view of the map | **n** | Tab→Enter | ✕ · Escape · Back |
 | 26 | `deck.sort` | *sort* the list · channel | select inside the deck | dimension key | rows reorder | **n** | Tab→select | pick another |
-| 27 | `deck.filter` | *filter* the list · **deck only** | `filter…` input inside the deck | text | rows narrow. **Does not touch the map or the chips** (see M-N2) | **n** | type | empty the box |
+| 27 | `deck.filter` | *filter* the list · **deck only** | `find in list…` input inside the deck | text | rows narrow. **Does not touch the map or the chips** (see M-N2) | **n** | type | empty the box |
 | 28 | `deck.unread` | *filter* to unread · **deck only** | `unread only` toggle (only when the corpus carries read state) | — | read rows hidden | **n** | Tab→Enter | same button |
 | 29 | `source.open` | *open* the original · card | links in the detail pane and on deck rows | — | new tab | n | Tab→Enter | — |
 | **Camera** |
-| 30 | `camera.pan` | *move* the camera · camera | drag | — | view translates | n | **n** | `reset` |
-| 31 | `camera.zoom` | *scale* the camera · camera | wheel / pinch | — | zoom; more region labels reveal as you go in | n | **n** | `reset` |
-| 32 | `camera.rotate` | *orbit* the camera · camera | drag in a 3D layout | — | view rotates | n | **n** | `reset` |
-| 33 | `camera.fit` | *frame* a set · camera | implicit in `region.isolate` / `facet.isolate` / `region.drill` | indices | camera transitions to the set | n | — | `reset` |
+| 30 | `camera.pan` | *move* the camera · camera | drag | — | view translates | n | **n** | `reset view` |
+| 31 | `camera.zoom` | *scale* the camera · camera | wheel / pinch | — | zoom; more region labels reveal as you go in | n | **n** | `reset view` |
+| 32 | `camera.rotate` | *orbit* the camera · camera | drag in a 3D layout | — | view rotates | n | **n** | `reset view` |
+| 33 | `camera.fit` | *frame* a set · camera | implicit in `region.isolate` / `facet.isolate` / `region.drill` | indices | camera transitions to the set | n | — | `reset view` |
 | **Chrome** |
 | 34 | `theme.flipGround` | *flip* light⇄dark · chrome | `☾ / ☀` button | — | whole app **and the map canvas** re-ink from the theme's tokens | `?theme=` | Tab→Enter | same button |
 | 35 | `theme.set` | *set* the theme · chrome | theme `▾` menu (10 themes, each with a swatch) | theme id | as above | `?theme=` | Tab→Enter | pick another |
 | 36 | `controls.sheet` | *reveal* the controls · chrome | `controls ▴` (phone only — renders the identical `controls()` snippet) | — | bottom sheet with every toolbar command | n | Tab→Enter | Escape · Back |
-| 37 | `view.reset` | *reset* filters + selection + grain + camera · view | `reset` button | — | every chip clears, card closes, grain returns to the file's default, camera goes home | (params drop) | Tab→Enter | — |
+| 37 | `view.reset` | *reset* filters + selection + grain + camera · view | `reset view` button | — | every chip clears, card closes, grain returns to the file's default, camera goes home | (params drop) | Tab→Enter | — |
 | 38 | `overlay.close` | *close* the topmost overlay · view | ✕ buttons; **Escape**; browser **Back** | — | intro / deck / sheet / card closes | n | **Escape** | re-open |
 
 ### Bindings that are not user commands
@@ -160,10 +160,28 @@ Mechanical only — behaviour unchanged. See commits `6879c70`, `c703ec6`, `83d3
 
 ---
 
-## 3. Naming proposal
+## 3. Naming proposal — **APPLIED 2026-08-06**
 
-**Nothing in this section has been changed.** These are user-visible labels; renaming them is
-deepfates' call. Each row is *current → proposed → why*.
+Every ruling below was accepted and is now in the code (branch `agent/naming`). Each row is
+*current → proposed → why*; "current" is the pre-ruling name, kept as the record of what changed.
+The rulings are labels only — no URL parameter, no wire field and no state key moved.
+
+**As applied**, exactly:
+
+| Was | Is now |
+|---|---|
+| toolbar `time <lo> – <hi>` | `window <dimension> <lo> – <hi>` — the windowed dimension is always named, so "time" appears only when the dimension *is* the date |
+| `+ query` button · `semantic axis` popover title · `⌕` submit · `⌕ <text>` dimension name | `+ axis` button · `axis from a question` popover title · `add` submit · `? <text>` dimension name (the find box keeps `⌕`, now its only meaning) |
+| deck `filter…` | deck `find in list…` (toolbar stays `find`) |
+| author dimension `source` · provenance `from <path>` | `author` · `corpus source <path>` |
+| layout `3D space` | `3D neighbor map` |
+| `labels` toggle | `region labels` |
+| scrubber `clear window` · chips `clear all` · toolbar `reset` | `clear` · `clear all filters` · `reset view` |
+| legend row: isolate visible only to a screen reader | the row shows `isolate` (or `release`, when active) on hover / focus |
+| pipeline manifest labels `author / source`, `tags` | `author`, `tag` — and `NAME_OVERRIDE` in `viewer/src/dimensions.ts` is **gone**, so a file's own manifest labels now flow straight through. One two-entry migration remains, keyed on the retired label *strings*, so `.eido` files written before the rulings don't display a name we retired. |
+
+**Kept, explicitly:** `grain`, `deck`, the `region` overload (§N-3), `tag` singular, `frontier` in the
+UI over `ghosts` in the code.
 
 ### N-1 · One concept, several names
 
@@ -172,7 +190,7 @@ deepfates' call. Each row is *current → proposed → why*.
 | toolbar button **`time`** | **`window`** | The single worst mislabel in the app. This control windows *any* scalar or temporal dimension — on `map.eido` it offers **19 dimensions, 18 of which are not time** (16 PCA axes, influence, length). A user windowing "length" is clicking a button labelled "time". The popover's own inner label is already `window`. Caught in the wild: on `tldr.eido` the toolbar reads **`time 0 – 100`**, because the scrubber parked on a unitless PCA axis (see `scratchpad/shell-tldr.png`). |
 | **`+ query`** (button) · **`semantic axis`** (popover title) · **`⌕`** (submit) · **`⌕ <text>`** (the dimension's name in menus) | **`+ axis`** everywhere, dimension shown as **`? <text>`** | Four names for one concept, and `⌕` is *also* the find box's glyph — the same symbol means "substring search" in one place and "embed a semantic query" in another. |
 | **`find`** (toolbar, filters the map) vs **`filter…`** (deck, filters only the list) | **`find`** for both, with the deck's scoped as **`find in list`** | Same verb, same input type, same substring semantics, two names — and the difference that actually matters (map-wide vs list-only) is the one thing neither name states. |
-| **`source`** = the *author* dimension · **`source site`** = siteNames · **`from <source>`** = provenance path · **`original →`** = the document's own URL | author dimension → **`author`**; provenance → **`corpus source`** | "Source" currently means four different things on screen. The pipeline's own manifest calls this field `author / source`; the viewer shows `source`. Note: the manifest's labels are deliberately *not* applied yet — `NAME_OVERRIDE` in `dimensions.ts` pins the viewer's existing names so consuming the manifest could not silently rename a control. Settling this row is what un-pins them. |
+| **`source`** = the *author* dimension · **`source site`** = siteNames · **`from <source>`** = provenance path · **`original →`** = the document's own URL | author dimension → **`author`**; provenance → **`corpus source`** | "Source" currently means four different things on screen. The pipeline's own manifest calls this field `author / source`; the viewer shows `source`. Settling this row un-pinned `NAME_OVERRIDE` in `dimensions.ts`, which had been holding the viewer's own names in front of the manifest's; the manifest is now the single source of a dimension's name. |
 | **`frontier`** (menu item) vs **`ghosts`** (the code, the layer, the option key) | **`frontier`** in the UI, keep `ghosts` internal | Only a mismatch for whoever reads both; the hover tooltip already says "frontier paper". Listed for completeness. |
 | **`tag`** (viewer) vs **`tags`** (manifest label) | **`tag`** | Singular reads correctly in "colour by tag". One-word fix; only needs a ruling because it means dropping the manifest's label. |
 | **`honest magnitudes` / `rank-normalized`** (menus) vs **`honest` / `rank`** (axes popover) | long form in menus, short in the compact button row, but **always in that order** | Same command, two vocabularies. Acceptable if it's a deliberate long/short pair; currently it reads as two different features. |

@@ -14,12 +14,12 @@ import type { MapContract, MetaField } from "./schema.ts";
 export function buildMetaFields(D: Partial<MapContract> & { axes: MapContract["axes"] }): MetaField[] {
   const has = (a?: unknown[]) => Array.isArray(a) && a.some((x) => x != null && x !== "");
   const f: MetaField[] = [];
-  if (has(D.authors)) f.push({ key: "author", label: "author / source", type: "categorical", source: "col:authors" });
+  if (has(D.authors)) f.push({ key: "author", label: "author", type: "categorical", source: "col:authors" });
   if (has(D.siteNames)) f.push({ key: "site", label: "source site", type: "categorical", source: "col:siteNames" });
   // prefer the carried folders column; the url-derived fallback only works for file:// urls (old files)
   if (has(D.folders)) f.push({ key: "folder", label: "folder", type: "categorical", source: "col:folders" });
   else if (Array.isArray(D.urls) && D.urls.some((u) => typeof u === "string" && u.startsWith("file://"))) f.push({ key: "folder", label: "folder", type: "categorical", source: "derived:folder" });
-  if (has(D.tags)) f.push({ key: "tags", label: "tags", type: "categorical", multi: true, source: "col:tags" });
+  if (has(D.tags)) f.push({ key: "tags", label: "tag", type: "categorical", multi: true, source: "col:tags" });
   if (has(D.dates)) f.push({ key: "date", label: "date", type: "temporal", source: "col:dates" });
   if (has(D.read)) f.push({ key: "read", label: "read", type: "boolean", source: "col:read" });
   f.push({ key: "hub", label: "influence", type: "scalar", source: "col:hub" });

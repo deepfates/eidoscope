@@ -116,7 +116,7 @@ export class ViewModel {
   // ---- the dimension registry: one list all channels draw from ----
   dimList = $derived(this.data ? buildDimensions(this.data) : []);
   queryDims = $derived.by((): Dimension[] =>
-    this.queries.map((q) => ({ key: q.key, name: "⌕ " + q.text, kind: "scalar", source: "query", raw: q.raw, bipolar: false, low: "unrelated", high: q.text })));
+    this.queries.map((q) => ({ key: q.key, name: "? " + q.text, kind: "scalar", source: "query", raw: q.raw, bipolar: false, low: "unrelated", high: q.text })));
   allDims = $derived([...this.dimList, ...this.queryDims]);
 
   colorDim = $derived(this.channels.color === "region" ? undefined : this.allDims.find((d) => d.key === this.channels.color)); // undefined = the region clustering

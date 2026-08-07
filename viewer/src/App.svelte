@@ -143,7 +143,7 @@
   function reset() { focusCard(null); m.clearFilters(); handle?.setHighlight(null); m.grain = data?.di ?? 0; handle?.resetView(); }
 
   // The current label for each channel button — the toolbar states the view, so nothing is hidden in a menu.
-  const LAYOUT_LABELS: Record<string, string> = { mde: "neighbor map", axes: "axis scatter", orbit: "3D space", axes3d: "3D axis scatter" };
+  const LAYOUT_LABELS: Record<string, string> = { mde: "neighbor map", axes: "axis scatter", orbit: "3D neighbor map", axes3d: "3D axis scatter" };
   const colorLabel = $derived(m.channels.color === "region" ? "region" : colorDim?.name ?? "region");
   const sizeLabel = $derived(m.channels.size === "uniform" ? "uniform" : sizeDim?.name ?? "uniform");
 
@@ -247,10 +247,10 @@
       queryStatus = "";
       return key;
     } catch (e: any) {
-      resetEmbedder();   // drop the poisoned/half-loaded model so the next ⌕ retries cleanly
+      resetEmbedder();   // drop the poisoned/half-loaded model so the next add retries cleanly
       queryErr = e?.message === "__stall__"
-        ? "model download stalled — check your connection, then press ⌕ to retry"
-        : "couldn’t run the query (" + String(e?.message ?? e) + ") — press ⌕ to retry";
+        ? "model download stalled — check your connection, then press add to retry"
+        : "couldn’t run the query (" + String(e?.message ?? e) + ") — press add to retry";
       queryStatus = "";
       return null;
     } finally { clearTimeout(stallTimer); querying = false; }
@@ -367,6 +367,9 @@
       <span class="h-2.5 w-2.5 flex-none rounded-xs" style="background:{swatch}"></span>
       <span class="truncate" title={label}>{label}</span>
       {#if count !== undefined}<span class="ml-auto flex-none font-mono text-[10px] opacity-60">{count}</span>{/if}
+      <!-- the verb, said out loud: the row IS the isolate control, so on hover/focus it names itself.
+           `aria-hidden` because the button's aria-label already carries "isolate <thing>". -->
+      <span aria-hidden="true" class="isolate-cue ml-auto flex-none font-mono text-[10px] opacity-0">{active ? "release" : "isolate"}</span>
     </button>
   </li>
 {/snippet}
@@ -387,7 +390,7 @@
           <div class="text-sm font-bold leading-snug">{prov?.title ?? "eidoscope"}</div>
           <div class="mt-0.5 font-mono text-[10px] leading-snug opacity-60">
             {data.ids.length} documents · {axStats.n} discovered axes · {curCount} regions{#if prov?.generated} · {provDate(prov.generated)}{/if}</div>
-          {#if prov?.source}<div class="mt-0.5 break-all font-mono text-[10px] opacity-60">from {prov.source}</div>{/if}
+          {#if prov?.source}<div class="mt-0.5 break-all font-mono text-[10px] opacity-60"><span class="uppercase tracking-widest opacity-70">corpus source</span> {prov.source}</div>{/if}
 
           <div class="mt-3 space-y-2 text-[11px] leading-snug">
             <div><span class="font-bold">positions</span> — <span class="opacity-75">{positionsLine}. Distance is relative, not a measured quantity; there are no units.</span></div>
@@ -548,11 +551,12 @@
     </Popover.Portal>
   </Popover.Root>
 
-  <!-- TIME — the scrubber: field picker + the dual-thumb window over it -->
+  <!-- WINDOW — the scrubber: field picker + the dual-thumb window over the CHOSEN dimension (any scalar or
+       temporal one — the label always names it, so the button never claims to be about time when it isn't) -->
   {#if scrubFields.length && scrubRange && scrubField}
     <Popover.Root>
-      <Popover.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case" data-menu="{scope}:time" aria-label="time">
-        <span class="opacity-60">time</span><span class="max-w-[10rem] truncate font-mono text-xs">{scrubText}</span><span class="text-[9px] opacity-50">▾</span>
+      <Popover.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case" data-menu="{scope}:window" aria-label="window a dimension — currently {scrubField.name}" title="window the corpus along {scrubField.name}">
+        <span class="opacity-60">window</span><span class="max-w-[6rem] truncate">{scrubField.name}</span><span class="max-w-[10rem] truncate font-mono text-xs">{scrubText}</span><span class="text-[9px] opacity-50">▾</span>
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Content class="eido-pop w-80 p-3" sideOffset={6} align="start">
@@ -570,7 +574,7 @@
           </div>
           <div class="mt-1 flex items-center gap-2">
             <span class="min-w-0 flex-1 truncate font-mono text-[11px] opacity-70">{scrubText}</span>
-            <button class="btn btn-ghost btn-xs" onclick={resetScrub}>clear window</button>
+            <button class="btn btn-ghost btn-xs" onclick={resetScrub} title="clear this window (the other filters stay)" aria-label="clear the {scrubField.name} window">clear</button>
           </div>
           {@render propItems(scrubField)}
         </Popover.Content>
@@ -584,18 +588,18 @@
     <input type="search" value={m.query} oninput={(e) => m.onFind(e.currentTarget.value)} placeholder="find a card…" aria-label="find a card" class="min-w-0 grow" />
   </label>
 
-  <!-- + QUERY — embed a text query into a first-class dimension you can place on any channel -->
+  <!-- + AXIS — embed a question into a first-class dimension (an axis) you can place on any channel -->
   {#if data?.vectors}
     <Popover.Root>
-      <Popover.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case" data-menu="{scope}:query" aria-label="add a semantic axis">
-        <span class="font-medium">+ query</span>{#if queryDims.length}<span class="badge badge-xs badge-primary">{queryDims.length}</span>{/if}
+      <Popover.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case" data-menu="{scope}:axis" aria-label="add an axis from a question" title="add an axis from a question you ask the corpus">
+        <span class="font-medium">+ axis</span>{#if queryDims.length}<span class="badge badge-xs badge-primary">{queryDims.length}</span>{/if}
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Content class="eido-pop w-80 p-3" sideOffset={6} align="end">
-          <div class="mb-1 font-mono text-[10px] uppercase tracking-widest opacity-60">semantic axis</div>
+          <div class="mb-1 font-mono text-[10px] uppercase tracking-widest opacity-60">axis from a question</div>
           <div class="flex gap-1">
-            <input bind:value={semQuery} onkeydown={(e) => e.key === "Enter" && runQuery()} placeholder="e.g. arguments about scaling" aria-label="semantic query" disabled={querying} class="input input-sm min-w-0 flex-1" />
-            <button onclick={runQuery} disabled={querying || !semQuery.trim()} title="embed & add a query dimension you can place on any channel" class="btn btn-sm btn-primary flex-none">{querying ? "…" : "⌕"}</button>
+            <input bind:value={semQuery} onkeydown={(e) => e.key === "Enter" && runQuery()} placeholder="e.g. arguments about scaling" aria-label="the question this axis measures" disabled={querying} class="input input-sm min-w-0 flex-1" />
+            <button onclick={runQuery} disabled={querying || !semQuery.trim()} title="embed the question and add it as an axis you can place on any channel" aria-label="add this axis" class="btn btn-sm btn-primary flex-none normal-case">{querying ? "…" : "add"}</button>
           </div>
           {#if querying}
             <div class="mt-2 flex items-center gap-1.5 text-[11px] opacity-70">
@@ -609,8 +613,8 @@
           {#each queryDims as qd}
             <div class="rounded-field mt-2 flex items-center gap-1 bg-base-200 px-2 py-1 text-[11px]">
               <span class="min-w-0 flex-1 truncate font-mono opacity-80" title={qd.name}>{qd.name}</span>
-              <button onclick={() => (m.channels.color = qd.key)} title="colour by this query" aria-label="colour by this query" class="btn btn-ghost btn-xs">●</button>
-              <button onclick={() => m.removeQuery(qd.key)} title="remove query" aria-label="remove query" class="btn btn-ghost btn-xs">✕</button>
+              <button onclick={() => (m.channels.color = qd.key)} title="colour by this axis" aria-label="colour by this axis" class="btn btn-ghost btn-xs">●</button>
+              <button onclick={() => m.removeQuery(qd.key)} title="remove this axis" aria-label="remove this axis" class="btn btn-ghost btn-xs">✕</button>
             </div>
           {/each}
         </Popover.Content>
@@ -622,7 +626,7 @@
 {#snippet rightControls(scope: string)}
   <button class="btn btn-sm btn-ghost flex-none normal-case" title="read the corpus as a sortable, filterable list" onclick={() => (deckOpen = true)}>deck</button>
   <button disabled={m.channels.color !== "region"} title={m.channels.color !== "region" ? "region labels show when coloured by region" : "show region labels on the map"}
-    aria-pressed={labelsOn} class="btn btn-sm flex-none normal-case {showLabels && m.channels.color === 'region' ? 'btn-active' : 'btn-ghost'}" onclick={() => (showLabels = !showLabels)}>labels</button>
+    aria-pressed={labelsOn} class="btn btn-sm flex-none normal-case {showLabels && m.channels.color === 'region' ? 'btn-active' : 'btn-ghost'}" onclick={() => (showLabels = !showLabels)} aria-label="toggle region labels">region labels</button>
   <button class="btn btn-sm btn-ghost btn-square flex-none" onclick={toggleTheme} aria-label="toggle light or dark theme" title="toggle light / dark">{theme === "dark" ? "☾" : "☀"}</button>
   <DropdownMenu.Root>
     <DropdownMenu.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case" data-menu="{scope}:theme" aria-label="pick a colour theme" title="theme">
@@ -642,7 +646,7 @@
       </DropdownMenu.Content>
     </DropdownMenu.Portal>
   </DropdownMenu.Root>
-  <button class="btn btn-sm btn-ghost flex-none normal-case" title="clear every filter, close the open card, and return grain + camera to this map's defaults" onclick={reset}>reset</button>
+  <button class="btn btn-sm btn-ghost flex-none normal-case" title="clear every filter, close the open card, and return grain + camera to this map's defaults" onclick={reset}>reset view</button>
 {/snippet}
 
 <div class="flex h-screen w-screen flex-col overflow-hidden bg-base-100 text-base-content"
@@ -690,7 +694,7 @@
                 <span class="max-w-[11rem] truncate">{chip.label}</span><span class="opacity-60">✕</span>
               </button>
             {/each}
-            {#if chips.length > 1}<button onclick={() => m.clearFilters()} title="remove every active filter" aria-label="clear all filters" class="btn btn-ghost btn-xs normal-case">clear all</button>{/if}
+            {#if chips.length > 1}<button onclick={() => m.clearFilters()} title="remove every active filter" aria-label="clear all filters" class="btn btn-ghost btn-xs normal-case">clear all filters</button>{/if}
             <span class="ml-auto font-mono text-[10px] opacity-60">{filterMask ? filterMask.reduce((a, v) => a + v, 0) : data.ids.length} / {data.ids.length} cards</span>
           </div>
         </div>
@@ -807,7 +811,7 @@
               {#each scalarDims as d}<option value={d.key}>{d.name}</option>{/each}
             </select></label>
           {#if hasRead}<button class="btn btn-xs normal-case {deckUnread ? 'btn-active' : 'btn-ghost'}" aria-pressed={deckUnread} title="hide cards already marked read" onclick={() => (deckUnread = !deckUnread)}>unread only</button>{/if}
-          <input bind:value={deckQ} placeholder="filter…" aria-label="filter the deck" class="input input-xs min-w-0 flex-1" />
+          <input bind:value={deckQ} placeholder="find in list…" aria-label="find in the list — narrows these rows only, not the map" class="input input-xs min-w-0 flex-1" />
           <button class="btn btn-ghost btn-xs btn-square ml-auto" onclick={() => requestClose()} aria-label="close deck">✕</button>
         </div>
         <div class="thin-sb grid grid-cols-1 gap-2 overflow-auto sm:grid-cols-2">
@@ -836,7 +840,7 @@
       <div use:trapFocus tabindex="-1" role="dialog" aria-modal="true" aria-label="welcome" class="rounded-box max-w-md border border-base-300 bg-base-100 p-6 shadow-2xl">
         <div class="text-lg font-bold">{prov?.title ?? "the forms of the corpus"} 🔭</div>
         <div class="mt-1 font-mono text-[11px] opacity-60">{data.ids.length} documents · {data.axes.length} discovered axes · {data.k} regions{#if prov?.generated} · {provDate(prov.generated)}{/if}</div>
-        {#if prov?.source}<div class="mt-0.5 truncate font-mono text-[10px] opacity-60">from {prov.source}</div>{/if}
+        {#if prov?.source}<div class="mt-0.5 truncate font-mono text-[10px] opacity-60"><span class="uppercase tracking-widest opacity-70">corpus source</span> {prov.source}</div>{/if}
         <ul class="mt-3 space-y-2 text-sm opacity-80">
           <li><b class="opacity-100">Proximity is similarity</b> — nearby cards are alike; colour is an emergent region, size is influence.</li>
           <li><b class="opacity-100">Slide the grain</b> to move regions from continents to towns; click a region to isolate, double-click the map to drill in.</li>
