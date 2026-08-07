@@ -32,7 +32,7 @@ slot), `dimension` (one per-card field), `corpus` (the filter set), `card`, `cam
 | **Encoding — what cards look like** |
 | 9 | `color.set` | *put* a dimension on colour · channel | `color ▾` popover, "color by" list; the ● button on a query chip | dimension key or `region` | every point recolours; the legend above becomes that dimension's legend | `?color=` | Tab→Enter | `color → region` |
 | 10 | `size.set` | *put* a dimension on size · channel | `size ▾` popover | dimension key or `uniform` | point radii change | `?size=` | Tab→Enter | `size → uniform` |
-| 11 | `grain.set` | *set* clustering grain · view | slider inside the `color ▾` popover — **only when colour = region** | 0…nLevels-1 | regions merge/split; the count next to the slider and in the toolbar updates | `?grain=` | Tab→arrows | `reset view` |
+| 11 | `grain.set` | *set* clustering grain · view | **toolbar slider** (always visible; a parameter of the region dimension, not of any channel) | 0…nLevels-1 | regions merge/split; the count next to the slider and in the toolbar updates | `?grain=` | Tab→arrows | `reset view` |
 | 12 | `labels.toggle` | *toggle* region labels · chrome | `region labels` button (disabled off the region lens, with a tooltip saying why) | — | region names appear/disappear on the map | **n** | Tab→Enter | same button |
 | **Selecting — narrowing the corpus** |
 | 13 | `region.isolate` | *isolate* one region · corpus | click a legend row under colour = region (the row shows `isolate` / `release` on hover or focus) | cluster id | non-members hidden, camera flies to the set, chip appears, `N / M cards` updates, region detail pane opens | `?region=` | Tab→Enter | click again · chip ✕ · `reset view` |
@@ -84,7 +84,7 @@ docked rather than modal so the toolbar stays operable while you read.
   teaches, it has no keyboard route, no menu item, and no direct URL form (only the `?grain=` it
   happens to move). Cheap second binding: a "drill in" item in the region detail pane, which is
   already open and already knows the region.
-- **M-A2 `grain.set` is reachable only from inside the colour popover, and only while colour = region.**
+- ~~**M-A2 `grain.set` is reachable only from inside the colour popover, and only while colour = region.**~~ **FIXED 2026-08-06** — grain is a first-class toolbar control at every lens.
   Grain still governs the regions the hover tooltip names, the region filter, and the drill target
   under *every* lens — but the moment you colour by anything else, the control vanishes. The state is
   still shown ("21 regions" in the toolbar), so the user can see a thing they can no longer touch.
@@ -296,3 +296,18 @@ this change. The manifest-derived categorical was therefore verified on `map.eid
 whose `folder` and `tags` now come from its manifest rather than from a guess. Old and new
 `buildDimensions` were diffed across all three corpora: identical dimension keys everywhere, plus the
 one genuinely new manifest-only dimension.
+
+---
+
+## Amendments — 2026-08-06 (evening)
+
+- **`region.isolate` / `facet.isolate` no longer move the camera.** They are filters; the interaction
+  law (*one action changes one thing*) forbids an incidental camera flight, and it made every
+  `?region=` deep link re-frame the view the sharer had chosen. The camera moves only on explicit
+  request: the new **`view.fit`** command (the `fit` button in the selection and region panes), or
+  `view.reset`.
+- **New command — `view.fit`** · *frame* a set · view. Binding: `fit` button in the reading pane
+  (selection or isolated region). Result: camera eases to the set's bounds (depth-aware in 3D).
+  Not serialized (camera never has been). Undo: `reset view`.
+- **`card.open` uses an overlay pane.** The reading pane no longer resizes the map — it overlays the
+  right edge — so opening a card cannot shift the layout under a click.

@@ -19,10 +19,18 @@ PCA (with a parallel-analysis significance check) finds the axes; a document's p
 *is* its projection — calibrated, reproducible, exact. The model labels poles, re-states each
 document as a card, and writes placements. It never scores, positions, or invents the ontology.
 
-**The concept bottleneck is the point.** Geometry is built from the interpretable cards, never routed
-around them to raw full-text to buy a better number. Axes come from full-text PCA; the neighbor map
-comes from UMAP over card vectors. Those two views *differ on purpose* — that difference is the
-instrument, not a bug to reconcile.
+**The concept bottleneck is the point** — and be precise about where it sits, because a sloppy version
+of this sentence has caused two wasted round-trips already:
+
+- Axes are **discovered** from full-text embeddings (PCA + parallel analysis), and a document's
+  position *on an axis* is its full-text PCA projection.
+- Those axes are then **projected through the bottleneck**: the LLM writes each document's card as a
+  placement on the discovered axes, and the **neighbor map** is UMAP over the *card* vectors.
+- So the two views differ **on purpose** — axis space and neighborhood space answer different
+  questions. That difference is the instrument, not a defect to reconcile.
+
+What "never route around the bottleneck" forbids: replacing the card-vector neighbor map with a raw
+full-text map because it scores better. The cards are the readable atoms; the map is built on them.
 
 **No imposed ontology.** No hand-carved cutoffs, magic numbers, or tidy-looking constants standing in
 for structure. If a parameter isn't justified by the data, it's a bug with a nice haircut.
@@ -49,8 +57,11 @@ cards. Operators — QUERY, SELECT, DERIVE, DESCEND, grain — all produce or co
   spent on the grammar and the seams — never on re-rolling a dropdown, a slider, or an SVD.
 - **Finish; don't defer.** Solve the problem instead of filing a ticket to dodge it. Done means the
   old path is deleted, not that the new one works alongside it.
-- **No one-off scripts, smoke tests, or side projects.** Real software, professionally. If a script
-  is worth running twice, it belongs in `bin/` or the CLI with a test.
+- **No one-off scripts as a substitute for the product.** Don't build a side script that fakes what
+  the app should do, and don't commit it. (Measurement harnesses and research prototypes that
+  *produce evidence* — timing an algorithm, generating a palette to score it — are how we falsify:
+  write them, run them, report the numbers, throw them away. If a script is worth running twice, it
+  belongs in `bin/` or the CLI, with a test.)
 - **No fake choice points.** With a recommendation in hand and a reversible action, act and report.
 - **Measure before you claim.** Costs, timings, and quality numbers get measured, not estimated.
 - **Every increment: green and committed.** `bun run qa` (types · viewer types · svelte-check · unit ·

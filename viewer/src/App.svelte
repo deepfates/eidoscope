@@ -89,9 +89,14 @@
 
   // Pin/isolate is a state mutation (model) plus a camera move (App owns the handle) — the model returns the
   // camera intent rather than reaching for a deck handle it has no business knowing about.
-  function applyCamera(op: CameraOp) { if (op?.kind === "fit") handle?.fitToIndices(op.indices); else if (op?.kind === "reset") handle?.resetView(); }
+  // THE INTERACTION LAW: one action changes one thing. Isolating is a FILTER — it must not also fly the
+  // camera (that was "I clicked a legend row and the map jumped somewhere else", and it made every
+  // ?region= deep link re-frame the view the sharer had chosen). The camera moves only when the user
+  // asks: the `fit` button in the pane, or `reset view`. Releasing an isolate likewise leaves the camera.
+  function applyCamera(op: CameraOp) { if (op?.kind === "reset") return; /* deliberately ignore `fit` — see above */ }
   const togglePin = (c: number) => applyCamera(m.togglePin(c));
   const toggleFacetPin = (v: string) => applyCamera(m.toggleFacetPin(v));
+  const fitTo = (idx: number[]) => handle?.fitToIndices(idx);   // the explicit, user-asked-for camera move
 
   function setTheme(t: string, persist = true) {
     themeName = THEMES.some((x) => x.id === t) ? t : DEFAULT_DARK;
@@ -877,6 +882,7 @@
 
           <div class="mb-2 flex flex-wrap gap-1">
             <button data-testid="sel-filter" class="btn btn-primary btn-xs normal-case" title="hide everything else — the selection becomes a filter, and composes with the others" onclick={() => m.filterToSelection()}>filter to these</button>
+            <button data-testid="sel-fit" class="btn btn-xs normal-case" title="move the camera to frame these cards" onclick={() => fitTo(selection!)}>fit</button>
             <button data-testid="sel-export" class="btn btn-xs normal-case" title="download these cards as JSON (ids, titles, urls)" onclick={exportSelection}>export</button>
             <button data-testid="sel-derive" class="btn btn-xs normal-case" disabled title="next: an axis from this set">derive axis</button>
             <button data-testid="sel-clear" class="btn btn-ghost btn-xs normal-case" onclick={() => m.clearSelection()}>clear</button>
@@ -909,6 +915,7 @@
           <div class="mb-1 flex items-center gap-2 pr-8 font-bold"><span class="h-3 w-3 flex-none rounded-xs" style="background:{rgb(colOf(pinnedRegion.c))}"></span><span class="truncate">{pinnedRegion.label}</span></div>
           <div class="mb-2 font-mono text-[10px] opacity-60">region · {pinnedRegion.n} cards · grain {m.grain + 1}/{nLevels}</div>
           {#if pinnedBlurb}<div class="mb-2 text-xs leading-relaxed opacity-80">{pinnedBlurb}</div>{/if}
+          <div class="mb-2"><button data-testid="region-fit" class="btn btn-xs normal-case" title="move the camera to frame this region" onclick={() => fitTo(m.membersOf(pinnedRegion.c))}>fit</button></div>
           <div class="mt-3 mb-1 font-mono text-[10px] uppercase tracking-wide opacity-60">members</div>
           {#each m.membersOf(pinnedRegion.c).slice(0, 200) as i}
             <button class="block w-full truncate rounded px-2 py-1.5 text-left text-xs hover:bg-base-200" onclick={() => focusCard(i)}>{data.titles[i]}</button>

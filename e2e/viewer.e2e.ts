@@ -160,10 +160,19 @@ try {
   await legendItem.click(); await p.waitForTimeout(200); s = await st();
   ok(s.grain === g0, `legend-click leaves grain unchanged — grain ${g0}→${s.grain}`);
   ok(s.pin !== null, "legend-click pins/isolates the region");
-  ok(s.zoom > z0 * 1.15, `legend-click zooms IN — ${z0.toFixed(2)}→${s.zoom.toFixed(2)}`);
+  // THE INTERACTION LAW: isolating is a filter and must NOT move the camera (this assertion used to
+  // demand the opposite — it was enforcing the incidental camera flight). The explicit `fit` button
+  // in the region pane is the only thing that frames it.
+  ok(Math.abs(s.zoom - z0) < 0.01, `legend-click leaves the camera alone — ${z0.toFixed(2)}→${s.zoom.toFixed(2)}`);
   await legendItem.click(); await p.waitForTimeout(200); s = await st();   // popover stays open through an isolate
   ok(s.pin === null, `re-click releases the pin — pin=${s.pin}`);
+  // …and the explicit `fit` in the region pane is what DOES move the camera (isolate again to get the pane)
+  await legendItem.click(); await p.waitForTimeout(200);
   await closeMenus();
+  await p.locator("[data-testid=region-fit]").first().click();
+  await p.waitForTimeout(700); s = await st();
+  ok(s.zoom > z0 * 1.15, `the region pane's fit button DOES zoom in — ${z0.toFixed(2)}→${s.zoom.toFixed(2)}`);
+  await menu("color"); await legendItem.click(); await p.waitForTimeout(200); await closeMenus();   // release, back to a clean slate
 
   // 5. drill via map double-click steps grain finer (and does NOT open a card)
   await btn(/^reset view$/).click(); await p.waitForTimeout(200); const gd = (await st()).grain;
@@ -363,7 +372,7 @@ try {
   ok(selPane?.count === "30 cards", `the reading pane shows the selection count — "${selPane?.count}"`);
   ok(!!selPane && selPane.terms.includes("beta"), `the pane EXPLAINS the set: blob 1's distinctive term surfaces — terms=[${selPane?.terms.join(", ")}]`);
   ok((selPane?.axes ?? 0) === 2, `the pane names the set's most-distinctive axes — got ${selPane?.axes}`);
-  ok(JSON.stringify(selPane?.verbs) === JSON.stringify(["sel-filter", "sel-export", "sel-derive", "sel-clear"]), `the verbs appear on a held set — ${JSON.stringify(selPane?.verbs)}`);
+  ok(JSON.stringify(selPane?.verbs) === JSON.stringify(["sel-filter", "sel-fit", "sel-export", "sel-derive", "sel-clear"]), `the verbs appear on a held set — ${JSON.stringify(selPane?.verbs)}`);
   ok(selPane?.derivDisabled === true, "the `derive axis` verb is present but disabled (wave 3 wires it)");
 
   // 14d. FILTER TO THESE: the selection becomes a Filter, so it flows through the normal mask + chips row
