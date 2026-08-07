@@ -216,7 +216,7 @@
       onGrainChange: (g) => { m.grain = g; m.pinned = null; },
     });
     // read-only introspection seam for the integration suite (drives the REAL built app, asserts real state)
-    (window as any).__eido = () => { const d = handle?.debug(); return { grain: m.grain, k: curCount, layout: m.layout, color: m.channels.color, pin: pinned, facetPin, focus: selected, detail: selected !== null, deckOpen, cite: citeOn, ghosts: ghostsOn, theme, themeName, pal: Array.from({ length: 6 }, (_, i) => col(i)), hover: hovered ? hovered.kind : null, zoom: d?.zoom ?? 0, labels: d?.labels ?? 0, regions: d?.regions ?? 0, rot: d?.rot ?? null, rotX: d?.rotX ?? null, target: d?.target ?? null, span3: d?.span3 ?? null, filters: chips.map((c) => c.label), visible: filterMask ? filterMask.reduce((a, v) => a + v, 0) : (data?.ids.length ?? 0) }; };
+    (window as any).__eido = () => { const d = handle?.debug(); return { grain: m.grain, k: curCount, layout: m.layout, color: m.channels.color, pin: pinned, facetPin, focus: selected, detail: selected !== null, deckOpen, cite: citeOn, ghosts: ghostsOn, theme, themeName, pal: Array.from({ length: 6 }, (_, i) => col(i)), hover: hovered ? hovered.kind : null, zoom: d?.zoom ?? 0, labels: d?.labels ?? 0, labelsOn, regions: d?.regions ?? 0, rot: d?.rot ?? null, rotX: d?.rotX ?? null, target: d?.target ?? null, span3: d?.span3 ?? null, filters: chips.map((c) => c.label), visible: filterMask ? filterMask.reduce((a, v) => a + v, 0) : (data?.ids.length ?? 0) }; };
     // the map no longer fills the window (a toolbar sits above it), so both seams speak PAGE coordinates —
     // what a test's mouse/touch actually uses — and convert at the canvas edge.
     const rect = () => canvas.getBoundingClientRect();
@@ -326,6 +326,20 @@
   const provDate = (g?: number) => (g ? new Date(g).toISOString().slice(0, 10) : "");
   $effect(() => { try { document.title = prov?.title ? `${prov.title} · eidoscope 🔭` : "eidoscope 🔭"; } catch {} });
   const weakAxes = $derived(m.layout === "axes" ? (xDim?.weak ? 1 : 0) + (yDim?.weak ? 1 : 0) : 0);
+
+  // ── ABOUT THIS MAP — projection as HYPOTHESIS, not ground truth ─────────────────────────────────────
+  // Everything here is already in the .eido (derivedBy + the axis stats); the popover just says it out loud,
+  // in the terms a reader needs to judge what the picture can and can't support. No new data, no new state.
+  const madeBy = $derived(data?.derivedBy);
+  const axStats = $derived.by(() => {
+    const A = data?.axes ?? [];
+    return { n: A.length, variance: A.reduce((s, a) => s + (a.variance ?? 0), 0), weak: A.filter((a) => a.weak).length };
+  });
+  // The two geometries have DIFFERENT bases and mean different things — the single most misread thing about
+  // the map, so it's stated first and plainly.
+  const positionsLine = $derived(madeBy?.geometryBasis === "raw"
+    ? "UMAP of raw full-text embeddings — the card bottleneck was bypassed for this map (--embed raw)"
+    : "UMAP of the card vectors — nearby means similar cards");
   // the region the legend has isolated — the sidebar reads it when no card is selected
   const pinnedRegion = $derived(pinned === null ? null : curClusters.find((c) => c.c === pinned) ?? null);
   const pinnedBlurb = $derived(pinned === null ? "" : data?.levelBlurbs?.[m.grain]?.[pinned] ?? "");
@@ -339,10 +353,10 @@
     <!-- discovered axes are rank-normalized positions by design (even, readable spread); norm isn't a
          user choice there, so only metrics/queries get the honest⇄rank toggle. invert applies to all. -->
     {#if !d.fixedNorm}
-      <li><button onclick={() => setProp(d, { norm: "honest" })} aria-label="honest magnitudes"><span class="w-3">{p.norm === "honest" ? "✓" : ""}</span> honest magnitudes <span class="ml-auto text-xs opacity-50">the skew shows</span></button></li>
-      <li><button onclick={() => setProp(d, { norm: "rank" })} aria-label="rank-normalized"><span class="w-3">{p.norm === "rank" ? "✓" : ""}</span> rank-normalized <span class="ml-auto text-xs opacity-50">even spread</span></button></li>
+      <li><button onclick={() => setProp(d, { norm: "honest" })} aria-label="honest magnitudes" aria-pressed={p.norm === "honest"} title="scale {d.name} by its true magnitudes — the skew shows"><span class="w-3">{p.norm === "honest" ? "✓" : ""}</span> honest magnitudes <span class="ml-auto text-xs opacity-50">the skew shows</span></button></li>
+      <li><button onclick={() => setProp(d, { norm: "rank" })} aria-label="rank-normalized" aria-pressed={p.norm === "rank"} title="spread {d.name} evenly by rank order"><span class="w-3">{p.norm === "rank" ? "✓" : ""}</span> rank-normalized <span class="ml-auto text-xs opacity-50">even spread</span></button></li>
     {/if}
-    <li><button onclick={() => setProp(d, { invert: !p.invert })} aria-label="invert direction"><span class="w-3">{p.invert ? "✓" : ""}</span> invert direction <span class="ml-auto text-xs opacity-50">high ↔ low</span></button></li>
+    <li><button onclick={() => setProp(d, { invert: !p.invert })} aria-label="invert direction" aria-pressed={p.invert} title="flip {d.name}: high ↔ low"><span class="w-3">{p.invert ? "✓" : ""}</span> invert direction <span class="ml-auto text-xs opacity-50">high ↔ low</span></button></li>
   {/if}
 {/snippet}
 
@@ -357,6 +371,54 @@
   </li>
 {/snippet}
 
+<!-- ABOUT THIS MAP — the corpus name IS the button. Says how the picture was made (from the .eido's own
+     derivedBy + axis stats) so a reader can weigh it as a hypothesis rather than read it as a fact. -->
+{#snippet about(scope: string)}
+  {#if data}
+    <Popover.Root>
+      <Popover.Trigger class="rounded-field min-w-0 cursor-pointer px-1 py-0.5 text-left hover:bg-base-300" data-menu="{scope}:about"
+        aria-label="about this map — how it was made" title="about this map — how it was made">
+        <div class="truncate text-sm font-bold leading-tight">{prov?.title ?? "eidoscope"}</div>
+        <div class="truncate font-mono text-[10px] leading-tight opacity-60">{data.ids.length} cards · {curCount} regions · about ⓘ</div>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content class="eido-pop thin-sb max-h-[min(32rem,80vh)] w-88 overflow-y-auto p-3" sideOffset={6} align="start" data-about>
+          <div class="mb-1 font-mono text-[10px] uppercase tracking-widest opacity-60">about this map</div>
+          <div class="text-sm font-bold leading-snug">{prov?.title ?? "eidoscope"}</div>
+          <div class="mt-0.5 font-mono text-[10px] leading-snug opacity-60">
+            {data.ids.length} documents · {axStats.n} discovered axes · {curCount} regions{#if prov?.generated} · {provDate(prov.generated)}{/if}</div>
+          {#if prov?.source}<div class="mt-0.5 break-all font-mono text-[10px] opacity-60">from {prov.source}</div>{/if}
+
+          <div class="mt-3 space-y-2 text-[11px] leading-snug">
+            <div><span class="font-bold">positions</span> — <span class="opacity-75">{positionsLine}. Distance is relative, not a measured quantity; there are no units.</span></div>
+            <div><span class="font-bold">axes</span> — <span class="opacity-75">PCA of the full-text embeddings. A card's place on an axis is its exact projection, so an axis position IS a number you can compare.</span></div>
+            <div><span class="font-bold">regions</span> — <span class="opacity-75">clusters of the same vectors, named by a model from what each group over-uses. The grain slider picks how finely the corpus is cut.</span></div>
+          </div>
+
+          <div class="mt-3 border-t border-base-300 pt-2">
+            <div class="mb-1 font-mono text-[10px] uppercase tracking-widest opacity-60">strength</div>
+            <div class="text-[11px] leading-snug opacity-75">
+              The {axStats.n} axes together explain <b class="opacity-100">{Math.round(axStats.variance * 100)}%</b> of the variation between documents{#if axStats.weak}, and <b class="opacity-100">{axStats.weak}</b> of them {axStats.weak > 1 ? "are" : "is"} thin (under 2% each) — read positions on those loosely{/if}. The rest is structure no straight axis captured.
+            </div>
+          </div>
+
+          <div class="mt-3 border-t border-base-300 pt-2">
+            <div class="mb-1 font-mono text-[10px] uppercase tracking-widest opacity-60">made by</div>
+            <dl class="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 font-mono text-[10px] opacity-70">
+              {#if madeBy?.cardModel}<dt class="opacity-60">card model</dt><dd class="break-all">{madeBy.cardModel}</dd>{/if}
+              {#if madeBy?.embedder}<dt class="opacity-60">embedder</dt><dd class="break-all">{madeBy.embedder.id} · {madeBy.embedder.dim}d</dd>{/if}
+              {#if madeBy?.geometryBasis}<dt class="opacity-60">geometry</dt><dd>{madeBy.geometryBasis === "card" ? "card vectors (concept bottleneck)" : "raw full text"}</dd>{/if}
+              {#if madeBy?.pipelineVersion}<dt class="opacity-60">pipeline</dt><dd>{madeBy.pipelineVersion}</dd>{/if}
+              {#if madeBy?.generated}<dt class="opacity-60">generated</dt><dd>{provDate(madeBy.generated)}</dd>{/if}
+              {#if !madeBy}<dt class="opacity-60">provenance</dt><dd>not recorded (pre-v2 file)</dd>{/if}
+            </dl>
+          </div>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  {/if}
+{/snippet}
+
 {#snippet controls(scope: string)}
   <!-- LAYOUT — plus the two map-render overlays, which are layout-ish rather than encoding-ish -->
   <DropdownMenu.Root>
@@ -366,14 +428,14 @@
     <DropdownMenu.Portal>
       <DropdownMenu.Content class="eido-pop menu w-56 p-1" sideOffset={6} align="start">
         {#each Object.entries(LAYOUT_LABELS) as [k, name]}
-          <DropdownMenu.Item class="rounded-field flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm hover:bg-base-200" data-opt="{scope}:layout:{k}" onSelect={() => (m.layout = k as any)}>
+          <DropdownMenu.Item role="menuitemradio" aria-checked={m.layout === k} class="rounded-field flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm hover:bg-base-200" data-opt="{scope}:layout:{k}" onSelect={() => (m.layout = k as any)}>
             <span class="w-3">{m.layout === k ? "✓" : ""}</span>{name}
           </DropdownMenu.Item>
         {/each}
         {#if hasCite || hasGhosts}
           <DropdownMenu.Separator class="my-1 h-px bg-base-300" />
-          {#if hasCite}<DropdownMenu.Item class="rounded-field flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm hover:bg-base-200" data-opt="{scope}:overlay:cite" onSelect={() => (citeOn = !citeOn)}><span class="w-3">{citeOn ? "✓" : ""}</span>cite edges</DropdownMenu.Item>{/if}
-          {#if hasGhosts}<DropdownMenu.Item class="rounded-field flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm hover:bg-base-200" data-opt="{scope}:overlay:ghosts" onSelect={() => (ghostsOn = !ghostsOn)}><span class="w-3">{ghostsOn ? "✓" : ""}</span>frontier</DropdownMenu.Item>{/if}
+          {#if hasCite}<DropdownMenu.Item class="rounded-field flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm hover:bg-base-200" data-opt="{scope}:overlay:cite" role="menuitemcheckbox" aria-checked={citeOn} title="draw an edge between citing and cited cards" onSelect={() => (citeOn = !citeOn)}><span class="w-3">{citeOn ? "✓" : ""}</span>cite edges</DropdownMenu.Item>{/if}
+          {#if hasGhosts}<DropdownMenu.Item class="rounded-field flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm hover:bg-base-200" data-opt="{scope}:overlay:ghosts" role="menuitemcheckbox" aria-checked={ghostsOn} title="show cited-but-absent papers at the edge of the corpus" onSelect={() => (ghostsOn = !ghostsOn)}><span class="w-3">{ghostsOn ? "✓" : ""}</span>frontier</DropdownMenu.Item>{/if}
         {/if}
       </DropdownMenu.Content>
     </DropdownMenu.Portal>
@@ -398,13 +460,13 @@
               {#if ax.d && !ax.d.fixedNorm}
                 {@const p = propsOf(ax.d)}
                 <div class="ml-6 flex gap-1">
-                  <button class="btn btn-xs {p.norm === 'honest' ? 'btn-active' : 'btn-ghost'}" onclick={() => setProp(ax.d!, { norm: "honest" })}>honest</button>
-                  <button class="btn btn-xs {p.norm === 'rank' ? 'btn-active' : 'btn-ghost'}" onclick={() => setProp(ax.d!, { norm: "rank" })}>rank</button>
-                  <button class="btn btn-xs {p.invert ? 'btn-active' : 'btn-ghost'}" onclick={() => setProp(ax.d!, { invert: !p.invert })}>invert</button>
+                  <button class="btn btn-xs {p.norm === 'honest' ? 'btn-active' : 'btn-ghost'}" aria-pressed={p.norm === "honest"} aria-label="{ax.ch} axis: honest magnitudes" title="true magnitudes — the skew shows" onclick={() => setProp(ax.d!, { norm: "honest" })}>honest</button>
+                  <button class="btn btn-xs {p.norm === 'rank' ? 'btn-active' : 'btn-ghost'}" aria-pressed={p.norm === "rank"} aria-label="{ax.ch} axis: rank-normalized" title="even spread by rank order" onclick={() => setProp(ax.d!, { norm: "rank" })}>rank</button>
+                  <button class="btn btn-xs {p.invert ? 'btn-active' : 'btn-ghost'}" aria-pressed={p.invert} aria-label="{ax.ch} axis: invert direction" title="flip the axis: high ↔ low" onclick={() => setProp(ax.d!, { invert: !p.invert })}>invert</button>
                 </div>
               {:else if ax.d}
                 {@const p = propsOf(ax.d)}
-                <div class="ml-6 flex gap-1"><button class="btn btn-xs {p.invert ? 'btn-active' : 'btn-ghost'}" onclick={() => setProp(ax.d!, { invert: !p.invert })}>invert</button></div>
+                <div class="ml-6 flex gap-1"><button class="btn btn-xs {p.invert ? 'btn-active' : 'btn-ghost'}" aria-pressed={p.invert} aria-label="{ax.ch} axis: invert direction" title="flip the axis: high ↔ low" onclick={() => setProp(ax.d!, { invert: !p.invert })}>invert</button></div>
               {/if}
             </div>
           {/each}
@@ -457,9 +519,9 @@
         <div class="thin-sb max-h-56 flex-none overflow-y-auto border-t border-base-300">
           <ul class="menu menu-sm w-full p-1">
             <li class="menu-title text-[10px] tracking-widest uppercase">color by</li>
-            <li><button data-opt="{scope}:color:region" onclick={() => (m.channels.color = "region")}><span class="w-3">{m.channels.color === "region" ? "✓" : ""}</span>region</button></li>
-            {#each catDims as d}<li><button data-opt="{scope}:color:{d.key}" onclick={() => (m.channels.color = d.key)}><span class="w-3">{m.channels.color === d.key ? "✓" : ""}</span><span class="truncate">{d.name}</span></button></li>{/each}
-            {#each scalarDims as d}<li><button data-opt="{scope}:color:{d.key}" onclick={() => (m.channels.color = d.key)}><span class="w-3">{m.channels.color === d.key ? "✓" : ""}</span><span class="truncate">{d.source === "axis" ? "axis: " + d.name : d.name}</span></button></li>{/each}
+            <li><button data-opt="{scope}:color:region" aria-pressed={m.channels.color === "region"} title="colour by the region clustering at the current grain" onclick={() => (m.channels.color = "region")}><span class="w-3">{m.channels.color === "region" ? "✓" : ""}</span>region</button></li>
+            {#each catDims as d}<li><button data-opt="{scope}:color:{d.key}" aria-pressed={m.channels.color === d.key} title="colour by {d.name} — {d.ord?.length} values" onclick={() => (m.channels.color = d.key)}><span class="w-3">{m.channels.color === d.key ? "✓" : ""}</span><span class="truncate">{d.name}</span></button></li>{/each}
+            {#each scalarDims as d}<li><button data-opt="{scope}:color:{d.key}" aria-pressed={m.channels.color === d.key} title="colour by {d.name} (a gradient low → high)" onclick={() => (m.channels.color = d.key)}><span class="w-3">{m.channels.color === d.key ? "✓" : ""}</span><span class="truncate">{d.source === "axis" ? "axis: " + d.name : d.name}</span></button></li>{/each}
             {@render propItems(colorDim)}
           </ul>
         </div>
@@ -476,9 +538,9 @@
       <Popover.Content class="eido-pop thin-sb max-h-[min(28rem,70vh)] w-60 overflow-y-auto p-0" sideOffset={6} align="start">
         <ul class="menu menu-sm w-full p-1">
           <li class="menu-title text-[10px] tracking-widest uppercase">size by</li>
-          <li><button data-opt="{scope}:size:uniform" onclick={() => (m.channels.size = "uniform")}><span class="w-3">{m.channels.size === "uniform" ? "✓" : ""}</span>uniform</button></li>
+          <li><button data-opt="{scope}:size:uniform" aria-pressed={m.channels.size === "uniform"} title="every card the same radius" onclick={() => (m.channels.size = "uniform")}><span class="w-3">{m.channels.size === "uniform" ? "✓" : ""}</span>uniform</button></li>
           {#each allDims.filter((d) => d.kind === "scalar") as d}
-            <li><button data-opt="{scope}:size:{d.key}" onclick={() => (m.channels.size = d.key)}><span class="w-3">{m.channels.size === d.key ? "✓" : ""}</span><span class="truncate">{d.name}</span></button></li>
+            <li><button data-opt="{scope}:size:{d.key}" aria-pressed={m.channels.size === d.key} title="size by {d.name}" onclick={() => (m.channels.size = d.key)}><span class="w-3">{m.channels.size === d.key ? "✓" : ""}</span><span class="truncate">{d.name}</span></button></li>
           {/each}
           {@render propItems(sizeDim)}
         </ul>
@@ -558,9 +620,9 @@
 {/snippet}
 
 {#snippet rightControls(scope: string)}
-  <button class="btn btn-sm btn-ghost flex-none normal-case" onclick={() => (deckOpen = true)}>deck</button>
+  <button class="btn btn-sm btn-ghost flex-none normal-case" title="read the corpus as a sortable, filterable list" onclick={() => (deckOpen = true)}>deck</button>
   <button disabled={m.channels.color !== "region"} title={m.channels.color !== "region" ? "region labels show when coloured by region" : "show region labels on the map"}
-    class="btn btn-sm flex-none normal-case {showLabels && m.channels.color === 'region' ? 'btn-active' : 'btn-ghost'}" onclick={() => (showLabels = !showLabels)}>labels</button>
+    aria-pressed={labelsOn} class="btn btn-sm flex-none normal-case {showLabels && m.channels.color === 'region' ? 'btn-active' : 'btn-ghost'}" onclick={() => (showLabels = !showLabels)}>labels</button>
   <button class="btn btn-sm btn-ghost btn-square flex-none" onclick={toggleTheme} aria-label="toggle light or dark theme" title="toggle light / dark">{theme === "dark" ? "☾" : "☀"}</button>
   <DropdownMenu.Root>
     <DropdownMenu.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case" data-menu="{scope}:theme" aria-label="pick a colour theme" title="theme">
@@ -569,7 +631,7 @@
     <DropdownMenu.Portal>
       <DropdownMenu.Content class="eido-pop w-52 p-1" sideOffset={6} align="end">
         {#each THEMES as t}
-          <DropdownMenu.Item class="rounded-field flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm hover:bg-base-200" data-opt="{scope}:theme:{t.id}" onSelect={() => setTheme(t.id)}>
+          <DropdownMenu.Item role="menuitemradio" aria-checked={themeName === t.id} class="rounded-field flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm hover:bg-base-200" data-opt="{scope}:theme:{t.id}" onSelect={() => setTheme(t.id)}>
             <span class="w-3">{themeName === t.id ? "✓" : ""}</span>
             <span class="flex-1">{t.label}</span>
             <span data-theme={t.id} class="flex flex-none gap-0.5 rounded-sm bg-base-100 p-0.5">
@@ -580,7 +642,7 @@
       </DropdownMenu.Content>
     </DropdownMenu.Portal>
   </DropdownMenu.Root>
-  <button class="btn btn-sm btn-ghost flex-none normal-case" onclick={reset}>reset</button>
+  <button class="btn btn-sm btn-ghost flex-none normal-case" title="clear every filter, close the open card, and return grain + camera to this map's defaults" onclick={reset}>reset</button>
 {/snippet}
 
 <div class="flex h-screen w-screen flex-col overflow-hidden bg-base-100 text-base-content"
@@ -599,10 +661,7 @@
       <div class="hidden items-center gap-1 px-2 py-1.5 sm:flex">
         <div class="flex min-w-0 max-w-[16rem] flex-none items-center gap-2 pr-1">
           <span class="flex-none text-base leading-none">🔭</span>
-          <div class="min-w-0">
-            <div class="truncate text-sm font-bold leading-tight" title={prov?.source ?? ""}>{prov?.title ?? "eidoscope"}</div>
-            <div class="truncate font-mono text-[10px] leading-tight opacity-60">{data.ids.length} cards · {curCount} regions</div>
-          </div>
+          <div class="min-w-0">{@render about("bar")}</div>
         </div>
         <div class="divider divider-horizontal mx-0 flex-none"></div>
         <div class="thin-sb flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
@@ -615,10 +674,7 @@
 
       <!-- mobile: name + a controls button that opens the same contents as a sheet -->
       <div class="flex items-center gap-1 px-2 py-1.5 sm:hidden">
-        <div class="min-w-0 flex-1">
-          <div class="truncate text-sm font-bold leading-tight">{prov?.title ?? "eidoscope"}</div>
-          <div class="truncate font-mono text-[10px] leading-tight opacity-60">{data.ids.length} cards · {curCount} regions</div>
-        </div>
+        <div class="min-w-0 flex-1">{@render about("m")}</div>
         <button class="btn btn-sm btn-ghost flex-none normal-case" data-menu="sheet:open" onclick={() => (sheetOpen = true)} aria-label="open controls">controls ▴</button>
         <button class="btn btn-sm btn-ghost flex-none normal-case" onclick={() => (deckOpen = true)}>deck</button>
       </div>
@@ -630,11 +686,11 @@
           <div class="flex flex-wrap items-center gap-1 border-t border-base-300 px-2 py-1.5">
             <span class="font-mono text-[10px] uppercase tracking-widest opacity-50">filters</span>
             {#each chips as chip}
-              <button onclick={chip.remove} title="remove filter" class="badge badge-sm badge-neutral gap-1 font-mono">
+              <button onclick={chip.remove} title="remove this filter: {chip.label}" aria-label="remove filter {chip.label}" class="badge badge-sm badge-neutral gap-1 font-mono">
                 <span class="max-w-[11rem] truncate">{chip.label}</span><span class="opacity-60">✕</span>
               </button>
             {/each}
-            {#if chips.length > 1}<button onclick={() => m.clearFilters()} class="btn btn-ghost btn-xs normal-case">clear all</button>{/if}
+            {#if chips.length > 1}<button onclick={() => m.clearFilters()} title="remove every active filter" aria-label="clear all filters" class="btn btn-ghost btn-xs normal-case">clear all</button>{/if}
             <span class="ml-auto font-mono text-[10px] opacity-60">{filterMask ? filterMask.reduce((a, v) => a + v, 0) : data.ids.length} / {data.ids.length} cards</span>
           </div>
         </div>
@@ -750,7 +806,7 @@
             <select bind:value={m.channels.sort} aria-label="sort the deck" class="select select-xs">
               {#each scalarDims as d}<option value={d.key}>{d.name}</option>{/each}
             </select></label>
-          {#if hasRead}<button class="btn btn-xs normal-case {deckUnread ? 'btn-active' : 'btn-ghost'}" onclick={() => (deckUnread = !deckUnread)}>unread only</button>{/if}
+          {#if hasRead}<button class="btn btn-xs normal-case {deckUnread ? 'btn-active' : 'btn-ghost'}" aria-pressed={deckUnread} title="hide cards already marked read" onclick={() => (deckUnread = !deckUnread)}>unread only</button>{/if}
           <input bind:value={deckQ} placeholder="filter…" aria-label="filter the deck" class="input input-xs min-w-0 flex-1" />
           <button class="btn btn-ghost btn-xs btn-square ml-auto" onclick={() => requestClose()} aria-label="close deck">✕</button>
         </div>

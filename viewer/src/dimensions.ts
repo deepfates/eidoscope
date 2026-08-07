@@ -1,4 +1,4 @@
-import type { MapContract } from "../../src/schema";
+import type { MapContract, MetaField } from "../../src/schema";
 import { col, axisColor, type RGB } from "./encode";
 
 // THE DIMENSION REGISTRY — one abstraction for "a per-card value", from three sources (discovered PCA axes,
@@ -8,7 +8,7 @@ import { col, axisColor, type RGB } from "./encode";
 // its properties uniformly — so the same little toggle works identically wherever a dimension is placed.
 
 export type DimKind = "scalar" | "categorical" | "temporal";
-export type DimSource = "region" | "axis" | "meta" | "query";
+export type DimSource = "axis" | "meta" | "query";
 export type DimProps = { norm: "honest" | "rank"; invert: boolean };  // user-controllable, per dimension
 
 export type Dimension = {
@@ -38,27 +38,68 @@ export const defaultProps = (d: Dimension): DimProps => ({
 
 const folderOf = (u?: string) => { if (!u || !u.startsWith("file://")) return undefined; const p = u.slice(7).split("/").filter(Boolean); return p.length >= 2 ? decodeURIComponent(p[p.length - 2]).replace(/_/g, " ") : undefined; };
 
-// categorical dimensions the corpus actually supports, self-filtered to a legible, well-covered set.
-function categoricals(D: MapContract): Dimension[] {
-  const n = D.ids.length;
-  const defs: { key: string; name: string; get: (i: number) => string | undefined }[] = [
-    { key: "folder", name: "folder", get: (i) => folderOf(D.urls?.[i]) },
-    { key: "author", name: "source", get: (i) => (D.authors?.[i] ?? undefined) as string | undefined },
-    { key: "site", name: "source site", get: (i) => (D.siteNames?.[i] ?? undefined) as string | undefined },
-    { key: "tags", name: "tag", get: (i) => { const t = D.tags?.[i] as any; return Array.isArray(t) ? t[0] : (t ?? undefined); } },
-  ];
-  return defs.map((d) => {
-    const cnt: Record<string, number> = {};
-    for (let i = 0; i < n; i++) { const v = d.get(i); if (v) cnt[v] = (cnt[v] || 0) + 1; }
-    const ord = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a]);
-    const idx: Record<string, number> = {}; ord.forEach((v, i) => (idx[v] = i));
-    return { key: d.key, name: d.name, kind: "categorical" as const, source: "meta" as const, cat: d.get, ord, idx, cnt };
-  }).filter((f) => f.ord!.length >= 2 && f.ord!.length <= 40 && f.ord!.reduce((a, v) => a + f.cnt![v], 0) >= n * 0.4);
+// ---- the META-FIELD MANIFEST (v2 `D.metaFields`) → dimensions -------------------------------------------
+// The pipeline DECLARES each corpus field and its type (src/map.ts buildMetaFields); the viewer only has to
+// resolve `source` to values. Older (v1) files carry no manifest, so LEGACY_FIELDS below reproduces exactly
+// what the viewer used to hardcode — same keys, same names — and is used as the fallback.
+//
+// Display names: the viewer keeps its own established labels for the keys it already showed (a manifest label
+// must not silently rename a user-visible control); unknown keys use the manifest's label verbatim.
+const NAME_OVERRIDE: Record<string, string> = { author: "source", site: "source site", folder: "folder", tags: "tag", date: "date", hub: "influence", citec: "citation impact", length: "length" };
+const nameOf = (f: MetaField) => NAME_OVERRIDE[f.key] ?? f.label;
+
+// Resolve one MetaField.source to a per-card accessor. `col:<field>` reads the named parallel column;
+// `derived:<k>` is something the viewer computes (folder from urls, length from cores).
+function resolve(D: MapContract, f: MetaField): ((i: number) => unknown) | null {
+  if (f.source.startsWith("col:")) {
+    const arr = (D as unknown as Record<string, unknown[]>)[f.source.slice(4)];
+    if (!Array.isArray(arr)) return null;
+    return (i) => arr[i];
+  }
+  if (f.source === "derived:folder") return (i) => folderOf(D.urls?.[i]);
+  if (f.source === "derived:length") return (i) => (D.cores[i] || "").length;
+  return null;   // axis:* is served from D.axes; anything else is a field this viewer doesn't know how to read
 }
 
-// Build the static dimension registry from the loaded map. `region` (the grain-driven cluster) is a categorical
-// dimension built by the caller (it depends on the current grain assignment). Query dimensions are appended by
-// the caller too (they're created at runtime).
+// A declared field → a Dimension (or null when the corpus doesn't actually carry usable values for it).
+function dimOf(D: MapContract, f: MetaField): Dimension | null {
+  const get = resolve(D, f); if (!get) return null;
+  const n = D.ids.length;
+  if (f.type === "scalar" || f.type === "temporal") {
+    const raw = Array.from({ length: n }, (_, i) => { const v = get(i); return typeof v === "number" ? v : undefined; });
+    if (!raw.some((v) => typeof v === "number")) return null;
+    return { key: f.key, name: nameOf(f), kind: f.type, source: "meta", raw, bipolar: false };
+  }
+  // categorical + boolean both become a categorical dimension. A multi-valued field (tags) is represented by
+  // its FIRST value — one card sits in one colour bucket.
+  const cat = f.type === "boolean"
+    ? (i: number) => { const v = get(i); return v === true ? nameOf(f) : v === false ? "not " + nameOf(f) : undefined; }
+    : (i: number) => { const v = get(i); const s = f.multi && Array.isArray(v) ? v[0] : v; return typeof s === "string" && s ? s : undefined; };
+  const cnt: Record<string, number> = {};
+  for (let i = 0; i < n; i++) { const v = cat(i); if (v) cnt[v] = (cnt[v] || 0) + 1; }
+  const ord = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a]);
+  // self-filter to a legible, well-covered set: at least two values, not a near-unique id column, and present
+  // on a real share of the corpus. A field that fails this would make a useless colour lens.
+  if (ord.length < 2 || ord.length > 40 || ord.reduce((a, v) => a + cnt[v], 0) < n * 0.4) return null;
+  const idx: Record<string, number> = {}; ord.forEach((v, i) => (idx[v] = i));
+  return { key: f.key, name: nameOf(f), kind: "categorical", source: "meta", cat, ord, idx, cnt };
+}
+
+// What a pre-manifest (v1) .eido gets: exactly the set the viewer used to hardcode.
+const LEGACY_FIELDS: MetaField[] = [
+  { key: "hub", label: "influence", type: "scalar", source: "col:hub" },
+  { key: "citec", label: "citation impact", type: "scalar", source: "col:citec" },
+  { key: "length", label: "length", type: "scalar", source: "derived:length" },
+  { key: "date", label: "date", type: "temporal", source: "col:dates" },
+  { key: "folder", label: "folder", type: "categorical", source: "derived:folder" },
+  { key: "author", label: "author / source", type: "categorical", source: "col:authors" },
+  { key: "site", label: "source site", type: "categorical", source: "col:siteNames" },
+  { key: "tags", label: "tags", type: "categorical", multi: true, source: "col:tags" },
+];
+
+// Build the static dimension registry from the loaded map. The region clustering is NOT a dimension: it's the
+// `color: "region"` sentinel (see model.svelte.ts) because it's grain-derived, not a stored per-card column.
+// Query dimensions are appended by the caller (they're created at runtime).
 export function buildDimensions(D: MapContract): Dimension[] {
   const dims: Dimension[] = [];
   // only the DISCOVERED axes — skip the injected metadata/query pseudo-axes (flagged `monotonic`) the old path
@@ -67,11 +108,12 @@ export function buildDimensions(D: MapContract): Dimension[] {
   // are both real, so the norm toggle works on axes. Older files carry only the rank-normed scores → fixedNorm
   // (rank is the only recoverable view). Default props keep axes on rank either way (readable geometry).
   for (const a of D.axes) if (!(a as any).monotonic) { const raw = D.rawScores?.[a.key]; dims.push({ key: a.key, name: a.name, kind: "scalar", source: "axis", raw: raw ?? D.scores[a.key], bipolar: true, fixedNorm: !raw, low: (a as any).low, high: (a as any).high, variance: (a as any).variance, weak: (a as any).weak }); }
-  dims.push({ key: "hub", name: "influence", kind: "scalar", source: "meta", raw: D.hub, bipolar: false });
-  if (D.citec?.some((x) => typeof x === "number")) dims.push({ key: "citec", name: "citation impact", kind: "scalar", source: "meta", raw: D.citec as number[], bipolar: false });
-  dims.push({ key: "length", name: "length", kind: "scalar", source: "meta", raw: D.cores.map((c) => (c || "").length), bipolar: false });
-  if (D.dates?.some((d) => typeof d === "number")) dims.push({ key: "date", name: "date", kind: "temporal", source: "meta", raw: D.dates as number[], bipolar: false });
-  dims.push(...categoricals(D));
+  // metadata dimensions come from the file's own typed manifest when it has one (v2), else the legacy set.
+  // `axis:*` entries are skipped — the discovered axes are already served above, straight from D.axes.
+  const fields = (D.metaFields?.length ? D.metaFields : LEGACY_FIELDS).filter((f) => !f.source.startsWith("axis:"));
+  const meta = fields.map((f) => dimOf(D, f)).filter((d): d is Dimension => !!d);
+  // scalars/temporals first, categoricals after — the order the channel menus have always presented.
+  dims.push(...meta.filter((d) => d.kind !== "categorical"), ...meta.filter((d) => d.kind === "categorical"));
   return dims;
 }
 
@@ -108,10 +150,7 @@ export function scores01(dim: Dimension, props: DimProps): number[] {
 const DIM = [58, 58, 58] as RGB; // missing categorical value
 export function colorAccessor(dim: Dimension | undefined, props: DimProps, regionAssign?: number[]): (i: number) => RGB {
   if (!dim) { const a = regionAssign ?? []; return (i) => col(a[i] ?? 0); } // fallback = region
-  if (dim.kind === "categorical") {
-    if (dim.source === "region" && regionAssign) return (i) => col(regionAssign[i] ?? 0);
-    return (i) => { const v = dim.cat!(i); return v == null ? DIM : col(dim.idx![v] ?? 0); };
-  }
+  if (dim.kind === "categorical") return (i) => { const v = dim.cat!(i); return v == null ? DIM : col(dim.idx![v] ?? 0); };
   const s = scores01(dim, props);
   return (i) => axisColor((s[i] ?? 50) / 100);
 }
