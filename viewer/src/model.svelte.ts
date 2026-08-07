@@ -10,6 +10,7 @@ import type { MapContract } from "../../src/schema";
 import type { Layout } from "./deckmap";
 import { distinctiveTerms, distinctiveAxes } from "../../src/distinct";
 import { buildDimensions, sizeAccessor, colorAccessor, scores01, defaultProps, type Dimension, type DimProps } from "./dimensions";
+import { encodeIdxSet, fnv1a, parseIdSet, type UrlIdSet } from "./idset";
 
 export type ChannelName = "color" | "size" | "x" | "y" | "z" | "scrub" | "sort";
 // A channel holds a Dimension.key, or one of these documented sentinels:
@@ -61,10 +62,12 @@ export type UrlPatch = {
   scrubbed: boolean;    // a window was restored → App must remount the slider (scrubNonce)
   queries: string[];    // query-dimension texts, to be re-embedded best-effort
   // DERIVED dimensions can't be recomputed from a label — they need their examples. Each arrives as
-  // `<label>~<card ids>` and is re-derived once the corpus is mounted (unresolvable ids drop out).
-  derived: { label: string; ids: string[] }[];
+  // `<label>~<key>:<set>` (key so channels pointing at it survive a reload; legacy `<label>~<ids>` still
+  // parses, keyless) and is re-derived once the corpus is mounted. `ref` = the examples ARE the shared
+  // selection (`sel=`), serialized once instead of twice.
+  derived: { label: string; key?: string; set?: UrlIdSet; ref?: boolean }[];
   region?: number; facet?: string; find?: string; card?: string;
-  sel?: string[];       // a shared SELECTION, as card ids (mapped to indices once the corpus is mounted)
+  sel?: UrlIdSet;       // a shared SELECTION (resolved to indices once the corpus is mounted)
 };
 
 export function parseUrl(search: string): UrlPatch {
@@ -72,7 +75,16 @@ export function parseUrl(search: string): UrlPatch {
   const out: UrlPatch = {
     scrubbed: false,
     queries: p.getAll("q"),
-    derived: p.getAll("d").map((s) => { const t = s.indexOf("~"); return { label: t < 0 ? s : s.slice(0, t), ids: (t < 0 ? "" : s.slice(t + 1)).split(",").filter(Boolean) }; }).filter((d) => d.label && d.ids.length),
+    derived: p.getAll("d").flatMap((s): UrlPatch["derived"] => {
+      const t = s.indexOf("~"); if (t < 0) return [];
+      const label = s.slice(0, t); let payload = s.slice(t + 1);
+      let key: string | undefined;
+      const km = payload.match(/^(d\d+):/); if (km) { key = km[1]; payload = payload.slice(km[0].length); }
+      if (!label || !payload) return [];
+      if (payload === "s") return [{ label, key, ref: true }];   // examples = the sel= set, carried once
+      const set = parseIdSet(payload);
+      return set ? [{ label, key, set }] : [];
+    }),
   };
   const L = p.get("layout"); if (L === "mde" || L === "axes" || L === "orbit" || L === "axes3d") out.layout = L;
   const c = p.get("color"); if (c) out.color = c;
@@ -100,7 +112,7 @@ export function parseUrl(search: string): UrlPatch {
   const fp = p.get("facet"); if (fp) out.facet = fp;
   const find = p.get("find"); if (find) out.find = find;
   const card = p.get("card"); if (card) out.card = card;
-  const sel = p.get("sel"); if (sel) out.sel = sel.split(",").filter(Boolean);
+  const sel = p.get("sel"); if (sel) { const set = parseIdSet(sel); if (set) out.sel = set; }
   return out;
 }
 
@@ -249,13 +261,38 @@ export class ViewModel {
     if (!D || !sel?.length) return [];
     return distinctiveAxes(D.scores, D.axes, sel, 4);
   });
-  // Beyond this many ids a `sel=` param stops being a link and starts being a payload, so we say so out
-  // loud rather than silently truncating (a truncated selection would be a LIE about what was shared).
-  static SEL_URL_CAP = 200;
-  selShareable = $derived(!this.selection || this.selection.length <= ViewModel.SEL_URL_CAP);
-  // …and the same honesty for a derived dimension: past the cap its examples don't ride in the link, so the
-  // dimension won't come back on reload — say it rather than let a shared view quietly lose an axis.
-  derivedShareable = (key: string): boolean => (this.derived.find((d) => d.key === key)?.ids.length ?? 0) <= ViewModel.SEL_URL_CAP;
+  // An id set rides in the URL as delta-encoded sorted indices + checksum (idset.ts) — measured at
+  // 1.34–1.9 chars/card for corpora of 500–20,000 cards (vs ~27/card spelling ULIDs out). The cap is on the
+  // ENCODED length, and it comes from the URL itself: the lowest widely-enforced URL limit in the wild is
+  // 2,083 chars (IE's, still the floor many share sinks assume); the rest of a busy view's params measured
+  // ~280 chars, leaving ~1,800 for the set — ≈1,300 cards at the measured density. Past that we serialize
+  // NOTHING and say so, rather than silently truncating (a truncated set would be a LIE about what was shared).
+  static SET_PARAM_CAP = 1800;
+  // encode a set of indices for THIS corpus (checksummed against the ids they name), or null with no corpus
+  private encSet(idx: number[]): string | null {
+    const D = this.data; if (!D) return null;
+    return "*" + encodeIdxSet(idx, fnv1a([...new Set(idx)].sort((a, b) => a - b).map((i) => D.ids[i]).join(",")));
+  }
+  selEnc = $derived.by((): string | null => (this.selection?.length && this.data ? this.encSet(this.selection) : null));
+  selShareable = $derived(!this.selection?.length || (this.selEnc !== null && this.selEnc.length <= ViewModel.SET_PARAM_CAP));
+  // A derived dim's payload: `s` when its examples ARE the shareable current selection (carried once, in
+  // sel=), else its own encoded set — or null past the cap (the axis won't survive the link; the pane says so).
+  private derivedPayload(d: { ids: string[] }): string | null {
+    const D = this.data; if (!D) return null;
+    const sel = this.selection;
+    if (sel?.length === d.ids.length && this.selShareable && this.selEnc) {
+      const s = new Set(d.ids);
+      if (sel.every((i) => s.has(D.ids[i]))) return "s";
+    }
+    const idToIdx = new Map(D.ids.map((id, i) => [id, i]));
+    const idx = d.ids.map((id) => idToIdx.get(id)).filter((i): i is number => i !== undefined);
+    if (!idx.length) return null;
+    const enc = this.encSet(idx);
+    return enc && enc.length <= ViewModel.SET_PARAM_CAP ? enc : null;
+  }
+  // …the same honesty for a derived dimension: if its examples don't ride in the link, the dimension won't
+  // come back on reload — say it rather than let a shared view quietly lose an axis.
+  derivedShareable = (key: string): boolean => { const d = this.derived.find((x) => x.key === key); return !!d && this.derivedPayload(d) !== null; };
   // The isolated facet VALUE is derived, never stored: it is simply "is there a categorical filter on the
   // dimension colour currently shows". Switching the colour lens therefore cannot delete a filter (it used
   // to — an effect wrote state and ate "author = Alice" when you coloured by folder); the filter lives on
@@ -327,10 +364,14 @@ export class ViewModel {
   // ---- derived dimensions (DERIVE): minted from a selection, registered exactly like a query ----
   // Minting changes EXACTLY ONE THING: a new dimension exists. It places itself on no channel, and the
   // selection it came from stays held (deriving doesn't consume it).
-  addDerived(label: string, ids: string[], raw: number[]): string {
-    const key = "d" + this.dN++;
-    this.derived = [...this.derived, { key, label, ids, raw }];
-    return key;
+  // `key` is passed when restoring from a URL: the serialized channels name the dim by key (color=d1), so
+  // the restored dim must come back UNDER ITS OWN KEY — renumbering positionally handed a channel to a
+  // different axis whenever a sibling dim didn't survive the link (the eid-0iql label-drift bug).
+  addDerived(label: string, ids: string[], raw: number[], key?: string): string {
+    const k = key && /^d\d+$/.test(key) && !this.derived.some((d) => d.key === key) ? key : "d" + this.dN;
+    this.dN = Math.max(this.dN, +k.slice(1) + 1);
+    this.derived = [...this.derived, { key: k, label, ids, raw }];
+    return k;
   }
   renameDerived(key: string, label: string) { this.derived = this.derived.map((d) => (d.key === key ? { ...d, label } : d)); }
   // remove a MINTED dimension (query or derived); every channel pointing at it falls back to its default.
@@ -388,13 +429,17 @@ export class ViewModel {
     if (this.facetPin !== null) p.set("facet", this.facetPin);
     const tf = this.filters.find((f) => f.kind === "text") as Extract<Filter, { kind: "text" }> | undefined; if (tf) p.set("find", tf.q);
     for (const qq of this.queries) p.append("q", qq.text);   // query dims by text (re-embedded on load, best-effort)
-    // derived dims by <label>~<example ids> (re-derived on load). Past the same cap a selection uses, the
-    // examples stop being a link and start being a payload: we serialize NOTHING and the pane says so.
-    for (const dd of this.derived) if (dd.ids.length <= ViewModel.SEL_URL_CAP) p.append("d", dd.label.replace(/~/g, "-") + "~" + dd.ids.join(","));
+    // derived dims as <label>~<key>:<set> (re-derived on load). The KEY rides along so channels pointing at
+    // the dim (color=d1) still name the same axis after a reload even if a sibling dim dropped — restoring
+    // positionally renumbered the survivors and a shared view came back painted (and labeled) by the WRONG
+    // axis. A dim minted from the shared selection references it (`s`) instead of repeating the ids. Past
+    // the cap we serialize NOTHING and the pane says so.
+    for (const dd of this.derived) { const pay = this.derivedPayload(dd); if (pay !== null) p.append("d", dd.label.replace(/~/g, "-") + "~" + dd.key + ":" + pay); }
     if (this.selected !== null && this.data) p.set("card", this.data.ids[this.selected]);
-    // a held SELECTION rides as card IDS, not indices (ids survive a re-render of the same corpus; indices
-    // don't). Capped — past the cap we serialize NOTHING and the UI says the selection is too large to share.
-    if (this.selection?.length && this.data && this.selShareable) p.set("sel", this.selection.map((i) => this.data!.ids[i]).join(","));
+    // a held SELECTION rides as an encoded, checksummed index set (idset.ts) — compact, and the checksum
+    // drops it cleanly on a corpus whose ids no longer match. Capped — past the cap we serialize NOTHING
+    // and the UI says the selection is too large to share.
+    if (this.selection?.length && this.data && this.selShareable && this.selEnc) p.set("sel", this.selEnc);
     const q = p.toString();
     return pathname + (q ? "?" + q : "");
   }

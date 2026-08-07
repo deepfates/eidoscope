@@ -13,6 +13,7 @@ import type { MapContract } from "../src/schema.ts";
 // 3 blobs · 30 each · a NESTED 4-level ladder [3,6,12,24] refining by index. Node 0 sits at the ORIGIN
 // (blob centers are symmetric so the map centers on it) — a center click/tap/dbl-click is a guaranteed hit.
 import { synthMap as synth, altSynth } from "./synth.ts";
+import { parseIdSet, resolveIdSet, encodeIdxSet, fnv1a } from "../viewer/src/idset.ts";
 
 const distIndex = join(import.meta.dir, "..", "viewer", "dist", "index.html");
 if (!existsSync(distIndex)) { console.error("✗ viewer/dist/index.html missing — run `cd viewer && bun run build` first"); process.exit(2); }
@@ -294,8 +295,11 @@ try {
   await p.waitForTimeout(400);
   s = await st();
   ok(s.selection === 30, `a pointer-drawn lasso holds exactly the circled clump (blob 1 = 30 cards) — got ${s.selection}`);
-  const selIds = await p.evaluate(() => new URL(location.href).searchParams.get("sel")?.split(",") ?? []);
-  ok(selIds.length === 30 && selIds.every((id: string) => +id.slice(1) >= 30 && +id.slice(1) < 60), `the held set is the RIGHT 30 cards (all of blob 1, none of the others) — e.g. ${selIds.slice(0, 3).join(",")}`);
+  const synthIds = synth().ids;
+  const selParam = await p.evaluate(() => new URL(location.href).searchParams.get("sel"));
+  const selIdx = selParam ? (resolveIdSet(parseIdSet(selParam)!, synthIds) ?? []) : [];
+  ok(selIdx.length === 30 && selIdx.every((i) => i >= 30 && i < 60), `the held set decodes to the RIGHT 30 cards (all of blob 1, none of the others) — e.g. ${selIdx.slice(0, 3).join(",")}`);
+  ok(!!selParam && selParam.length < 30 * 4, `…and it is COMPACT: ${selParam?.length} chars for 30 cards, not ~${30 * 4 - 1} spelled-out ids (eid-0iql)`);
 
   // 14c. THE EXPLAIN STEP: the pane says what distinguishes the set, not just how many it grabbed
   const selPane = await p.evaluate(() => {
@@ -339,18 +343,41 @@ try {
     return g.color;
   });
   ok(scoreOrder === "d0", "the derived axis is what's painting");
+  // eid-0iql: the derived axis rides as d=<label>~<key>:<set>, and because its examples ARE the held
+  // selection, the set is the one-char reference `s` — the 30 ids ride ONCE (in sel=), not twice.
   const dParam = new URL(p.url()).searchParams.get("d");
-  ok(!!dParam && dParam.startsWith("blobby~") && dParam.split("~")[1].split(",").length === 30, `the derived axis rides in the URL as d=<label>~<ids> — ${dParam?.slice(0, 24)}…`);
+  ok(dParam === "blobby~d0:s", `the derived axis rides as d=<label>~<key>:<set>, deduped against sel= — got "${dParam}"`);
   const deriveUrl = p.url();
   await p.goto(deriveUrl);
   await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
   await p.waitForTimeout(700);
   s = await st();
   ok(s.derived === 1 && s.color === "d0", `?d= re-derives the axis on load and the placement survives — derived=${s.derived} color=${s.color}`);
+  // LABEL FIDELITY (eid-0iql): the axis comes back under the NAME it was shared with, not a re-derived one
+  const colorNameAfter = await p.evaluate(() => (document.querySelector('[data-menu="bar:color"]') as HTMLElement)?.textContent?.trim());
+  ok(!!colorNameAfter?.includes("≈ blobby"), `…and under its OWN LABEL — toolbar says "${colorNameAfter}"`);
+  // KEY FIDELITY (eid-0iql): channels name derived dims by key, so a restored dim must come back under the
+  // key the URL carries — even a non-zero one (positional renumbering re-painted shared views with the
+  // WRONG axis's direction and label whenever a sibling dim hadn't survived the link).
+  const sel3060 = "*" + encodeIdxSet(Array.from({ length: 30 }, (_, i) => 30 + i), fnv1a(Array.from({ length: 30 }, (_, i) => "d" + (30 + i)).join(",")));
+  await p.goto(`${base}/index.html?color=d4&d=${encodeURIComponent("survivor~d4:s")}&sel=${sel3060}`);
+  await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
+  await p.waitForTimeout(600);
+  s = await st();
+  const keyName = await p.evaluate(() => (document.querySelector('[data-menu="bar:color"]') as HTMLElement)?.textContent?.trim());
+  ok(s.derived === 1 && s.color === "d4" && !!keyName?.includes("≈ survivor"), `a derived dim restores under the KEY the URL names (color=d4 → "≈ survivor") — color=${s.color} label="${keyName}"`);
+  // honesty guards: legacy spelled-out ids still resolve; unresolvable ids and a checksum that disagrees
+  // with this corpus (same indices, different cards) drop the axis instead of faking one
   await p.goto(`${base}/index.html?d=ghost~nosuch1,nosuch2`);
   await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
   await p.waitForTimeout(600);
   ok((await st()).derived === 0, "a d= whose example ids don't resolve drops cleanly instead of faking an axis");
+  const badSum = "*" + encodeIdxSet(Array.from({ length: 30 }, (_, i) => 30 + i), fnv1a("some,other,corpus"));
+  await p.goto(`${base}/index.html?sel=${badSum}&d=${encodeURIComponent("impostor~d0:" + badSum)}`);
+  await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
+  await p.waitForTimeout(600);
+  s = await st();
+  ok(s.selection === 0 && s.derived === 0, `an encoded set whose checksum names a DIFFERENT corpus drops whole (no plausible-looking wrong set) — sel=${s.selection} derived=${s.derived}`);
 
   // back to a held selection for the rest of the SELECT walk
   await p.goto(`${base}/index.html`);
@@ -388,7 +415,8 @@ try {
   await p.evaluate((path) => (window as any).__eidoLasso(path), circle(bx, by, rad));
   await p.waitForTimeout(300);
   const shareUrl = p.url();
-  ok(new URL(shareUrl).searchParams.get("sel")!.split(",").length === 30, "a held selection serializes to the URL as sel=<ids>");
+  const shareSel = new URL(shareUrl).searchParams.get("sel");
+  ok(!!shareSel && (resolveIdSet(parseIdSet(shareSel)!, synthIds)?.length ?? 0) === 30, "a held selection serializes to the URL as a compact encoded set");
   await p.goto(shareUrl);
   await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
   await p.waitForTimeout(600);

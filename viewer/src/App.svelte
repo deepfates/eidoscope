@@ -10,6 +10,7 @@
   import { ViewModel, parseUrl, type CameraOp } from "./model.svelte";
   import { embedQuery, cosineAll, resetEmbedder } from "./semantic";
   import { deriveDirection } from "./derive";
+  import { resolveIdSet } from "./idset";
   import type { MapContract } from "../../src/schema";
 
   // THE MODEL — channels, filters, scrubber, the dimension registry, URL (de)serialization. App keeps the DOM,
@@ -268,21 +269,24 @@
     m.applyPatch(p);
     if (p.scrubbed) scrubNonce++;               // remount the slider so its thumbs show the restored window
     for (const t of p.queries) embedAndAdd(t);  // best-effort, background; won't block the restore or hang the app
-    // DERIVED dims re-derive from their example ids (a label alone can't reproduce a direction). Ids that the
-    // corpus no longer has are dropped; if too few survive to contrast against the rest, the axis drops too.
+    // a shared SELECTION resolves first (a derived dim may reference it); a set that doesn't resolve
+    // against this corpus — missing legacy ids, or an encoded set whose checksum disagrees — drops, not fakes
+    const selIdx = p.sel && data ? resolveIdSet(p.sel, data.ids) : null;
+    // DERIVED dims re-derive from their example ids (a label alone can't reproduce a direction), under the
+    // KEY the URL names (so channels pointing at them keep pointing at the same axis) and with the label
+    // the URL carries. Examples that don't resolve drop the axis rather than restoring a lookalike.
     for (const d of p.derived) {
       const D = data; if (!D) break;
-      const idx = d.ids.map((id) => D.ids.indexOf(id)).filter((i) => i >= 0);
+      const idx = d.ref ? (selIdx ?? []) : (d.set ? (resolveIdSet(d.set, D.ids) ?? []) : []);
       const dir = deriveDirection(D.vectors, idx);
-      if (dir) m.addDerived(d.label, idx.map((i) => D.ids[i]), cosineAll(dir, D.vectors!));
+      if (dir) m.addDerived(d.label, idx.map((i) => D.ids[i]), cosineAll(dir, D.vectors!), d.key);
     }
     queueMicrotask(() => {
       if (p.region !== undefined && p.region >= 0 && p.region < curCount) togglePin(p.region);
       if (p.facet !== undefined && colorDim?.ord?.includes(p.facet)) toggleFacetPin(p.facet);
       if (p.find !== undefined) m.onFind(p.find);
       if (p.card !== undefined && data) { const i = data.ids.indexOf(p.card); if (i >= 0) focusCard(i); }
-      // a shared SELECTION arrives as ids; missing ids (a regenerated corpus) are dropped, not faked
-      if (p.sel && data) { const idx = p.sel.map((id) => data!.ids.indexOf(id)).filter((i) => i >= 0); if (idx.length) m.setSelection(idx); }
+      if (selIdx?.length) m.setSelection(selIdx);   // resolved above, applied once the graph settles
     });
   }
   $effect(() => { void [m.layout, m.channels.color, m.channels.size, m.grain, m.channels.x, m.channels.y, m.channels.z, m.pinned, m.selected, m.channels.scrub, m.scrubLo, m.scrubHi, m.dimProps, m.filters, m.queries, m.derived, m.selection, themeName]; if (urlReady) { try { history.replaceState(history.state, "", currentUrl()); } catch {} } });
@@ -944,7 +948,7 @@
             <button data-testid="sel-clear" class="btn btn-ghost btn-xs normal-case" onclick={() => { m.clearSelection(); mintedKey = null; }}>clear</button>
           </div>
           {#if !m.selShareable}
-            <div class="rounded-field mb-2 bg-base-200 px-2 py-1 text-[11px] leading-snug opacity-70">selection too large to share — the link carries up to 200 cards</div>
+            <div class="rounded-field mb-2 bg-base-200 px-2 py-1 text-[11px] leading-snug opacity-70">selection too large to share — these {selection?.length} cards encode to {m.selEnc?.length ?? 0} characters and the link carries up to {ViewModel.SET_PARAM_CAP} (≈1,300 cards)</div>
           {/if}
 
           <!-- ═══ DERIVE: name the axis before (or after) you mint it. The result appears HERE with one-tap
@@ -972,7 +976,7 @@
                 <button data-testid="derive-place-x" class="btn btn-xs normal-case" onclick={() => (m.channels.x = mintedDim.key)}>x</button>
               </div>
               {#if !m.derivedShareable(mintedDim.key)}
-                <div class="mt-1 leading-snug opacity-70">too many examples to share — the link carries up to 200, so this axis won't come back on reload</div>
+                <div class="mt-1 leading-snug opacity-70">too many examples to share — they encode past the link's {ViewModel.SET_PARAM_CAP}-character budget (≈1,300 cards), so this axis won't come back on reload</div>
               {/if}
             </div>
           {/if}
