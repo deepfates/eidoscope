@@ -94,7 +94,7 @@
   // ?region= deep link re-frame the view the sharer had chosen). The camera moves only when the user
   // asks: the `fit` button in the pane, or `reset view`. Releasing an isolate likewise leaves the camera.
   function applyCamera(op: CameraOp) { if (op?.kind === "reset") return; /* deliberately ignore `fit` — see above */ }
-  const togglePin = (c: number) => applyCamera(m.togglePin(c));
+  const togglePin = (c: number) => { const op = m.togglePin(c); if (m.pinned === null) handle?.setHighlight(null); applyCamera(op); };
   const toggleFacetPin = (v: string) => applyCamera(m.toggleFacetPin(v));
   const fitTo = (idx: number[]) => handle?.fitToIndices(idx);   // the explicit, user-asked-for camera move
 
@@ -111,7 +111,16 @@
   // history-synced overlays (eid-fktf): opening an overlay pushes a history entry, so Back — and the
   // mobile back gesture — closes the topmost one (the only intuitive way to escape deck/detail on a phone).
   let overlayPushed = false;
-  function doCloseOverlays() { if (showIntro) { try { localStorage.setItem("eido-seen", "1"); } catch {} } showIntro = false; deckOpen = false; sheetOpen = false; if (selected !== null) focusCard(null); }
+  // Close the TOPMOST overlay only — Escape with a card open behind the deck used to close both, which is
+  // the "one action changes one thing" law applied to dismissal. Order = stacking order, innermost first.
+  function doCloseOverlays() {
+    if (showIntro) { try { localStorage.setItem("eido-seen", "1"); } catch {} showIntro = false; return; }
+    if (sheetOpen) { sheetOpen = false; return; }
+    if (deckOpen) { deckOpen = false; return; }
+    if (selection !== null) { m.clearSelection(); return; }
+    if (selected !== null) { focusCard(null); return; }
+    if (pinned !== null) togglePin(pinned);
+  }
   function requestClose() { if (overlayPushed) { try { history.back(); return; } catch {} } doCloseOverlays(); }
   function dismissIntro() { requestClose(); }
   $effect(() => { const anyOpen = showIntro || deckOpen || sheetOpen || selected !== null; if (anyOpen && !overlayPushed) { try { history.pushState({ eido: 1 }, ""); } catch {} overlayPushed = true; } });
@@ -130,8 +139,6 @@
   });
   const labelsOn = $derived(showLabels && m.channels.color === "region");  // 3D now has proper billboarded region labels (isomorphic with 2D)
   // switching the colour lens drops stale facet filters (a folder value means nothing under a different lens)
-  let lastColorForFacet = m.channels.color;
-  $effect(() => { const c = m.channels.color; if (c !== lastColorForFacet) { lastColorForFacet = c; const cur = untrack(() => m.colorDim?.key); untrack(() => m.dropStaleFacets(cur)); } });
 
   const rgb = (c: [number, number, number]) => `rgb(${c[0]},${c[1]},${c[2]})`;
   const trunc = (s: string, m2 = 44) => (s && s.length > m2 ? s.slice(0, m2 - 1) + "…" : s);
@@ -222,7 +229,6 @@
   function applyUrlState() {
     const p = parseUrl(location.search);
     m.applyPatch(p);
-    if (p.color) lastColorForFacet = p.color;   // keep the facet-clear effect from firing on this restore
     if (p.scrubbed) scrubNonce++;               // remount the slider so its thumbs show the restored window
     for (const t of p.queries) embedAndAdd(t);  // best-effort, background; won't block the restore or hang the app
     queueMicrotask(() => {
@@ -276,7 +282,7 @@
       getColor: m.colorGet(dims0, ch.color, D.levels?.[m.grain] ?? D.cluster), getRadius: m.sizeGet(dims0, ch.size), getX: m.posGet(dims0, ch.x), getY: m.posGet(dims0, ch.y), getZ: m.posGet(dims0, ch.z), posSig: m.posSig, layout: m.layout, showLabels: labelsOn, grain: m.grain, theme: themeName,
       onClick: (i) => { if (m.selectMode) return; focusCard(i < 0 ? null : i); },
       onHover: (h, x, y) => (hovered = h == null ? null : { ...h, x, y }),
-      onGrainChange: (g) => { m.grain = g; m.pinned = null; },
+      onGrainChange: (g) => m.setGrain(g),
     });
     // read-only introspection seam for the integration suite (drives the REAL built app, asserts real state)
     (window as any).__eido = () => { const d = handle?.debug(); return { grain: m.grain, k: curCount, layout: m.layout, color: m.channels.color, pin: pinned, facetPin, focus: selected, detail: selected !== null, deckOpen, cite: citeOn, ghosts: ghostsOn, theme, themeName, pal: Array.from({ length: 6 }, (_, i) => col(i)), hover: hovered ? hovered.kind : null, zoom: d?.zoom ?? 0, labels: d?.labels ?? 0, labelsOn, regions: d?.regions ?? 0, rot: d?.rot ?? null, rotX: d?.rotX ?? null, target: d?.target ?? null, span3: d?.span3 ?? null, filters: chips.map((c) => c.label), selectMode: m.selectMode, selection: selection?.length ?? 0, selShareable: m.selShareable, drawing: !!lasso, visible: filterMask ? filterMask.reduce((a, v) => a + v, 0) : (data?.ids.length ?? 0) }; };
@@ -621,7 +627,7 @@
   {#if nLevels > 1}
     <label class="flex flex-none items-center gap-1.5 px-1 text-xs" title="how finely the map is divided into regions — continents to towns">
       <span class="flex-none font-mono text-[10px] uppercase opacity-60">grain</span>
-      <input type="range" data-testid="grain" min="0" max={nLevels - 1} bind:value={m.grain} oninput={() => (m.pinned = null)} class="range range-xs w-20 min-w-0" aria-label="grain level: how finely the map is divided into regions" aria-valuetext="{curCount} regions" />
+      <input type="range" data-testid="grain" min="0" max={nLevels - 1} value={m.grain} oninput={(e) => m.setGrain(+(e.currentTarget as HTMLInputElement).value)} class="range range-xs w-20 min-w-0" aria-label="grain level: how finely the map is divided into regions" aria-valuetext="{curCount} regions" />
       <span class="w-6 flex-none text-right font-mono text-[10px] opacity-60">{curCount}</span>
     </label>
   {/if}

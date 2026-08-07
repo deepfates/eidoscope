@@ -104,7 +104,6 @@ export class ViewModel {
   grain = $state(0);
   selected = $state<number | null>(null);
   pinned = $state<number | null>(null);            // isolated region (kept for legend styling / hover)
-  facetPin = $state<string | null>(null);          // isolated facet value (e.g. a folder) — one lens at a time
   // dimProps holds per-dimension user overrides (norm/invert), keyed by dim.key so the props travel WITH the
   // dimension — toggling honest⇄rank changes it identically wherever it's placed (colour/size/x/y/z).
   dimProps = $state<Record<string, DimProps>>({});
@@ -186,13 +185,23 @@ export class ViewModel {
   toggleFacetPin(v: string): CameraOp {
     const key = this.colorDim?.key; if (!key) return null;
     const i = this.filters.findIndex((f) => f.kind === "cat" && f.key === key && f.value === v);
-    if (i >= 0) { this.filters = this.filters.filter((_, j) => j !== i); this.facetPin = null; return { kind: "reset" }; }
+    if (i >= 0) { this.filters = this.filters.filter((_, j) => j !== i); return { kind: "reset" }; }
     this.filters = [...this.filters.filter((f) => !(f.kind === "cat" && f.key === key)), { kind: "cat", key, label: v, value: v }];
-    this.facetPin = v;
     return { kind: "fit", indices: this.facetMembers(v) };
   }
-  removeFilter(f: Filter) { this.filters = this.filters.filter((x) => x !== f); if (f.kind === "region") this.pinned = null; if (f.kind === "cat") this.facetPin = null; if (f.kind === "text") this.query = ""; }
-  clearFilters() { this.filters = []; this.pinned = null; this.facetPin = null; this.query = ""; this.clearSelection(); this.resetScrub(); }
+  removeFilter(f: Filter) { this.filters = this.filters.filter((x) => x !== f); if (f.kind === "region") this.pinned = null; if (f.kind === "text") this.query = ""; }
+  // "clear all filters" clears FILTERS. A held selection is not a filter (it has no chip, and it only
+  // becomes one via filterToSelection) — destroying it here silently ate a lasso the user had just drawn.
+  clearFilters() { this.filters = []; this.pinned = null; this.query = ""; this.resetScrub(); }
+  // Changing the grain re-cuts the regions, so a region filter naming cluster #N no longer means what the
+  // user chose — the filter must go WITH the pointer. Doing half of it (nulling `pinned` only, as the
+  // slider used to) left an invisible mask on a re-numbered cluster and dropped ?region= from the URL.
+  setGrain(g: number) {
+    if (g === this.grain) return;
+    this.grain = g;
+    this.pinned = null;
+    this.filters = this.filters.filter((f) => f.kind !== "region");
+  }
 
   // ── the SELECTION verbs ────────────────────────────────────────────────────────────────────────────
   setSelection(idx: number[]) { this.selection = idx.length ? [...idx].sort((a, b) => a - b) : null; }
@@ -228,11 +237,15 @@ export class ViewModel {
   // loud rather than silently truncating (a truncated selection would be a LIE about what was shared).
   static SEL_URL_CAP = 200;
   selShareable = $derived(!this.selection || this.selection.length <= ViewModel.SEL_URL_CAP);
-  // switching the colour lens drops stale facet filters (a folder value means nothing under a different lens)
-  dropStaleFacets(currentKey: string | undefined) {
-    const next = this.filters.filter((f) => f.kind !== "cat" || f.key === currentKey);
-    if (next.length !== this.filters.length) { this.filters = next; this.facetPin = null; }
-  }
+  // The isolated facet VALUE is derived, never stored: it is simply "is there a categorical filter on the
+  // dimension colour currently shows". Switching the colour lens therefore cannot delete a filter (it used
+  // to — an effect wrote state and ate "author = Alice" when you coloured by folder); the filter lives on
+  // its DIMENSION, keeps filtering, keeps its chip, and lights its legend row again when you come back.
+  facetPin = $derived.by((): string | null => {
+    const key = this.colorDim?.key; if (!key) return null;
+    const f = this.filters.find((x) => x.kind === "cat" && x.key === key) as Extract<Filter, { kind: "cat" }> | undefined;
+    return f?.value ?? null;
+  });
   // text search = a filter (hard hide), synced from the find box — no separate deck path.
   onFind(v: string) {
     this.query = v; const q = v.trim();
@@ -293,17 +306,33 @@ export class ViewModel {
     return key;
   }
   // remove a query dimension; every channel pointing at it falls back to its default. ONE loop, not seven ifs.
-  removeQuery(key: string) { this.queries = this.queries.filter((q) => q.key !== key); this.releaseDimension(key); }
+  // If it was the WINDOWED dimension, the window's numbers must die with it: cosine bounds silently
+  // re-applied to whatever dimension the scrubber lands on next (dates in epoch-ms) hid the whole corpus.
+  removeQuery(key: string) {
+    const wasWindowed = this.channels.scrub === key;
+    this.queries = this.queries.filter((q) => q.key !== key);
+    this.releaseDimension(key);
+    if (wasWindowed) this.resetScrub();
+  }
   releaseDimension(key: string) {
     const fallback: Channels = { ...RELEASE, ...defaultsFor(this.data) };
     for (const c of CHANNELS) if (this.channels[c] === key) this.channels[c] = fallback[c];
   }
 
-  // ---- a new corpus: reset the per-corpus state and park x/y/z on this file's axes ----
+  // ---- a new corpus: EVERYTHING corpus-shaped resets ----
+  // Anything indexed by, scored against, or named after the old corpus is meaningless here: filters name
+  // cluster ids and category values that don't exist; a `set` filter and a selection are raw indices into a
+  // different file; query dimensions carry cosine arrays of the old length; the window carries the old
+  // dimension's units; dimProps key off dimension ids that may not recur. Carrying any of it forward opened
+  // the new map already silently masked — the worst possible first impression of an "honest" instrument.
   mount(D: MapContract) {
-    this.selected = null; this.pinned = null; this.facetPin = null;   // per-corpus state doesn't carry across files
-    this.selection = null; this.selectMode = false;                   // …and a held selection is per-corpus too
-    Object.assign(this.channels, defaultsFor(D));
+    this.selected = null; this.pinned = null;
+    this.selection = null; this.selectMode = false;
+    this.filters = []; this.query = "";
+    this.queries = []; this.qN = 0;
+    this.dimProps = {};
+    this.channels = { ...INITIAL, ...defaultsFor(D) };
+    this.scrubLo = null; this.scrubHi = null;
     this.grain = D.di ?? 0;
     this.data = D;
   }
