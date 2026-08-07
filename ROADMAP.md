@@ -44,8 +44,21 @@ Build order (deps encoded in `tk`):
    untested).
 7. **Polish** (`eid-ef7e`) — craft pass once the grammar is whole.
 
-Open design forks (decide by looking at built candidates): panel layout · where selection verbs
-appear (on-map vs inspector) · what a card looks like as you zoom · mobile posture.
+Shipped since this plan was written: the DaisyUI shell (toolbar · filter chips · reading pane ·
+themes), theme-derived map palettes, the extracted view model, SELECT (circle → held set that
+explains itself → filter/export), exact Gram/EVD axis discovery (26× faster, bit-identical), seeded
+determinism, ingest dedupe, and one command-name-per-concept.
+
+Recovered from the full conversation history and now tracked (things asked for that had fallen out
+of the record): the micro-UX inventory (`eid-kzv2` — multiple filter slicers, a real status bar,
+full region names on hover, card-hover content, symbol toggles), the view-state store architecture
+question (`eid-thbs`), auto-deploy so the live URL is always current (`eid-vkep`), export sinks
+beyond `.eido` (`eid-ncrq`), justifying the grain ladder from the data rather than hand-carved
+constants (`eid-iw04`), the competitive feature study (`eid-zz8n`), named corpus targets
+(`eid-6bd2`), and mobile animations that jump instead of easing (`eid-aw7x`).
+
+Open design forks (decide by looking at built candidates): where selection verbs appear (on-map vs
+inspector) · what a card looks like as you zoom · deck as drawer vs modal.
 
 ## Far side (`eid-8j5h`)
 

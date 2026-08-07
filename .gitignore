@@ -35,3 +35,7 @@ story/*.png
 /region-cache.jsonl
 /viewer/dist-pathfinder/
 .claude/worktrees/
+# agent verification screenshots (evidence, not source — they live in the ticket/report, not the repo)
+*.png
+!docs/*.png
+scratchpad/
