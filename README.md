@@ -158,6 +158,23 @@ actual `dist/index.html`, and asserts interaction invariants (grain ladder, labe
 legend isolate, drill, tap-to-open, frontier, theme, `?map=`) through a read-only `window.__eido()`
 seam — real bundle, real browser, no mocks. Requires `cd viewer && bun run build` first.
 
+## Live deploy
+
+The viewer is live at **https://dist-pathfinder.vercel.app** — pathfinder map by default, plus
+`?map=readwise.eido` and `?map=tldr.eido`.
+
+Two paths keep it current:
+
+- **Automatic (app code):** every push to `main` runs `.github/workflows/deploy.yml`, which
+  rebuilds `viewer/dist/index.html`, carries forward the maps already on the live URL, and
+  redeploys. Needs three GitHub repo secrets: `VERCEL_TOKEN` (vercel.com → Account Settings →
+  Tokens), `VERCEL_ORG_ID` (`team_20bP21GMzY6WsTcwrquSQofc`), and `VERCEL_PROJECT_ID`
+  (`prj_QfTktphemWI57mgx12Er7Y84jjAo`).
+- **Manual (new/updated maps):** `bun run deploy` assembles `viewer/dist-pathfinder/` from your
+  local `viewer/public/*.eido` and pushes to production. Maps are deliberately not in git — an
+  `.eido` carries the cards and vectors of its corpus, so publishing one is a privacy decision
+  made locally, not a CI side effect.
+
 ## Status
 
 `bun test` + `bun run typecheck` are green. Working end to end: the core pipeline

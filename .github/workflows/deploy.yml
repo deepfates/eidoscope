@@ -1,0 +1,45 @@
+# eid-vkep — the live URL updates itself on merge to main.
+#
+# The .eido maps are local artifacts (large, privacy-gated) and are NOT in git, so
+# Vercel's native git integration can't build this site. Instead: build the viewer
+# here, carry forward the maps already published on the live URL, and redeploy.
+# Publishing NEW maps stays a local act: `bun run deploy`.
+#
+# Requires three repo secrets (see README "Live deploy"):
+#   VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID
+name: deploy
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      LIVE_URL: https://dist-pathfinder.vercel.app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: cd viewer && bun install
+      - run: cd viewer && bun run build
+      - name: assemble deploy dir (fresh app + maps already live)
+        run: |
+          mkdir -p deploy-dir
+          cp viewer/dist/index.html deploy-dir/
+          for f in map.eido readwise.eido tldr.eido; do
+            curl --fail --silent --show-error --location -o "deploy-dir/$f" "$LIVE_URL/$f"
+          done
+          ls -la deploy-dir
+      - name: deploy to production
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          cd deploy-dir
+          npx -y vercel@latest deploy --prod --yes --token "$VERCEL_TOKEN"
