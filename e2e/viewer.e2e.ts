@@ -99,9 +99,22 @@ const consoleErrs: string[] = []; p.on("console", (m) => { if (m.type() === "err
 
 const st = () => p.evaluate(() => (window as any).__eido());
 const proj = (xy: number[]) => p.evaluate((xy) => (window as any).__eidoProject(xy) as number[], xy);
-const setGrain = (v: number) => p.evaluate((v) => { const s = document.querySelector('input[type=range]') as HTMLInputElement; const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!; set.call(s, String(v)); s.dispatchEvent(new Event("input", { bubbles: true })); }, v);
 const btn = (re: RegExp) => p.locator("button", { hasText: re }).first();
-const setControl = (label: string, value: string) => p.evaluate(([label, value]) => { const l = [...document.querySelectorAll("label")].find((l) => l.querySelector("span")?.textContent?.trim() === label); const s = l?.querySelector("select") as HTMLSelectElement | undefined; if (!s) return; const set = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!; set.call(s, value); s.dispatchEvent(new Event("change", { bubbles: true })); }, [label, value] as [string, string]);
+// ── the toolbar is a row of real menus now (DaisyUI classes on Bits UI behaviour), so the harness drives the
+// SAME affordances a person does: open the menu, click the item. Triggers carry data-menu="<scope>:<channel>"
+// and items data-opt="<scope>:<channel>:<value>" purely as stable test handles — the semantics asserted below
+// are unchanged from the select-driven era.
+const closeMenus = async () => { await p.evaluate(() => (document.querySelector('[data-menu][data-state="open"]') as HTMLElement | null)?.click()); await p.waitForTimeout(80); };
+const menu = async (channel: string) => { await closeMenus(); await p.click(`[data-menu="bar:${channel}"]`); await p.waitForTimeout(180); };
+// pick a value on a channel. The colour popover deliberately STAYS open after a pick (it is also the legend),
+// so callers that then click a legend row don't have to reopen it.
+const setControl = async (channel: string, value: string) => { await menu(channel); await p.click(`[data-opt="bar:${channel}:${value}"]`); await p.waitForTimeout(180); if (channel !== "color") await closeMenus(); };
+// grain lives in the colour popover now (it modifies the region clustering it legends)
+const setGrain = async (v: number) => {
+  await menu("color");
+  await p.evaluate((v) => { const s = document.querySelector('[data-testid=grain]') as HTMLInputElement; const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!; set.call(s, String(v)); s.dispatchEvent(new Event("input", { bubbles: true })); }, v);
+  await p.waitForTimeout(120); await closeMenus();
+};
 // deck's onClick fires the SAME way for a desktop mouse click and a touch tap; Playwright can't cleanly
 // drive deck's mouse-gesture recognizer (a harness limit), but touchscreen.tap reaches it reliably — so a
 // tap is the honest proxy for "click/tap a card". Single-click card-open is debounced 220ms behind a
@@ -139,13 +152,15 @@ try {
 
   // 4. THE REGRESSION: legend-click isolates + zooms but must NOT change grain; re-click releases
   await btn(/^reset$/).click(); await p.waitForTimeout(200); s = await st(); const g0 = s.grain, z0 = s.zoom;
-  const legendItem = p.locator('[role="button"][aria-label^="isolate region"]').first();
+  await menu("color");   // the legend IS the colour picker's popover now
+  const legendItem = p.locator('button[aria-label^="isolate region"]').first();
   await legendItem.click(); await p.waitForTimeout(200); s = await st();
   ok(s.grain === g0, `legend-click leaves grain unchanged — grain ${g0}→${s.grain}`);
   ok(s.pin !== null, "legend-click pins/isolates the region");
   ok(s.zoom > z0 * 1.15, `legend-click zooms IN — ${z0.toFixed(2)}→${s.zoom.toFixed(2)}`);
-  await legendItem.click(); await p.waitForTimeout(200); s = await st();
+  await legendItem.click(); await p.waitForTimeout(200); s = await st();   // popover stays open through an isolate
   ok(s.pin === null, `re-click releases the pin — pin=${s.pin}`);
+  await closeMenus();
 
   // 5. drill via map double-click steps grain finer (and does NOT open a card)
   await btn(/^reset$/).click(); await p.waitForTimeout(200); const gd = (await st()).grain;
@@ -163,7 +178,8 @@ try {
 
   // 8. FRONTIER: cite + ghost toggles flip; hovering a ghost reports 'ghost' (not a wrong card); click → arXiv
   await btn(/^reset$/).click(); await p.waitForTimeout(200);
-  await btn(/cite edges/i).click(); await btn(/frontier/i).click(); await p.waitForTimeout(150); s = await st();
+  await menu("layout"); await p.click('[data-opt="bar:overlay:cite"]'); await p.waitForTimeout(150);
+  await menu("layout"); await p.click('[data-opt="bar:overlay:ghosts"]'); await p.waitForTimeout(200); await closeMenus(); s = await st();
   ok(s.cite === true && s.ghosts === true, `cite + frontier toggles flip on — cite=${s.cite} ghosts=${s.ghosts}`);
   const [gx, gy] = await proj([0.8, 0.5]);
   await p.mouse.move(gx, gy); await p.waitForTimeout(200); s = await st();
@@ -177,17 +193,24 @@ try {
   // 9. THEME toggle flips data-theme + persists
   await btn(/^reset$/).click(); await p.waitForTimeout(150);
   const t0 = (await st()).theme;
-  await p.locator('button[aria-label*="theme"]').click(); await p.waitForTimeout(150);
-  const t1 = (await st()).theme, attr = await p.evaluate(() => document.documentElement.dataset.theme), stored = await p.evaluate(() => localStorage.getItem("eido-theme"));
-  ok(t1 !== t0 && attr === t1 && stored === t1, `theme toggle flips + persists — ${t0}→${t1} attr=${attr} stored=${stored}`);
+  await p.locator('button[aria-label="toggle light or dark theme"]').click(); await p.waitForTimeout(150);
+  let ts = await st();
+  const attr = await p.evaluate(() => document.documentElement.dataset.theme), stored = await p.evaluate(() => localStorage.getItem("eido-theme"));
+  ok(ts.theme !== t0 && attr === ts.themeName && stored === ts.themeName, `theme toggle flips ground + persists — ${t0}→${ts.theme} (${ts.themeName}) attr=${attr} stored=${stored}`);
+  // the picker: any curated theme stamps <html data-theme> and still maps to a legible canvas ground
+  await menu("theme"); await p.click('[data-opt="bar:theme:nord"]'); await p.waitForTimeout(200); ts = await st();
+  const attr2 = await p.evaluate(() => document.documentElement.dataset.theme);
+  ok(ts.themeName === "nord" && attr2 === "nord" && ts.theme === "dark", `theme picker swaps the DaisyUI theme + maps it to dark canvas ink — name=${ts.themeName} attr=${attr2} canvas=${ts.theme}`);
+  ok(new URL(p.url()).searchParams.get("theme") === "nord", `the chosen theme rides the shareable URL — ${new URL(p.url()).search}`);
+  await menu("theme"); await p.click('[data-opt="bar:theme:black"]'); await p.waitForTimeout(150); await closeMenus();
 
   // 10. DECK shows the whole corpus (was capped at 300) + unread-only filters
   await btn(/^reset$/).click(); await p.waitForTimeout(150);
   await btn(/^deck$/).click(); await p.waitForTimeout(200);
-  const all = await p.locator(".grid button").count();
+  const all = await p.locator("[data-deck-card]").count();
   ok(all === 90, `deck lists the whole corpus (90 cards, not capped) — got ${all}`);
   await btn(/unread only/i).click(); await p.waitForTimeout(200);
-  const unread = await p.locator(".grid button").count();
+  const unread = await p.locator("[data-deck-card]").count();
   ok(unread < all && unread === 60, `unread-only drops read cards — ${all}→${unread}`);
   await p.keyboard.press("Escape"); await p.waitForTimeout(100);
 
@@ -228,13 +251,14 @@ try {
   await p.goto(`${base}/index.html`); await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
   await btn(/explore/i).click().catch(() => {}); await p.waitForTimeout(150);
   await setControl("color", "author"); await p.waitForTimeout(250);  // dimension KEY (the registry replaced the old meta: prefix)
-  const facetRow = p.locator('[role="button"][aria-label^="isolate source"]').first();
+  const facetRow = p.locator('button[aria-label^="isolate source"]').first();   // the colour popover stays open after the pick
   await facetRow.click(); await p.waitForTimeout(250);
   let fs = await st();
   ok(fs.facetPin != null, `clicking a facet legend row isolates that value — facetPin=${JSON.stringify(fs.facetPin)}`);
   await facetRow.click(); await p.waitForTimeout(250);
   fs = await st();
   ok(fs.facetPin == null, `re-clicking releases the facet isolate — facetPin=${JSON.stringify(fs.facetPin)}`);
+  await closeMenus();
 
   // 11f. MISSING METADATA: the bare card (no author/date/url/source) still renders cleanly — no empty '·', no broken links (eid-m107)
   await p.goto(`${base}/index.html`); await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
@@ -242,11 +266,11 @@ try {
   await btn(/^deck$/).click(); await p.waitForTimeout(250);
   await p.locator('input[placeholder="filter…"]').fill("Doc 2.29");   // unique to the bare last card
   await p.waitForTimeout(250);
-  await p.locator(".grid button").first().click(); await p.waitForTimeout(350);
+  await p.locator("[data-deck-card]").first().click(); await p.waitForTimeout(350);
   const bare = await p.evaluate(() => {
     const d = document.querySelector('[role="dialog"][aria-label="card detail"]');
     if (!d) return null;
-    const meta = (d.querySelector("div.mb-2.font-mono")?.textContent || "").trim();
+    const meta = (d.querySelector("[data-meta]")?.textContent || "").trim();
     return { hasTitle: !!d.querySelector(".font-bold"), meta, anchors: [...d.querySelectorAll("a")].length };
   });
   ok(!!bare?.hasTitle, "bare card still shows its detail panel (title present)");

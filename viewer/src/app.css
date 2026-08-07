@@ -1,82 +1,23 @@
 @import "tailwindcss";
 
-/* ── Design tokens ───────────────────────────────────────────────────────────
-   One source of truth for colour. Components reference these via Tailwind
-   arbitrary values (bg-[var(--panel)], text-[var(--ink)]) so light/dark is a
-   token swap, never a per-component rewrite. Neutrals carry a faint cool bias
-   toward the blue accent so they read as chosen, not defaulted. */
-:root {
-  /* dark is the default ground (deck.gl points glow against it) */
-  --bg: #0a0a0b;
-  --panel: rgba(20, 20, 23, 0.82);
-  --panel-solid: rgba(9, 9, 11, 0.96);
-  --scrim: rgba(9, 9, 11, 0.72);
-  --field: #08080a;
-  --card: #17171a;
-  --chip: #27272b;
-  --chip2: rgba(39, 39, 43, 0.7);
-  --hair: #26262b;
-  --hair2: #3c3c42;
-  --ink: #f5f5f6;
-  --soft: #d2d2d6;
-  --dim: #a1a1aa;
-  --faint: #71717a;
-  --accent: #60a5fa;
-  --accent-ink: #08080a;
-  color-scheme: dark;
+/* ── THEMES ──────────────────────────────────────────────────────────────────
+   DaisyUI 5 owns the design tokens now (there is no hand-rolled --ink/--panel
+   ladder any more). "theme your own reader" is a product feature: the viewer
+   ships a curated set and stamps the choice on <html data-theme>, which is the
+   same signal DaisyUI keys off. `black` is the default ground (deck.gl points
+   glow hardest against it); `light` is the paper counterpart the ☾/☀ toggle
+   flips to. See THEMES in App.svelte for the canvas dark|light mapping. */
+@plugin "daisyui" {
+  themes: black --default, light, dim, night, nord, sunset, corporate, winter;
 }
 
-/* the viewer's own toggle stamps data-theme on <html> and must win over the OS
-   media query in both directions — so define light under BOTH signals. */
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) {
-    --bg: #f6f6f4;
-    --panel: rgba(255, 255, 255, 0.86);
-    --panel-solid: rgba(255, 255, 255, 0.97);
-    --scrim: rgba(244, 244, 242, 0.7);
-    --field: #ffffff;
-    --card: #ffffff;
-    --chip: #e9e9e6;
-    --chip2: rgba(233, 233, 230, 0.7);
-    --hair: #e2e2de;
-    --hair2: #cfcfca;
-    --ink: #18181b;
-    --soft: #3f3f46;
-    --dim: #52525b;
-    --faint: #71717a;
-    --accent: #2563eb;
-    --accent-ink: #ffffff;
-    color-scheme: light;
-  }
-}
-:root[data-theme="light"] {
-  --bg: #f6f6f4;
-  --panel: rgba(255, 255, 255, 0.86);
-  --panel-solid: rgba(255, 255, 255, 0.97);
-  --scrim: rgba(244, 244, 242, 0.7);
-  --field: #ffffff;
-  --card: #ffffff;
-  --chip: #e9e9e6;
-  --chip2: rgba(233, 233, 230, 0.7);
-  --hair: #e2e2de;
-  --hair2: #cfcfca;
-  --ink: #18181b;
-  --soft: #3f3f46;
-  --dim: #52525b;
-  --faint: #71717a;
-  --accent: #2563eb;
-  --accent-ink: #ffffff;
-  color-scheme: light;
-}
-:root[data-theme="dark"] { color-scheme: dark; }
-
-html, body { margin: 0; height: 100%; overscroll-behavior: none; background: var(--bg); }
+html, body { margin: 0; height: 100%; overscroll-behavior: none; background: var(--color-base-100); }
 #app { height: 100%; }
 
 /* a11y: a visible keyboard-focus ring on every interactive control (canvas map aside — the deck/list
    view is the accessible parallel). Mouse users don't see it thanks to :focus-visible. */
 button:focus-visible, select:focus-visible, input:focus-visible, a:focus-visible, [role="button"]:focus-visible, [tabindex]:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--color-primary);
   outline-offset: 2px;
   border-radius: 4px;
 }
@@ -86,4 +27,31 @@ button:focus-visible, select:focus-visible, input:focus-visible, a:focus-visible
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; scroll-behavior: auto !important; }
   [class*="backdrop-blur"] { backdrop-filter: none !important; }
+}
+
+/* scrollable regions that shouldn't advertise a chrome scrollbar — still scrolls, just quietly. */
+.thin-sb { scrollbar-width: thin; scrollbar-color: var(--color-base-300) transparent; }
+.thin-sb::-webkit-scrollbar { width: 6px; height: 6px; }
+.thin-sb::-webkit-scrollbar-thumb { background: var(--color-base-300); border-radius: 3px; }
+.thin-sb::-webkit-scrollbar-track { background: transparent; }
+
+/* theme svelte-range-slider-pips (the dual-thumb scrubber) to the DaisyUI tokens — one battle-tested
+   widget replaces the hand-rolled two-overlapping-inputs + pointer-events hack. */
+.scrub .rangeSlider {
+  margin: 6px 2px; height: 5px; background: var(--color-base-300);
+  --range-handle-inactive: var(--color-primary);
+  --range-handle: var(--color-primary);
+  --range-handle-focus: var(--color-primary);
+  --range-range: var(--color-primary);
+}
+.scrub .rangeSlider .rangeHandle .rangeNub { box-shadow: 0 0 0 1px var(--color-base-100); }
+
+/* the toolbar's popovers/menus (portalled to <body> by Bits UI) share one surface treatment */
+.eido-pop {
+  z-index: 60;
+  border-radius: var(--radius-box);
+  border: 1px solid var(--color-base-300);
+  background: var(--color-base-100);
+  box-shadow: 0 12px 32px -8px rgb(0 0 0 / 0.45);
+  color: var(--color-base-content);
 }
