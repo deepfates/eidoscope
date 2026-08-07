@@ -17,7 +17,8 @@
     "qa": "tsc --noEmit && bun run typecheck:viewer && bun run check:viewer && bun test && bun run e2e/viewer.e2e.ts && bun run e2e/offline.ts",
     "check:redundancy": "bun run src/redundancy.ts",
     "gallery": "bun run e2e/gallery.ts",
-    "singlefile": "bun bin/build-singlefile.ts"
+    "singlefile": "bun bin/build-singlefile.ts",
+    "deploy": "cp viewer/dist/index.html viewer/dist-pathfinder/ && cp viewer/public/pathfinder.eido viewer/dist-pathfinder/map.eido && cp viewer/public/map.eido viewer/dist-pathfinder/readwise.eido && cp viewer/public/tldr.eido viewer/dist-pathfinder/tldr.eido && cd viewer/dist-pathfinder && npx -y vercel@latest deploy --prod --yes"
   },
   "dependencies": {
     "@ax-llm/ax": "^23.0.5",
