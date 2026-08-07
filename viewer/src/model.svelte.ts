@@ -8,6 +8,7 @@
 
 import type { MapContract } from "../../src/schema";
 import type { Layout } from "./deckmap";
+import { distinctiveTerms, distinctiveAxes } from "../../src/distinct";
 import { buildDimensions, sizeAccessor, colorAccessor, scores01, defaultProps, type Dimension, type DimProps } from "./dimensions";
 
 export type ChannelName = "color" | "size" | "x" | "y" | "z" | "scrub" | "sort";
@@ -38,7 +39,11 @@ export const defaultsFor = (D: MapContract | null): Pick<Channels, "x" | "y" | "
 export type Filter =
   | { kind: "cat"; key: string; label: string; value: string }        // categorical dimension = value
   | { kind: "region"; key: "region"; label: string; cluster: number } // cluster at the current grain
-  | { kind: "text"; key: "text"; label: string; q: string };          // title/body substring
+  | { kind: "text"; key: "text"; label: string; q: string }           // title/body substring
+  // A materialized SELECTION, converted into a filter. Extensional by construction (frozen indices), which
+  // is exactly why it composes: once it is a Filter it intersects with every other filter and gets a chip,
+  // with no special case anywhere downstream.
+  | { kind: "set"; key: "set"; label: string; idx: number[] };
 
 // Pinning a region/facet is TWO acts: a state mutation (this module) and a camera move (App owns the deck
 // handle). The model returns the camera intent rather than reaching for a handle it shouldn't know about.
@@ -56,6 +61,7 @@ export type UrlPatch = {
   scrubbed: boolean;    // a window was restored → App must remount the slider (scrubNonce)
   queries: string[];    // query-dimension texts, to be re-embedded best-effort
   region?: number; facet?: string; find?: string; card?: string;
+  sel?: string[];       // a shared SELECTION, as card ids (mapped to indices once the corpus is mounted)
 };
 
 export function parseUrl(search: string): UrlPatch {
@@ -87,6 +93,7 @@ export function parseUrl(search: string): UrlPatch {
   const fp = p.get("facet"); if (fp) out.facet = fp;
   const find = p.get("find"); if (find) out.find = find;
   const card = p.get("card"); if (card) out.card = card;
+  const sel = p.get("sel"); if (sel) out.sel = sel.split(",").filter(Boolean);
   return out;
 }
 
@@ -108,6 +115,12 @@ export class ViewModel {
   query = $state("");                              // the find-box substring (mirrored into a "text" filter)
   scrubLo = $state<number | null>(null);           // window lower bound; null = field min
   scrubHi = $state<number | null>(null);           // window upper bound; null = field max (both null = show all)
+  // ── SELECT (eid-r8t6) ──────────────────────────────────────────────────────────────────────────────
+  // A selection is EXTENSIONAL: the frozen set of card indices a gesture resolved to, materialized at
+  // gesture end. Not a re-evaluable predicate — a lasso in 3D depends on the camera, so the RESULT is
+  // portable and the gesture is not. The model owns it; deckmap only renders it.
+  selection = $state<number[] | null>(null);
+  selectMode = $state(false);                      // the lasso owns the pointer while this is on
   private qN = 0;                                  // monotonic id source for stable query keys
 
   // App owns the slider-remount nonce (a view hack), so a model-side scrub reset tells it to re-read.
@@ -179,7 +192,42 @@ export class ViewModel {
     return { kind: "fit", indices: this.facetMembers(v) };
   }
   removeFilter(f: Filter) { this.filters = this.filters.filter((x) => x !== f); if (f.kind === "region") this.pinned = null; if (f.kind === "cat") this.facetPin = null; if (f.kind === "text") this.query = ""; }
-  clearFilters() { this.filters = []; this.pinned = null; this.facetPin = null; this.query = ""; this.resetScrub(); }
+  clearFilters() { this.filters = []; this.pinned = null; this.facetPin = null; this.query = ""; this.clearSelection(); this.resetScrub(); }
+
+  // ── the SELECTION verbs ────────────────────────────────────────────────────────────────────────────
+  setSelection(idx: number[]) { this.selection = idx.length ? [...idx].sort((a, b) => a - b) : null; }
+  clearSelection() { this.selection = null; }
+  toggleSelectMode(on?: boolean) { this.selectMode = on ?? !this.selectMode; }
+  selectionSet = $derived(this.selection ? new Set(this.selection) : null);
+  // FILTER TO THESE: the selection stops being an emphasis and becomes a hard mask, as one more Filter.
+  // Composing with the rest is then free — the chips row, the intersection mask and clear-all all already
+  // know how to handle a Filter.
+  filterToSelection() {
+    const sel = this.selection; if (!sel?.length) return;
+    this.filters = [...this.filters.filter((f) => f.kind !== "set"), { kind: "set", key: "set", label: "selection (" + sel.length + ")", idx: [...sel] }];
+    this.clearSelection();
+  }
+  // EXPORT: the curation loop's first sink — a plain JSON of what you circled.
+  selectionExport(): { ids: string[]; titles: string[]; urls: (string | undefined)[] } | null {
+    const D = this.data, sel = this.selection; if (!D || !sel?.length) return null;
+    return { ids: sel.map((i) => D.ids[i]), titles: sel.map((i) => D.titles[i]), urls: sel.map((i) => D.urls?.[i]) };
+  }
+  // THE EXPLAIN STEP — a circled clump has to say what it IS, in the corpus's own variables. Same two
+  // functions the pipeline uses to name a region (src/distinct.ts), pointed at the held set instead.
+  selectionTerms = $derived.by((): string[] => {
+    const D = this.data, sel = this.selection;
+    if (!D || !sel?.length) return [];
+    return distinctiveTerms(D.cores, [sel], { top: 8, minDocs: 2 })[0] ?? [];
+  });
+  selectionAxes = $derived.by((): { name: string; pole: string; mean: number }[] => {
+    const D = this.data, sel = this.selection;
+    if (!D || !sel?.length) return [];
+    return distinctiveAxes(D.scores, D.axes, sel, 4);
+  });
+  // Beyond this many ids a `sel=` param stops being a link and starts being a payload, so we say so out
+  // loud rather than silently truncating (a truncated selection would be a LIE about what was shared).
+  static SEL_URL_CAP = 200;
+  selShareable = $derived(!this.selection || this.selection.length <= ViewModel.SEL_URL_CAP);
   // switching the colour lens drops stale facet filters (a folder value means nothing under a different lens)
   dropStaleFacets(currentKey: string | undefined) {
     const next = this.filters.filter((f) => f.kind !== "cat" || f.key === currentKey);
@@ -196,6 +244,7 @@ export class ViewModel {
     const D = this.data; if (!D) return () => true;
     if (f.kind === "text") { const s = f.q.toLowerCase(), T = D.titles, C = D.cores; return (i) => T[i].toLowerCase().includes(s) || C[i].toLowerCase().includes(s); }
     if (f.kind === "region") { const a = this.assignment; return (i) => a[i] === f.cluster; }
+    if (f.kind === "set") { const s = new Set(f.idx); return (i) => s.has(i); }
     const d = this.allDims.find((x) => x.key === f.key); if (!d?.cat) return () => true; return (i) => d.cat!(i) === f.value;
   };
   // THE intersection mask: 1 = passes EVERY active filter (discrete + scrubber), 0 = hidden. null = none active.
@@ -253,6 +302,7 @@ export class ViewModel {
   // ---- a new corpus: reset the per-corpus state and park x/y/z on this file's axes ----
   mount(D: MapContract) {
     this.selected = null; this.pinned = null; this.facetPin = null;   // per-corpus state doesn't carry across files
+    this.selection = null; this.selectMode = false;                   // …and a held selection is per-corpus too
     Object.assign(this.channels, defaultsFor(D));
     this.grain = D.di ?? 0;
     this.data = D;
@@ -279,6 +329,9 @@ export class ViewModel {
     const tf = this.filters.find((f) => f.kind === "text") as Extract<Filter, { kind: "text" }> | undefined; if (tf) p.set("find", tf.q);
     for (const qq of this.queries) p.append("q", qq.text);   // query dims by text (re-embedded on load, best-effort)
     if (this.selected !== null && this.data) p.set("card", this.data.ids[this.selected]);
+    // a held SELECTION rides as card IDS, not indices (ids survive a re-render of the same corpus; indices
+    // don't). Capped — past the cap we serialize NOTHING and the UI says the selection is too large to share.
+    if (this.selection?.length && this.data && this.selShareable) p.set("sel", this.selection.map((i) => this.data!.ids[i]).join(","));
     const q = p.toString();
     return pathname + (q ? "?" + q : "");
   }

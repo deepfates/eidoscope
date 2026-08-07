@@ -78,6 +78,8 @@
   const curClusters = $derived(m.curClusters);
   const nLevels = $derived(m.nLevels);
   const chips = $derived(m.chips);
+  const selection = $derived(m.selection);
+  const selectMode = $derived(m.selectMode);
   const filterMask = $derived(m.filterMask);
   const scrubFields = $derived(m.scrubFields), scrubField = $derived(m.scrubField), scrubRange = $derived(m.scrubRange);
   const propsOf = m.propsOf, poles = m.poles;
@@ -139,8 +141,62 @@
     data ? data.axes.map((a) => ({ n: a.name, s: Math.round(data!.scores[a.key]?.[i] ?? 50) }))
       .sort((x, y) => Math.abs(y.s - 50) - Math.abs(x.s - 50)).slice(0, 3) : [];
 
+  // ═══ SELECT (eid-r8t6) — the lasso gesture ═══════════════════════════════════════════════════════
+  // The PATH lives here (transient view state, screen px relative to the canvas); the SET lives in the
+  // model. deckmap is asked exactly one question at gesture end — "which cards are inside this path?" —
+  // because only it holds the live viewport.
+  //
+  // Coexistence with deck, not interception: in select mode deck's own drag gestures are switched off
+  // (deckmap.setSelectMode → dragPan/dragRotate false), so a one-finger drag is ours by construction and
+  // we never have to swallow the event. That is what keeps two-finger PINCH-ZOOM alive on a phone: deck's
+  // pinch recognizer is registered independently and still sees both pointers.
+  let lasso = $state<number[][] | null>(null);
+  let lassoPointer = -1;
+  const canvasPt = (e: PointerEvent): number[] => { const r = canvas.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+  function lassoDown(e: PointerEvent) {
+    if (!m.selectMode || !data) return;
+    if (lassoPointer >= 0) { endLasso(false); return; }   // a second finger arrived → it's a pinch, abandon the draw
+    lassoPointer = e.pointerId;
+    lasso = [canvasPt(e)];
+    window.addEventListener("pointermove", lassoMove);
+    window.addEventListener("pointerup", lassoUp);
+    window.addEventListener("pointercancel", lassoUp);
+  }
+  function lassoMove(e: PointerEvent) {
+    if (e.pointerId !== lassoPointer || !lasso) return;
+    const pt = canvasPt(e), last = lasso[lasso.length - 1];
+    if (Math.abs(pt[0] - last[0]) + Math.abs(pt[1] - last[1]) < 2) return;   // decimate: no 1px path spam
+    lasso = [...lasso, pt];
+  }
+  function lassoUp(e: PointerEvent) { if (e.pointerId === lassoPointer) endLasso(true); }
+  function endLasso(commit: boolean) {
+    window.removeEventListener("pointermove", lassoMove);
+    window.removeEventListener("pointerup", lassoUp);
+    window.removeEventListener("pointercancel", lassoUp);
+    const path = lasso; lasso = null; lassoPointer = -1;
+    if (!commit || !path || path.length < 3 || !handle) return;
+    const idx = handle.selectPolygon(path, filterMask);   // hidden cards aren't selectable — the mask rides along
+    if (idx.length) { m.setSelection(idx); focusCard(null); }
+  }
+  // programmatic seam for the integration suite: synthesize the SAME path the pointer would have drawn
+  function lassoFromPath(path: number[][]): number {
+    if (!handle) return 0;
+    const idx = handle.selectPolygon(path, filterMask);
+    if (idx.length) { m.setSelection(idx); focusCard(null); }
+    return idx.length;
+  }
+  function exportSelection() {
+    const payload = m.selectionExport(); if (!payload) return;
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = (prov?.title ? prov.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase() : "eidoscope") + "-selection-" + payload.ids.length + ".json";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
   function focusCard(i: number | null) { m.selected = i; handle?.setFocus(i); }
-  function reset() { focusCard(null); m.clearFilters(); handle?.setHighlight(null); m.grain = data?.di ?? 0; handle?.resetView(); }
+  function reset() { focusCard(null); m.clearFilters(); m.selectMode = false; handle?.setHighlight(null); m.grain = data?.di ?? 0; handle?.resetView(); }
 
   // The current label for each channel button — the toolbar states the view, so nothing is hidden in a menu.
   const LAYOUT_LABELS: Record<string, string> = { mde: "neighbor map", axes: "axis scatter", orbit: "3D neighbor map", axes3d: "3D axis scatter" };
@@ -169,9 +225,11 @@
       if (p.facet !== undefined && colorDim?.ord?.includes(p.facet)) toggleFacetPin(p.facet);
       if (p.find !== undefined) m.onFind(p.find);
       if (p.card !== undefined && data) { const i = data.ids.indexOf(p.card); if (i >= 0) focusCard(i); }
+      // a shared SELECTION arrives as ids; missing ids (a regenerated corpus) are dropped, not faked
+      if (p.sel && data) { const idx = p.sel.map((id) => data!.ids.indexOf(id)).filter((i) => i >= 0); if (idx.length) m.setSelection(idx); }
     });
   }
-  $effect(() => { void [m.layout, m.channels.color, m.channels.size, m.grain, m.channels.x, m.channels.y, m.channels.z, m.pinned, m.selected, m.channels.scrub, m.scrubLo, m.scrubHi, m.dimProps, m.filters, m.queries, themeName]; if (urlReady) { try { history.replaceState(history.state, "", currentUrl()); } catch {} } });
+  $effect(() => { void [m.layout, m.channels.color, m.channels.size, m.grain, m.channels.x, m.channels.y, m.channels.z, m.pinned, m.selected, m.channels.scrub, m.scrubLo, m.scrubHi, m.dimProps, m.filters, m.queries, m.selection, themeName]; if (urlReady) { try { history.replaceState(history.state, "", currentUrl()); } catch {} } });
 
   // focus-trap action (eid-vxm2): on open, move focus into the modal + keep Tab inside it (so keyboard
   // focus can't wander to the background controls behind the overlay); on close, return focus to the opener.
@@ -211,17 +269,22 @@
     const ch = m.channels;
     handle = createMap(canvas, D, {
       getColor: m.colorGet(dims0, ch.color, D.levels?.[m.grain] ?? D.cluster), getRadius: m.sizeGet(dims0, ch.size), getX: m.posGet(dims0, ch.x), getY: m.posGet(dims0, ch.y), getZ: m.posGet(dims0, ch.z), posSig: m.posSig, layout: m.layout, showLabels: labelsOn, grain: m.grain, theme: themeName,
-      onClick: (i) => focusCard(i < 0 ? null : i),
+      onClick: (i) => { if (m.selectMode) return; focusCard(i < 0 ? null : i); },
       onHover: (h, x, y) => (hovered = h == null ? null : { ...h, x, y }),
       onGrainChange: (g) => { m.grain = g; m.pinned = null; },
     });
     // read-only introspection seam for the integration suite (drives the REAL built app, asserts real state)
-    (window as any).__eido = () => { const d = handle?.debug(); return { grain: m.grain, k: curCount, layout: m.layout, color: m.channels.color, pin: pinned, facetPin, focus: selected, detail: selected !== null, deckOpen, cite: citeOn, ghosts: ghostsOn, theme, themeName, pal: Array.from({ length: 6 }, (_, i) => col(i)), hover: hovered ? hovered.kind : null, zoom: d?.zoom ?? 0, labels: d?.labels ?? 0, labelsOn, regions: d?.regions ?? 0, rot: d?.rot ?? null, rotX: d?.rotX ?? null, target: d?.target ?? null, span3: d?.span3 ?? null, filters: chips.map((c) => c.label), visible: filterMask ? filterMask.reduce((a, v) => a + v, 0) : (data?.ids.length ?? 0) }; };
+    (window as any).__eido = () => { const d = handle?.debug(); return { grain: m.grain, k: curCount, layout: m.layout, color: m.channels.color, pin: pinned, facetPin, focus: selected, detail: selected !== null, deckOpen, cite: citeOn, ghosts: ghostsOn, theme, themeName, pal: Array.from({ length: 6 }, (_, i) => col(i)), hover: hovered ? hovered.kind : null, zoom: d?.zoom ?? 0, labels: d?.labels ?? 0, labelsOn, regions: d?.regions ?? 0, rot: d?.rot ?? null, rotX: d?.rotX ?? null, target: d?.target ?? null, span3: d?.span3 ?? null, filters: chips.map((c) => c.label), selectMode: m.selectMode, selection: selection?.length ?? 0, selShareable: m.selShareable, drawing: !!lasso, visible: filterMask ? filterMask.reduce((a, v) => a + v, 0) : (data?.ids.length ?? 0) }; };
     // the map no longer fills the window (a toolbar sits above it), so both seams speak PAGE coordinates —
     // what a test's mouse/touch actually uses — and convert at the canvas edge.
     const rect = () => canvas.getBoundingClientRect();
     (window as any).__eidoProject = (xy: number[]) => { const p = handle?.project(xy); if (!p) return p; const r = rect(); return [p[0] + r.left, p[1] + r.top]; };
     (window as any).__eidoPick = (x: number, y: number) => { const r = rect(); return handle?.pickAt(x - r.left, y - r.top); };
+    // SELECT seam: hand in a page-coordinate path, get back how many cards it caught (the same call the
+    // real pointerup makes, through the same viewport projection + polygon test).
+    // [screenX, screenY, ndcZ] for a card, in PAGE coords — the guard's evidence surface.
+    (window as any).__eidoProjectIndex = (i: number) => { const q = handle?.projectIndex(i); if (!q) return null; const r = rect(); return [q[0] + r.left, q[1] + r.top, q[2]]; };
+    (window as any).__eidoLasso = (path: number[][]) => { const r = rect(); return lassoFromPath(path.map(([x, y]) => [x - r.left, y - r.top])); };
   }
   // Semantic query: embed in-browser (same model that made the card vectors), cosine-rank, and append a
   // query-kind DIMENSION. It then appears in every channel menu (color/size/x/y/z/scrubber/deck-sort) like any
@@ -287,7 +350,16 @@
     })();
     // Escape closes the topmost OVERLAY — but a toolbar menu is not an overlay: Bits UI already closes it on
     // Escape, and letting the same key also pop history would yank the view out from under a menu dismissal.
-    const onKey = (e: KeyboardEvent) => { if (e.key !== "Escape") return; if (document.querySelector('[data-menu][data-state="open"]')) return; requestClose(); };
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      const typing = !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
+      if (e.key === "s" && !typing && !e.metaKey && !e.ctrlKey && !e.altKey) { m.toggleSelectMode(); return; }
+      if (e.key !== "Escape") return;
+      if (document.querySelector('[data-menu][data-state="open"]')) return;
+      // Escape leaves the lasso before it touches the overlay stack — the mode you're IN is what you meant.
+      if (m.selectMode) { endLasso(false); m.selectMode = false; return; }
+      requestClose();
+    };
     const onPop = () => { overlayPushed = false; doCloseOverlays(); };  // Back / mobile back gesture closes the overlay
     window.addEventListener("keydown", onKey);
     window.addEventListener("popstate", onPop);
@@ -320,7 +392,10 @@
       : fmtNum(m.scrubLo ?? r[0], r[1] - r[0]) + " – " + fmtNum(m.scrubHi ?? r[1], r[1] - r[0]);
   });
   $effect(() => { m.ensureScrubKey(); });
-  $effect(() => { const h = handle, mask = filterMask; if (h) h.setFilterMask(mask); });  // push the mask (pure derived → no write-loop)
+  $effect(() => { const h = handle, mask = filterMask; if (h) h.setFilterMask(mask); });
+  // selection + select-mode are pushed the same way the mask is: pure derived reads, no write-back.
+  $effect(() => { const h = handle, sel = selection; if (h) h.setSelection(sel); });
+  $effect(() => { const h = handle, sm = selectMode; if (h) h.setSelectMode(sm); });  // push the mask (pure derived → no write-loop)
 
   const prov = $derived(data?.provenance);   // so a passed-around file introduces itself
   const provDate = (g?: number) => (g ? new Date(g).toISOString().slice(0, 10) : "");
@@ -343,7 +418,7 @@
   // the region the legend has isolated — the sidebar reads it when no card is selected
   const pinnedRegion = $derived(pinned === null ? null : curClusters.find((c) => c.c === pinned) ?? null);
   const pinnedBlurb = $derived(pinned === null ? "" : data?.levelBlurbs?.[m.grain]?.[pinned] ?? "");
-  const sidebarOpen = $derived(!!data && (selected !== null || pinnedRegion !== null));
+  const sidebarOpen = $derived(!!data && (selected !== null || selection !== null || pinnedRegion !== null));
 </script>
 
 {#snippet propItems(d: Dimension | undefined)}
@@ -423,6 +498,16 @@
 {/snippet}
 
 {#snippet controls(scope: string)}
+  <!-- SELECT — a mode, not a menu: it changes what a drag on the map MEANS. While it is on, deck's own
+       drag is off and the pointer draws a lasso; pinch-zoom keeps working. Keyboard: s / Escape. -->
+  <button data-testid="{scope}:select" aria-pressed={selectMode}
+    class="btn btn-sm flex-none gap-1 normal-case {selectMode ? 'btn-active btn-primary' : 'btn-ghost'}"
+    title={selectMode ? "drawing mode — drag to circle cards (Escape to leave)" : "select: circle cards on the map to hold them as a set (s)"}
+    onclick={() => m.toggleSelectMode()}>
+    <span aria-hidden="true">◌</span><span class="font-medium">select</span>
+    {#if selection}<span class="badge badge-xs badge-primary">{selection.length}</span>{/if}
+  </button>
+
   <!-- LAYOUT — plus the two map-render overlays, which are layout-ish rather than encoding-ish -->
   <DropdownMenu.Root>
     <DropdownMenu.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case" data-menu="{scope}:layout" aria-label="layout">
@@ -704,10 +789,25 @@
 
   <!-- ═══ BODY: map (fills everything left) + docked details pane ═══ -->
   <main class="flex min-h-0 flex-1">
-    <div bind:this={mapBox} class="relative min-h-0 min-w-0 flex-1 touch-none">
+    <div bind:this={mapBox} class="relative min-h-0 min-w-0 flex-1 touch-none {selectMode ? 'cursor-crosshair' : ''}" onpointerdown={lassoDown}>
       <!-- svelte-ignore a11y_no_interactive_element_to_noninteractive_role -->
       <!-- role="img"+aria-label is the intended pattern: present the canvas as one labeled image and route AT users to the deck list (the real accessible surface) -->
       <canvas bind:this={canvas} class="absolute inset-0 h-full w-full" role="img" aria-label="Document similarity map (visual). Use the deck list for a screen-reader-accessible view of the same cards."></canvas>
+
+      <!-- the live lasso: a plain SVG overlay, inked from the theme's own base-content. Kept OUT of the
+           deck layer stack on purpose — it is gesture feedback, not data, and it must not force a GPU
+           re-render of the point cloud on every pointermove. pointer-events:none so deck still sees hovers. -->
+      {#if lasso && lasso.length > 1}
+        <svg class="pointer-events-none absolute inset-0 z-10 h-full w-full" aria-hidden="true">
+          <polygon points={lasso.map((q) => q[0] + "," + q[1]).join(" ")}
+            class="fill-base-content/5 stroke-base-content/70" stroke-width="1.5" stroke-dasharray="4 3" />
+        </svg>
+      {/if}
+      {#if selectMode && !lasso}
+        <div class="pointer-events-none absolute inset-x-0 top-2 z-10 flex justify-center">
+          <div class="rounded-field bg-base-100/85 px-2 py-1 font-mono text-[10px] shadow backdrop-blur">drag to circle cards · Escape to leave</div>
+        </div>
+      {/if}
 
       {#if data && m.layout === "axes" && xDim && yDim}
         {@const xp = poles(xDim)}{@const yp = poles(yDim)}
@@ -720,7 +820,7 @@
       {/if}
 
       <!-- hover tooltip: a corpus card, or a frontier ghost paper (distinct content, not a mislabeled card) -->
-      {#if hovered && data && selected === null}
+      {#if hovered && data && selected === null && !lasso}
         <div class="rounded-box pointer-events-none absolute z-10 max-w-xs border border-base-300 bg-base-100/95 p-2.5 text-xs shadow-xl backdrop-blur"
           style="left:{Math.min(hovered.x + 14, (mapBox?.clientWidth ?? 800) - 280)}px; top:{Math.min(hovered.y + 14, (mapBox?.clientHeight ?? 600) - 120)}px">
           {#if hovered.kind === "point"}
@@ -738,9 +838,9 @@
 
     <!-- ═══ DETAILS PANE — docked right (a bottom sheet on phones). Never floats over the map centre. ═══ -->
     {#if sidebarOpen && data}
-      <div use:focusOnOpen tabindex="-1" role="dialog" aria-label={selected !== null ? "card detail" : "region detail"}
+      <div use:focusOnOpen tabindex="-1" role="dialog" aria-label={selected !== null ? "card detail" : selection !== null ? "selection detail" : "region detail"}
         class="thin-sb fixed inset-x-0 bottom-0 z-40 max-h-[70vh] overflow-auto border-t border-base-300 bg-base-100 p-4 text-sm shadow-2xl sm:relative sm:inset-auto sm:z-auto sm:max-h-none sm:w-88 sm:flex-none sm:border-l sm:border-t-0 sm:shadow-none">
-        <button class="btn btn-ghost btn-sm btn-square sticky top-0 float-right ml-2" onclick={() => (selected !== null ? focusCard(null) : togglePin(pinned!))} aria-label="close">✕</button>
+        <button class="btn btn-ghost btn-sm btn-square sticky top-0 float-right ml-2" onclick={() => (selected !== null ? focusCard(null) : selection !== null ? m.clearSelection() : togglePin(pinned!))} aria-label="close">✕</button>
         {#if selected !== null}
           <div class="mb-1 pr-8 font-bold">{data.titles[selected]}</div>
           <div data-meta class="mb-2 font-mono text-[10px] opacity-60">{[data.authors?.[selected], dateOf(selected), regionOf(selected)].filter(Boolean).join(" · ")}</div>
@@ -762,6 +862,43 @@
           {#each data.nbr[selected] ?? [] as j}
             <button class="block w-full truncate rounded px-2 py-1.5 text-left text-xs hover:bg-base-200" onclick={() => focusCard(j)}>→ {data.titles[j]}</button>
           {/each}
+        {:else if selection}
+          <!-- ═══ A HELD SELECTION — SELECT must EXPLAIN, not just grab. The count, then what actually
+               distinguishes this set from the rest of the corpus (the same distinctiveTerms /
+               distinctiveAxes the pipeline uses to name a region), then the verbs. ═══ -->
+          <div class="mb-1 flex items-center gap-2 pr-8 font-bold"><span aria-hidden="true">◌</span><span data-sel-count>{selection.length} card{selection.length === 1 ? "" : "s"}</span></div>
+          <div class="mb-3 font-mono text-[10px] opacity-60">selection · {Math.round((100 * selection.length) / (data.ids.length || 1))}% of the corpus</div>
+
+          <div class="mb-2 flex flex-wrap gap-1">
+            <button data-testid="sel-filter" class="btn btn-primary btn-xs normal-case" title="hide everything else — the selection becomes a filter, and composes with the others" onclick={() => m.filterToSelection()}>filter to these</button>
+            <button data-testid="sel-export" class="btn btn-xs normal-case" title="download these cards as JSON (ids, titles, urls)" onclick={exportSelection}>export</button>
+            <button data-testid="sel-derive" class="btn btn-xs normal-case" disabled title="next: an axis from this set">derive axis</button>
+            <button data-testid="sel-clear" class="btn btn-ghost btn-xs normal-case" onclick={() => m.clearSelection()}>clear</button>
+          </div>
+          {#if !m.selShareable}
+            <div class="rounded-field mb-2 bg-base-200 px-2 py-1 text-[11px] leading-snug opacity-70">selection too large to share — the link carries up to 200 cards</div>
+          {/if}
+
+          <div class="mt-3 mb-1 font-mono text-[10px] uppercase tracking-wide opacity-60">what these share</div>
+          {#if m.selectionTerms.length}
+            <div data-sel-terms class="mb-2 flex flex-wrap gap-1">
+              {#each m.selectionTerms as t}<span class="badge badge-sm badge-ghost font-mono">{t}</span>{/each}
+            </div>
+          {:else}
+            <div class="mb-2 text-[11px] opacity-60">no term stands out against the corpus</div>
+          {/if}
+          {#each m.selectionAxes as a}
+            <div data-sel-axis class="flex items-center justify-between gap-2 border-b border-base-200 py-1 text-xs" title="{a.name}: mean {a.mean}/100 (corpus mean is 50)">
+              <span class="truncate opacity-70">{a.name} <span class="opacity-60">→ {a.pole}</span></span>
+              <span class="flex-none font-mono text-[10px]">{a.mean >= 50 ? "▲" : "▼"} <b>{a.mean}</b></span>
+            </div>
+          {/each}
+
+          <div class="mt-3 mb-1 font-mono text-[10px] uppercase tracking-wide opacity-60">members</div>
+          {#each selection.slice(0, 10) as i}
+            <button class="block w-full truncate rounded px-2 py-1.5 text-left text-xs hover:bg-base-200" onclick={() => focusCard(i)}>{data.titles[i]}</button>
+          {/each}
+          {#if selection.length > 10}<div class="px-2 py-1 font-mono text-[10px] opacity-60">+{selection.length - 10} more</div>{/if}
         {:else if pinnedRegion}
           <div class="mb-1 flex items-center gap-2 pr-8 font-bold"><span class="h-3 w-3 flex-none rounded-xs" style="background:{rgb(colOf(pinnedRegion.c))}"></span><span class="truncate">{pinnedRegion.label}</span></div>
           <div class="mb-2 font-mono text-[10px] opacity-60">region · {pinnedRegion.n} cards · grain {m.grain + 1}/{nLevels}</div>

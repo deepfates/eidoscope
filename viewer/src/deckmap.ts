@@ -5,6 +5,7 @@ import type { MapContract } from "../../src/schema";
 import { col, setActiveTheme, type RGB } from "./encode";
 import { themePalette } from "./palette";
 import { easeCubicInOut } from "d3-ease";
+import { selectInPolygon } from "./lasso";
 
 // The map's rendering + interaction core. ONE Deck for its whole life (canvas pointer capture never lost);
 // layout switches swap the view + camera via setProps. deck.gl gives GPU rendering, a controller with
@@ -25,7 +26,16 @@ export type MapHandle = {
   destroy: () => void;
   debug: () => { zoom: number; labels: number; regions: number; grain: number; rot: number | null; rotX: number | null; target: number[] | null; span3: number };  // read-only seam for integration tests
   project: (world: number[]) => number[];  // world [x,y,z?] → screen px, so tests can click exact nodes/ghosts
+  // A card's FULL projection in the current layout: [screenX, screenY, ndcZ]. The third component is the
+  // behind-camera signal the lasso guards on, so this seam lets the integration suite assert that guard
+  // directly (how many cards project on-screen but sit behind the eye) rather than inferring it.
+  projectIndex: (i: number) => number[] | null;
   pickAt: (x: number, y: number) => { layer: string | null; url: string | null; index: number } | null;  // what deck picks at a screen px
+  // SELECT (eid-r8t6). The model OWNS the selection; deckmap only renders it and answers the one question
+  // that needs the live camera: "which cards fall inside this screen path?"
+  setSelection: (idx: number[] | null) => void;
+  setSelectMode: (on: boolean) => void;
+  selectPolygon: (path: number[][], mask: ArrayLike<number> | null) => number[];
 };
 type Opts = { getColor: (i: number) => RGB; getRadius: (i: number) => number; layout: Layout; getX: (i: number) => number; getY: (i: number) => number; getZ: (i: number) => number; posSig?: string; showLabels: boolean; grain: number; citeOn?: boolean; ghostsOn?: boolean; theme?: string };
 
@@ -54,6 +64,9 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   let filterMask: ArrayLike<number> | null = null;
   const dataFilter = new DataFilterExtension({ filterSize: 1 });
   let focus: number | null = null, fSet: Set<number> | null = null;
+  // a HELD selection (frozen set of indices) + whether the lasso gesture owns the pointer right now
+  let selSet: Set<number> | null = null;
+  let selectMode = false;
   let highlight: number | null = null;
   let citeOn = init.citeOn ?? false, ghostsOn = init.ghostsOn ?? false;
   let clickTimer: ReturnType<typeof setTimeout> | null = null;  // single-click card-open, cancelled by a double-click (drill)
@@ -143,7 +156,9 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     for (const d of placed as any[]) { const sx = W / 2 + (d.p[0] - tx) * scale, vw = (d.label.length * charPx) / 2 + 4; d.dx = sx - vw < 6 ? 6 - (sx - vw) : sx + vw > W - 6 ? (W - 6) - (sx + vw) : 0; }
     return placed;
   };
-  const dimSet = () => (focus != null ? fSet : highlight != null ? new Set(members[highlight]) : null);
+  // A held SELECTION is the strongest emphasis source — it outranks focus and highlight, because the user
+  // just asserted it by hand. Otherwise the existing focus → highlight precedence is untouched.
+  const dimSet = () => (selSet ? selSet : focus != null ? fSet : highlight != null ? new Set(members[highlight]) : null);
   // a point dims (soft emphasis) if excluded by the active focus/highlight preview. (Filtering is a HARD hide
   // via the DataFilterExtension mask, a separate concern — text search is now a filter, not a dim.)
   const isDim = (index: number) => { const ds = dimSet(); return ds ? !ds.has(index) : false; };
@@ -151,9 +166,13 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   // 3D uses deck.gl's OWN default OrbitController — drag rotates, scroll zooms — the battle-tested interaction
   // for a point cloud. No custom wheel-dolly, no bounds clamp, no dragMode override (those were blind patches
   // that fought each other). Just sensible defaults; we can add deliberate motion later, seeing it work.
+  // In SELECT MODE the one-finger/pointer drag belongs to the lasso, so deck's drag gestures are switched
+  // off: dragPan in 2D, and in 3D dragRotate too — which is CORRECT, not a compromise. A lasso is a
+  // view-dependent gesture, so the view must hold still while it is drawn. PINCH is registered
+  // independently by deck's recognizer, so two-finger zoom stays live on a phone throughout.
   const controllerFor = (l: Layout) => is3d(l)
-    ? true
-    : { doubleClickZoom: false, inertia: true };
+    ? (selectMode ? { dragPan: false, dragRotate: false } : true)
+    : { doubleClickZoom: false, inertia: true, dragPan: !selectMode };
   const view = () => (is3d(layout) ? new OrbitView({ id: "orbit" }) : new OrthographicView({ id: "ortho", flipY: false }));
 
   // A dot is ONE thing in every view: a pixel-radius disc sized by getRadius(), with the same min-pixel floor.
@@ -309,6 +328,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     init.onGrainChange?.(newGrain);
   };
   canvas.addEventListener("dblclick", (e) => {
+    if (selectMode) return;   // in select mode the pointer draws; it does not drill
     if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; }  // a double-click drills; cancel the pending card-open
     suppressClickUntil = Date.now() + 350;  // …and swallow the trailing onClick deck fires right after this
     const info = (deck as any).pickObject({ x: (e as MouseEvent).offsetX, y: (e as MouseEvent).offsetY, radius: 8 });
@@ -381,7 +401,19 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     fitToIndices: (idx) => fit(idx),
     debug: () => ({ zoom: (deck.getViewports?.()?.[0] as any)?.zoom ?? viewState?.zoom ?? 0, labels: decluttered().length, regions: members.filter((m) => m.length).length, grain, rot: viewState?.rotationOrbit ?? null, rotX: viewState?.rotationX ?? null, target: viewState?.target ?? null, span3 }),
     project: (world) => { const vp = (deck as any).getViewports?.()[0]; return vp ? vp.project([world[0], world[1], world[2] ?? 0]).slice(0, 2) : [0, 0]; },  // honors z, so 3D layouts project correctly (was hardcoded z=0)
+    projectIndex: (i) => { const vp = (deck as any).getViewports?.()[0]; if (!vp || i < 0 || i >= n) return null; const q = pos(i); return vp.project([q[0], q[1], q[2] ?? 0]); },
     pickAt: (x, y) => { const o = (deck as any).pickObject?.({ x, y, radius: 8 }); return o ? { layer: o.layer?.id ?? null, url: o.object?.url ?? null, index: o.index ?? -1 } : null; },
+    setSelection: (idx) => { selSet = idx && idx.length ? new Set(idx) : null; colorVer++; paint(); },
+    setSelectMode: (on) => { if (on === selectMode) return; selectMode = on; deck.setProps({ controller: controllerFor(layout) }); },
+    // The camera-dependent half of SELECT, answered against the LIVE viewport: project every card with
+    // deck's own viewport (OrbitViewport inherits project(), so 3D projects correctly) and crossing-test the
+    // 2D result. clipZ only in 3D — that is the behind-the-camera guard (perspective w<0 mirrors a point
+    // into the loop otherwise). The filter mask is respected: a hidden card is not selectable.
+    selectPolygon: (path, mask) => {
+      const vp = (deck as any).getViewports?.()[0];
+      if (!vp) return [];
+      return selectInPolygon({ count: n, positionOf: pos, project: (w) => vp.project(w), path, mask, clipZ: is3d(layout) });
+    },
     resetView: () => { viewState = home(layout); deck.setProps({ viewState }); },
     setFilterMask: (mask) => { filterMask = mask; filterVer++; paint(); },
     destroy: () => deck.finalize(),
