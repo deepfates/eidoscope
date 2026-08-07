@@ -19,8 +19,10 @@
     "vite-plugin-singlefile": "^2.0.0"
   },
   "dependencies": {
+    "@types/culori": "^4.0.1",
     "apache-arrow": "^18.0.0",
     "bits-ui": "^2.18.1",
+    "culori": "^4.0.2",
     "d3-color": "^3.1.0",
     "d3-ease": "^3.0.1",
     "d3-scale-chromatic": "^3.1.0",

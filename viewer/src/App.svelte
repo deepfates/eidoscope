@@ -4,7 +4,8 @@
   import { DropdownMenu, Popover } from "bits-ui";
   import { loadMap, mapUrl, decodeEido } from "./loader";
   import { createMap, type MapHandle } from "./deckmap";
-  import { col, axisColor } from "./encode";
+  import { col, axisColor, setActiveTheme } from "./encode";
+  import { themePalette } from "./palette";
   import { buildDimensions, scores01, type Dimension } from "./dimensions";
   import { ViewModel, parseUrl, type CameraOp } from "./model.svelte";
   import { embedQuery, cosineAll, resetEmbedder } from "./semantic";
@@ -35,9 +36,10 @@
   let sheetOpen = $state(false);   // mobile: the toolbar's contents as a bottom sheet
 
   // ── THEMES ────────────────────────────────────────────────────────────────────────────────────────
-  // "Theme your own reader": a curated set of DaisyUI themes, stamped on <html data-theme>. The deck.gl
-  // canvas can't read CSS tokens (it draws its own ink), so every theme declares whether its ground is
-  // dark or light — ONE lookup keeps map ink legible under any of them.
+  // "Theme your own reader": a curated set of DaisyUI themes, stamped on <html data-theme>. The map now
+  // READS those tokens (palette.ts): its categorical colours, its ink and its notion of a dark ground all
+  // come from the live theme, so chrome and canvas are one colour system. `mode` survives only as the
+  // ☾/☀ toggle's hint about which default to flip to — the map never consults it.
   const THEMES = [
     { id: "black", label: "black", mode: "dark" as const },
     { id: "light", label: "light", mode: "light" as const },
@@ -45,13 +47,23 @@
     { id: "night", label: "night", mode: "dark" as const },
     { id: "nord", label: "nord", mode: "dark" as const },
     { id: "sunset", label: "sunset", mode: "dark" as const },
+    { id: "synthwave", label: "synthwave", mode: "dark" as const },
+    { id: "retro", label: "retro", mode: "light" as const },
     { id: "corporate", label: "corporate", mode: "light" as const },
     { id: "winter", label: "winter", mode: "light" as const },
   ];
   const DEFAULT_DARK = "black", DEFAULT_LIGHT = "light";
   const modeOf = (id: string) => THEMES.find((t) => t.id === id)?.mode ?? "dark";
   let themeName = $state(DEFAULT_DARK);
-  const theme = $derived(modeOf(themeName));   // what deckmap wants: "dark" | "light"
+  // The GROUND is read from the live theme's own base-100 lightness, not from a hardcoded per-theme flag
+  // (that flag was wrong for themes DaisyUI has since re-tinted — nord is a light theme in v5). modeOf
+  // survives only as the fallback for a theme whose tokens we couldn't parse.
+  // ONE invalidation number for everything painted from the theme-derived palette. setTheme stamps
+  // data-theme, then regenerates the palette from the freshly-computed tokens and bumps this; the legend
+  // swatches ($derived on palVer) and the deck layers (Opts.theme → colorVer/themeVer) both re-read.
+  let palVer = $state(0);
+  const theme = $derived.by(() => { void palVer; return (themePalette(themeName)?.dark ?? modeOf(themeName) === "dark") ? "dark" : "light"; });
+  const colOf = $derived.by(() => { void palVer; return (c: number) => col(c); });
 
   // read-only views onto the model, so the markup below reads as plainly as it did when the state was inline
   const data = $derived(m.data);
@@ -82,6 +94,7 @@
   function setTheme(t: string, persist = true) {
     themeName = THEMES.some((x) => x.id === t) ? t : DEFAULT_DARK;
     document.documentElement.dataset.theme = themeName;
+    setActiveTheme(themeName); palVer++;   // tokens are live now that data-theme is stamped
     if (persist) try { localStorage.setItem("eido-theme", themeName); } catch {}
   }
   // the ☾/☀ toggle flips GROUND, not a specific theme: a dark theme goes to the light default and back.
@@ -197,13 +210,13 @@
     const dims0 = buildDimensions(D);   // build the registry ONCE for this mount's accessors
     const ch = m.channels;
     handle = createMap(canvas, D, {
-      getColor: m.colorGet(dims0, ch.color, D.levels?.[m.grain] ?? D.cluster), getRadius: m.sizeGet(dims0, ch.size), getX: m.posGet(dims0, ch.x), getY: m.posGet(dims0, ch.y), getZ: m.posGet(dims0, ch.z), posSig: m.posSig, layout: m.layout, showLabels: labelsOn, grain: m.grain, theme,
+      getColor: m.colorGet(dims0, ch.color, D.levels?.[m.grain] ?? D.cluster), getRadius: m.sizeGet(dims0, ch.size), getX: m.posGet(dims0, ch.x), getY: m.posGet(dims0, ch.y), getZ: m.posGet(dims0, ch.z), posSig: m.posSig, layout: m.layout, showLabels: labelsOn, grain: m.grain, theme: themeName,
       onClick: (i) => focusCard(i < 0 ? null : i),
       onHover: (h, x, y) => (hovered = h == null ? null : { ...h, x, y }),
       onGrainChange: (g) => { m.grain = g; m.pinned = null; },
     });
     // read-only introspection seam for the integration suite (drives the REAL built app, asserts real state)
-    (window as any).__eido = () => { const d = handle?.debug(); return { grain: m.grain, k: curCount, layout: m.layout, color: m.channels.color, pin: pinned, facetPin, focus: selected, detail: selected !== null, deckOpen, cite: citeOn, ghosts: ghostsOn, theme, themeName, hover: hovered ? hovered.kind : null, zoom: d?.zoom ?? 0, labels: d?.labels ?? 0, regions: d?.regions ?? 0, rot: d?.rot ?? null, rotX: d?.rotX ?? null, target: d?.target ?? null, span3: d?.span3 ?? null, filters: chips.map((c) => c.label), visible: filterMask ? filterMask.reduce((a, v) => a + v, 0) : (data?.ids.length ?? 0) }; };
+    (window as any).__eido = () => { const d = handle?.debug(); return { grain: m.grain, k: curCount, layout: m.layout, color: m.channels.color, pin: pinned, facetPin, focus: selected, detail: selected !== null, deckOpen, cite: citeOn, ghosts: ghostsOn, theme, themeName, pal: Array.from({ length: 6 }, (_, i) => col(i)), hover: hovered ? hovered.kind : null, zoom: d?.zoom ?? 0, labels: d?.labels ?? 0, regions: d?.regions ?? 0, rot: d?.rot ?? null, rotX: d?.rotX ?? null, target: d?.target ?? null, span3: d?.span3 ?? null, filters: chips.map((c) => c.label), visible: filterMask ? filterMask.reduce((a, v) => a + v, 0) : (data?.ids.length ?? 0) }; };
     // the map no longer fills the window (a toolbar sits above it), so both seams speak PAGE coordinates —
     // what a test's mouse/touch actually uses — and convert at the canvas edge.
     const rect = () => canvas.getBoundingClientRect();
@@ -282,7 +295,7 @@
   });
 
   $effect(() => {
-    const l = m.layout, c = m.channels.color, s = m.channels.size, xk = m.channels.x, yk = m.channels.y, zk = m.channels.z, sl = labelsOn, g = m.grain, a = assignment, co = citeOn, go = ghostsOn, th = theme, h = handle, d = data, ad = allDims, dp = m.dimProps, ps = m.posSig;
+    const l = m.layout, c = m.channels.color, s = m.channels.size, xk = m.channels.x, yk = m.channels.y, zk = m.channels.z, sl = labelsOn, g = m.grain, a = assignment, co = citeOn, go = ghostsOn, th = themeName, h = handle, d = data, ad = allDims, dp = m.dimProps, ps = m.posSig;
     void dp; // dimProps in deps so a norm/invert change re-pushes the accessors
     if (h && d) h.update({ getColor: m.colorGet(ad, c, a), getRadius: m.sizeGet(ad, s), getX: m.posGet(ad, xk), getY: m.posGet(ad, yk), getZ: m.posGet(ad, zk), posSig: ps, layout: l, showLabels: sl, grain: g, citeOn: co, ghostsOn: go, theme: th });
   });
@@ -406,7 +419,7 @@
   <Popover.Root>
     <Popover.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case" data-menu="{scope}:color" aria-label="color">
       <span class="opacity-60">color</span>
-      <span class="h-2.5 w-2.5 flex-none rounded-xs" style="background:{m.channels.color === 'region' ? rgb(col(0)) : colorDim?.kind === 'categorical' ? rgb(col(0)) : rgb(axisColor(1))}"></span>
+      <span class="h-2.5 w-2.5 flex-none rounded-xs" style="background:{m.channels.color === 'region' ? rgb(colOf(0)) : colorDim?.kind === 'categorical' ? rgb(colOf(0)) : rgb(axisColor(1))}"></span>
       <span class="max-w-[9rem] truncate font-medium">{colorLabel}</span><span class="text-[9px] opacity-50">▾</span>
     </Popover.Trigger>
     <Popover.Portal>
@@ -420,11 +433,11 @@
         <ul class="menu thin-sb menu-sm min-h-0 w-full flex-1 flex-nowrap overflow-y-auto p-1 pt-0">
           {#if m.channels.color === "region"}
             {#each curClusters as c}
-              {@render legendRow(rgb(col(c.c)), c.label, c.n, pinned === c.c, "isolate region " + c.label, () => togglePin(c.c), () => { if (pinned === null) handle?.setHighlight(c.c); }, () => { if (pinned === null) handle?.setHighlight(null); })}
+              {@render legendRow(rgb(colOf(c.c)), c.label, c.n, pinned === c.c, "isolate region " + c.label, () => togglePin(c.c), () => { if (pinned === null) handle?.setHighlight(c.c); }, () => { if (pinned === null) handle?.setHighlight(null); })}
             {/each}
           {:else if colorDim?.kind === "categorical"}
             {#each colorDim.ord!.slice(0, 16) as v}
-              {@render legendRow(rgb(col(colorDim.idx![v])), v, colorDim.cnt![v], facetPin === v, "isolate " + colorDim.name + " " + v, () => toggleFacetPin(v))}
+              {@render legendRow(rgb(colOf(colorDim.idx![v])), v, colorDim.cnt![v], facetPin === v, "isolate " + colorDim.name + " " + v, () => toggleFacetPin(v))}
             {/each}
             {#if colorDim.ord!.length > 16}<li class="px-3 py-1 text-xs opacity-60">+{colorDim.ord!.length - 16} more</li>{/if}
           {:else if colorDim}
@@ -651,7 +664,7 @@
         <div class="rounded-box pointer-events-none absolute z-10 max-w-xs border border-base-300 bg-base-100/95 p-2.5 text-xs shadow-xl backdrop-blur"
           style="left:{Math.min(hovered.x + 14, (mapBox?.clientWidth ?? 800) - 280)}px; top:{Math.min(hovered.y + 14, (mapBox?.clientHeight ?? 600) - 120)}px">
           {#if hovered.kind === "point"}
-            <div class="mb-1 flex items-center gap-1.5 font-mono text-[10px] opacity-60"><span class="h-2 w-2 flex-none rounded-xs" style="background:{rgb(col(assignment[hovered.i]))}"></span><span class="truncate">{regionOf(hovered.i)}</span></div>
+            <div class="mb-1 flex items-center gap-1.5 font-mono text-[10px] opacity-60"><span class="h-2 w-2 flex-none rounded-xs" style="background:{rgb(colOf(assignment[hovered.i]))}"></span><span class="truncate">{regionOf(hovered.i)}</span></div>
             <div class="mb-1 font-bold leading-snug">{data.titles[hovered.i]}</div>
             <div class="line-clamp-2 opacity-70">{data.cores[hovered.i].slice(0, 140)}</div>
           {:else}
@@ -690,7 +703,7 @@
             <button class="block w-full truncate rounded px-2 py-1.5 text-left text-xs hover:bg-base-200" onclick={() => focusCard(j)}>→ {data.titles[j]}</button>
           {/each}
         {:else if pinnedRegion}
-          <div class="mb-1 flex items-center gap-2 pr-8 font-bold"><span class="h-3 w-3 flex-none rounded-xs" style="background:{rgb(col(pinnedRegion.c))}"></span><span class="truncate">{pinnedRegion.label}</span></div>
+          <div class="mb-1 flex items-center gap-2 pr-8 font-bold"><span class="h-3 w-3 flex-none rounded-xs" style="background:{rgb(colOf(pinnedRegion.c))}"></span><span class="truncate">{pinnedRegion.label}</span></div>
           <div class="mb-2 font-mono text-[10px] opacity-60">region · {pinnedRegion.n} cards · grain {m.grain + 1}/{nLevels}</div>
           {#if pinnedBlurb}<div class="mb-2 text-xs leading-relaxed opacity-80">{pinnedBlurb}</div>{/if}
           <div class="mt-3 mb-1 font-mono text-[10px] uppercase tracking-wide opacity-60">members</div>

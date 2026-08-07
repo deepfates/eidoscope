@@ -200,8 +200,25 @@ try {
   // the picker: any curated theme stamps <html data-theme> and still maps to a legible canvas ground
   await menu("theme"); await p.click('[data-opt="bar:theme:nord"]'); await p.waitForTimeout(200); ts = await st();
   const attr2 = await p.evaluate(() => document.documentElement.dataset.theme);
-  ok(ts.themeName === "nord" && attr2 === "nord" && ts.theme === "dark", `theme picker swaps the DaisyUI theme + maps it to dark canvas ink — name=${ts.themeName} attr=${attr2} canvas=${ts.theme}`);
+  // canvas ground is read from the theme's OWN base-100 (nord is a light theme in DaisyUI 5), not a hardcoded flag
+  ok(ts.themeName === "nord" && attr2 === "nord" && ts.theme === "light", `theme picker swaps the DaisyUI theme + reads its true canvas ground — name=${ts.themeName} attr=${attr2} canvas=${ts.theme}`);
   ok(new URL(p.url()).searchParams.get("theme") === "nord", `the chosen theme rides the shareable URL — ${new URL(p.url()).search}`);
+  // the MAP PALETTE is derived from the theme's own tokens (eid-caza): switching themes must repaint the
+  // region dots, and the legend swatches must be the SAME colours the canvas uses — one source of truth.
+  const nordPal = (await st()).pal;
+  const swatch = async () => p.evaluate(() => {
+    const b = document.querySelector('[aria-label^="isolate region"]') as HTMLElement | null;
+    const sw = b?.querySelector("span") as HTMLElement | null;
+    return sw ? getComputedStyle(sw).backgroundColor : "";
+  });
+  const legendFirst = async () => { await p.click('[data-menu="bar:color"]'); await p.waitForTimeout(180); const c = await swatch(); await closeMenus(); return c; };
+  const nordSwatch = await legendFirst();
+  await menu("theme"); await p.click('[data-opt="bar:theme:retro"]'); await p.waitForTimeout(250); await closeMenus();
+  const retroPal = (await st()).pal, retroSwatch = await legendFirst();
+  ok(JSON.stringify(nordPal) !== JSON.stringify(retroPal), `switching theme repaints the region colours — nord ${JSON.stringify(nordPal[0])} vs retro ${JSON.stringify(retroPal[0])}`);
+  ok(nordSwatch !== retroSwatch, `legend swatches follow the theme too — ${nordSwatch} → ${retroSwatch}`);
+  const rgbOf = (c: number[]) => `rgb(${c[0]}, ${c[1]}, ${c[2]})`;
+  ok(retroSwatch === rgbOf(retroPal[0]) && nordSwatch === rgbOf(nordPal[0]), `legend swatch === the map's own colour for region 0 — ${retroSwatch} vs ${rgbOf(retroPal[0])}`);
   await menu("theme"); await p.click('[data-opt="bar:theme:black"]'); await p.waitForTimeout(150); await closeMenus();
 
   // 10. DECK shows the whole corpus (was capped at 300) + unread-only filters
