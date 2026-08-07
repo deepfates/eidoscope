@@ -97,8 +97,13 @@ date, length), influence, and any **semantic query you type** — can be placed 
 (color, size, x, y, z, scrubber), with a per-dimension **honest ⇄ rank** toggle (true magnitudes vs
 even spread) and an invert flip.
 
-- **layout**: neighbor map · **axis scatter** (any dimensions on x/y) · **3D space** (the neighbor map in 3D, drag to rotate) · **3D axis scatter** (any dimensions on x/y/z)
-- **color** by region, any metadata, any axis, or a query · **size** likewise (default: influence)
+The shell is a standard app (DaisyUI 5): a top **toolbar** of labeled menus, a **filter-chips row**
+with a live visible-count, a docked **reading pane** (cards and regions), and a **theme picker**
+(black/light defaults + more; the theme rides the shareable URL) — on mobile the toolbar and pane
+become bottom sheets.
+
+- **layout**: neighbor map · **axis scatter** (any dimensions on x/y) · **3D space** (the neighbor map in 3D, drag to rotate) · **3D axis scatter** (any dimensions on x/y/z) — the camera stays continuous across 2D↔3D
+- **color** by region, any metadata, any axis, or a query · **size** likewise (default: influence) — the color menu doubles as the legend (click a row to isolate)
 - **filters** compose: isolate a region or folder, text-find, scrub any scalar dimension — active filters show as chips, one click to clear
 - **grain** slider — the nested region ladder from continents to towns; on-map labels declutter and *reveal as you zoom*, like a real map
 - **tap a card** → its restatement, where it sits on each axis (ranked by extremity), nearest neighbors, and links to **both** the reader and the **original source** (so a shared map opens even without the reader login)
