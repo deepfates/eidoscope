@@ -11,8 +11,9 @@ import { mulberry32 } from "../src/axes.ts";
 // so descent over one clump still finds an axis and clusters. 12 docs, ids d0..d11.
 function synthParent(): MapContract {
   const N = 12, D = 8, rnd = mulberry32(7);
-  const vectors = Array.from({ length: N }, (_, i) =>
+  const rows = Array.from({ length: N }, (_, i) =>
     Array.from({ length: D }, (_, j) => (j === 0 ? (i < 6 ? 1 : -1) : j === 1 ? (i % 2 ? 0.8 : -0.8) : 0) + (rnd() - 0.5) * 0.2));
+  const vectors = { data: Float32Array.from(rows.flat()), dim: D };   // schema CardVectors: flat row-major
   return {
     ids: Array.from({ length: N }, (_, i) => "d" + i),
     titles: Array.from({ length: N }, (_, i) => "Title " + i),
@@ -51,7 +52,7 @@ test("descendMap: re-discovers LOCAL axes over the subset's carried vectors and 
   // geometry is the subset's own: node-parallel, fresh clustering
   expect(C.xy.length).toBe(8); expect(C.cluster.length).toBe(8);
   expect(C.clusters.every((c) => c.label.startsWith("R:"))).toBe(true);            // named by the (mock) namer
-  expect(C.vectors!.length).toBe(8);                                              // substrate carried → grandchild descent works
+  expect(C.vectors!.data.length).toBe(8 * 8);                                     // substrate carried (8 rows × dim 8) → grandchild descent works
 });
 
 test("descendMap: child provenance records parent map, selection size, and date; derivedBy carries the basis", async () => {
@@ -79,7 +80,7 @@ test("descendMap: child round-trips through the .eido codec", async () => {
   expect(back.ids).toEqual(C.ids);
   expect(back.axes.map((a) => a.key)).toEqual(C.axes.map((a) => a.key));
   expect(back.provenance!.source).toBe(C.provenance!.source);
-  expect(back.vectors!.length).toBe(8);                                            // f16 on the wire, still present
+  expect(back.vectors!.data.length).toBe(8 * 8);                                   // f16 on the wire, still present
 });
 
 test("descendMap: fails loud on a lite emit (no vectors), unknown ids, or a too-small selection", async () => {

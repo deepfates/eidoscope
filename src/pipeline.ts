@@ -180,14 +180,16 @@ export async function relabelMap(D: MapContract, opts: { llm?: any; sig?: any; c
 // fresh full-text embeddings; (2) the per-axis placement notes were written against the PARENT's
 // axes, so the child's cards carry no notes (positions on the new axes are exact projections).
 export async function descendMap(P: MapContract, selIds: string[], opts: { llm?: any; sig?: any; name?: string; parentFile?: string; concurrency?: number; cacheDir?: string; quiet?: boolean } = {}): Promise<MapContract> {
-  if (!P.vectors?.length) throw new Error("descend: this .eido carries no card vectors (a lite emit) — nothing honest to re-discover from");
+  if (!P.vectors?.data?.length) throw new Error("descend: this .eido carries no card vectors (a lite emit) — nothing honest to re-discover from");
   const at = new Map(P.ids.map((id, i) => [id, i]));
   const missing = selIds.filter((id) => !at.has(id));
   if (missing.length) throw new Error(`descend: ${missing.length} selection id(s) not in the parent map (e.g. ${missing[0]})`);
   const idx = selIds.map((id) => at.get(id)!);
   if (idx.length < 2) throw new Error("descend: need at least 2 selected cards to discover local axes");
   const sub = <T>(a: T[] | undefined): T[] | undefined => (a ? idx.map((i) => a[i]) : undefined);
-  const vectors = idx.map((i) => P.vectors![i]);
+  // rows for discovery (PCA wants number[][]); the child re-emits them flat (schema CardVectors)
+  const vdim = P.vectors.dim;
+  const vectors = idx.map((i) => Array.from(P.vectors!.data.subarray(i * vdim, (i + 1) * vdim)));
   const titles = idx.map((i) => P.titles[i]), cores = idx.map((i) => P.cores[i]);
   const llm = opts.llm ?? provider();
   const conc = opts.concurrency ?? Number(process.env.EIDOSCOPE_CONCURRENCY || 24);
@@ -221,7 +223,7 @@ export async function descendMap(P: MapContract, selIds: string[], opts: { llm?:
     cite, citec: sub(P.citec ?? undefined),
     urls: sub(P.urls), sources: sub(P.sources), siteNames: sub(P.siteNames), authors: sub(P.authors),
     tags: sub(P.tags), dates: sub(P.dates), read: sub(P.read), folders: sub(P.folders),
-    vectors,
+    vectors: { data: Float32Array.from(vectors.flat()), dim: vdim },
   };
   // provenance — the child introduces itself AS a descent: parent map, selection size, date (about pane)
   D.provenance = {
