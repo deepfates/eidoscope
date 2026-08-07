@@ -23,7 +23,7 @@
   "dependencies": {
     "@ax-llm/ax": "^23.0.5",
     "@huggingface/transformers": "3.8.1",
-    "hnsw": "^1.1.1",
+    "hnswlib-node": "^3.0.0",
     "ml-kmeans": "^6.0.0",
     "ml-pca": "^4.1.1",
     "sharp": "0.35.3",
@@ -65,5 +65,8 @@
   ],
   "engines": {
     "bun": ">=1.0"
+  },
+  "patchedDependencies": {
+    "umap-js@1.4.0": "patches/umap-js@1.4.0.patch"
   }
 }
