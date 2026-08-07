@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { PCA } from "ml-pca";
+import { Matrix, QR, SVD } from "ml-matrix";
 import { labelAxes } from "./signatures.ts";
 import { provider } from "./provider.ts";
 
@@ -12,7 +12,6 @@ import { provider } from "./provider.ts";
 export type Axis = { pc: number; var: number; coherence: number; key: string; name: string; pole_low: string; pole_high: string };
 
 const unit = (v: number[]) => { let n = 0; for (const x of v) n += x * x; n = Math.sqrt(n) || 1; return v.map((x) => x / n); };
-const evr = (X: number[][], nc: number) => new PCA(X, { center: true }).getExplainedVariance().slice(0, nc);
 
 // Seeded PRNG (mulberry32, no deps). The parallel-analysis shuffle used to draw from Math.random, so the
 // noise floor — and therefore the honest dimension count — wobbled between identical runs. Same corpus +
@@ -22,6 +21,59 @@ export function mulberry32(seed: number): () => number {
   return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 }
 export const SEED = 42;
+
+// RANDOMIZED TRUNCATED PCA (Halko–Martinsson–Tropp range finder).
+// We only ever look at the top ~60 components, but a full thin SVD of an n x 384 matrix computes all
+// 384 of them — and discovery runs NINE of those (1 real + 8 parallel-analysis replicates). Instead:
+// draw a Gaussian test matrix Ω (d x ℓ, ℓ = k + oversample), sketch Y = AΩ (n x ℓ), sharpen it with a
+// couple of power iterations Y <- A(AᵀY) (re-orthonormalizing between so the small singular values
+// don't drown in round-off), take Q = qr(Y).Q as an orthonormal basis for A's dominant range, then
+// SVD the SMALL projected matrix B = QᵀA (ℓ x d) EXACTLY. A ≈ QB, so B's right singular vectors are
+// A's top components and B's singular values are A's. Everything stochastic runs off the same seeded
+// mulberry32 as the rest of the pipeline, so the geometry is still bit-identical run to run.
+// Defaults chosen by MEASUREMENT on the real 1446 x 384 Readwise corpus, not by taste. Embedding
+// spectra decay slowly, so the textbook (p=10, q=2) sketch is only accurate through ~PC17 there
+// (|cos| vs full PCA drops to 0.9976 by PC18) even though it's ~8.8x faster. (p=20, q=4) is exact to
+// ~1e-7 relative variance through PC40 and still ~4x faster / ~1.7x lighter than nine full SVDs —
+// the honest axes are the product's spine, so we buy the accuracy back.
+const OVERSAMPLE = 20, POWER_ITERS = 4;
+
+export type TruncPCA = { components: number[][]; explainedVariance: number[]; singularValues: number[]; mean: number[]; project: (X: number[][]) => number[][] };
+
+export function truncatedPCA(X: number[][], k: number, opts: { seed?: number; oversample?: number; powerIters?: number } = {}): TruncPCA {
+  const n = X.length, d = X[0].length;
+  const rnd = mulberry32(opts.seed ?? SEED);
+  // standard normal via Box–Muller off the seeded uniform stream
+  const gauss = () => { const u = Math.max(rnd(), 1e-12), v = rnd(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+
+  const mean = new Array(d).fill(0);
+  for (const row of X) for (let j = 0; j < d; j++) mean[j] += row[j];
+  for (let j = 0; j < d; j++) mean[j] /= n;
+  const A = new Matrix(n, d);
+  for (let i = 0; i < n; i++) for (let j = 0; j < d; j++) A.set(i, j, X[i][j] - mean[j]);
+  // total variance = sum of the centered columns' variances (denominator for the explained fractions)
+  let total = 0;
+  for (let j = 0; j < d; j++) { let s = 0; for (let i = 0; i < n; i++) { const x = A.get(i, j); s += x * x; } total += s / (n - 1 || 1); }
+
+  const kk = Math.min(k, n, d);
+  const ell = Math.min(kk + (opts.oversample ?? OVERSAMPLE), n, d);
+  const At = A.transpose();
+  let Y = A.mmul(Matrix.from1DArray(d, ell, Array.from({ length: d * ell }, gauss)));
+  Y = new QR(Y).orthogonalMatrix;
+  for (let it = 0; it < (opts.powerIters ?? POWER_ITERS); it++) {
+    Y = new QR(A.mmul(At.mmul(Y))).orthogonalMatrix;
+  }
+  const B = Y.transpose().mmul(A);                     // ell x d, small
+  const svd = new SVD(B, { autoTranspose: true });
+  const V = svd.rightSingularVectors;                   // d x ell
+  const sv = svd.diagonal.slice(0, kk);
+  const components = Array.from({ length: kk }, (_, c) => Array.from({ length: d }, (_, j) => V.get(j, c)));
+  const explainedVariance = sv.map((s) => (s * s) / (n - 1 || 1) / (total || 1));
+  const project = (Z: number[][]) => Z.map((row) => components.map((c) => { let s = 0; for (let j = 0; j < d; j++) s += (row[j] - mean[j]) * c[j]; return s; }));
+  return { components, explainedVariance, singularValues: sv, mean, project };
+}
+
+const evr = (X: number[][], nc: number, seed: number) => truncatedPCA(X, nc, { seed }).explainedVariance;
 
 function shuffleColumns(X: number[][], rnd: () => number): number[][] {
   const n = X.length, d = X[0].length, out = X.map((r) => r.slice());
@@ -33,16 +85,18 @@ const slug = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").
 export async function discoverAxes(embeddings: number[][], titles: string[], opts: { topN?: number; minCoherence?: number; llm?: any; seed?: number } = {}) {
   const NC = 60;
   const X = embeddings.map(unit);
-  const pca = new PCA(X, { center: true });
-  const variance = pca.getExplainedVariance();
-  const scores = pca.predict(X).to2DArray(); // n x components
+  const seed = opts.seed ?? SEED;
+  const pca = truncatedPCA(X, NC, { seed });
+  const variance = pca.explainedVariance;
+  const scores = pca.project(X); // n x kept components
 
-  // parallel analysis -> honest #dims above the 95th-pct noise floor
+  // parallel analysis -> honest #dims above the 95th-pct noise floor. The replicates only need the
+  // top-NC variance spectrum of each shuffle, so the truncated SVD is exactly enough here too.
   const REP = 8, noise: number[][] = [];
-  const rnd = mulberry32(opts.seed ?? SEED);
-  for (let r = 0; r < REP; r++) noise.push(evr(shuffleColumns(X, rnd), NC));
+  const rnd = mulberry32(seed);
+  for (let r = 0; r < REP; r++) noise.push(evr(shuffleColumns(X, rnd), NC, seed));
   const n95 = (k: number) => { const c = noise.map((row) => row[k]).sort((a, b) => a - b); return c[Math.floor(0.95 * (REP - 1))]; };
-  let realDims = 0; for (let k = 0; k < NC; k++) { if (variance[k] > n95(k)) realDims++; else break; }
+  let realDims = 0; for (let k = 0; k < Math.min(NC, variance.length); k++) { if (variance[k] > n95(k)) realDims++; else break; }
 
   // Surface only as many axes as the DATA supports. realDims (the parallel-analysis count of PCs
   // that beat noise) is the honest ceiling — cap the fixed request by it so we never show more

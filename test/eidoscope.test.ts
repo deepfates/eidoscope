@@ -376,7 +376,8 @@ test("cardCorpus: cards cache by content + axis GEOMETRY; relabeling axes hits (
 // These pin the math itself — dimension count, ladder shape, rescaling, chunking, caching — with
 // synthetic data and injected fakes, so nothing here touches the network or loads an embedder.
 
-import { discoverAxes, mulberry32 } from "../src/axes.ts";
+import { discoverAxes, mulberry32, truncatedPCA } from "../src/axes.ts";
+import { PCA } from "ml-pca";
 import { divisiveLevels, findOptimalK } from "../src/cluster.ts";
 import { normPct, knnBrute, knnHNSW, poolEmbed } from "../src/map.ts";
 import { EmbeddingCache } from "../src/embed.ts";
@@ -393,6 +394,40 @@ function plantedMatrix(n: number, d: number, k: number, seed = 7, noise = 0.05):
 }
 // discoverAxes always calls the LLM labeler; a stub keeps it offline and makes the names predictable.
 const axesLLM = { forward: async (_l: any, _i: any) => ({}) };
+
+// The randomized truncated SVD replaced the full one inside discoverAxes. It's an APPROXIMATION, so
+// it has to be proven against the exact answer, not eyeballed: same variances, same directions (up to
+// sign), same coordinates — on the planted-component fixtures, over the components that carry signal.
+const absCos = (a: number[], b: number[]) => { let s = 0, na = 0, nb = 0; for (let i = 0; i < a.length; i++) { s += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; } return Math.abs(s) / Math.sqrt(na * nb); };
+
+test("truncatedPCA: matches the exact full SVD on the top components (variance, direction, coordinates)", () => {
+  for (const [n, d, planted] of [[120, 40, 3], [200, 80, 12]] as number[][]) {
+    const X = plantedMatrix(n, d, planted);
+    const full = new PCA(X, { center: true });
+    const fv = full.getExplainedVariance(), fc = full.getEigenvectors().to2DArray(), fs = full.predict(X).to2DArray();
+    const t = truncatedPCA(X, Math.min(30, n, d), {});
+    const ts = t.project(X);
+    for (let c = 0; c < planted; c++) {
+      expect(Math.abs(t.explainedVariance[c] - fv[c]) / fv[c]).toBeLessThan(1e-3);   // variance spectrum
+      const fcv = fc.map((r) => r[c]);
+      expect(absCos(t.components[c], fcv)).toBeGreaterThan(0.999);                    // direction, up to sign
+      const sign = Math.sign(t.components[c].reduce((s, x, j) => s + x * fcv[j], 0)) || 1;
+      const scale = Math.max(...fs.map((r) => Math.abs(r[c])));
+      for (let i = 0; i < n; i++) expect(Math.abs(ts[i][c] * sign - fs[i][c]) / scale).toBeLessThan(1e-3); // coordinates
+    }
+    // explained variances are FRACTIONS of the total, in descending order, summing to <= 1
+    expect(t.explainedVariance.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(1 + 1e-9);
+    for (let c = 1; c < t.explainedVariance.length; c++) expect(t.explainedVariance[c]).toBeLessThanOrEqual(t.explainedVariance[c - 1] + 1e-12);
+  }
+});
+
+test("truncatedPCA: DETERMINISTIC — the random sketch is seeded, so identical input gives identical output", () => {
+  const X = plantedMatrix(90, 25, 4, 3);
+  const a = truncatedPCA(X, 20, { seed: 42 }), b = truncatedPCA(X, 20, { seed: 42 });
+  expect(b.components).toEqual(a.components);
+  expect(b.explainedVariance).toEqual(a.explainedVariance);
+  expect(b.project(X)).toEqual(a.project(X));
+});
 
 test("discoverAxes: parallel analysis finds the PLANTED dimensionality, not the ambient one", async () => {
   const n = 120, d = 40, planted = 3;
