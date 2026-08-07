@@ -152,6 +152,11 @@
   const rgb = (c: [number, number, number]) => `rgb(${c[0]},${c[1]},${c[2]})`;
   const trunc = (s: string, m2 = 44) => (s && s.length > m2 ? s.slice(0, m2 - 1) + "…" : s);
   const regionOf = (i: number) => curClusters[assignment[i]]?.label ?? "";
+  // honest labeling wherever a dimension is offered: a discovered axis carries its variance share, and a
+  // thin one (under the 2% floor the pipeline flags as `weak`) says so — same "thin" word the about pane
+  // and the scatter caption already use. No hiding, no reordering: just the number, everywhere.
+  const pctOf = (v: number) => { const p = v * 100; return (p >= 2 ? Math.round(p) : +p.toFixed(1)) + "%"; };
+  const dimTag = (d: { variance?: number; weak?: boolean }) => (d.variance == null ? "" : ` · ${pctOf(d.variance)}${d.weak ? " thin" : ""}`);
   const readerLabel = (u?: string) => (u && /readwise\.io/.test(u) ? "Readwise" : "open");
   const sourceLabel = (i: number) => data?.siteNames?.[i] || "original";
   const dateOf = (i: number) => { const d = data?.dates?.[i]; return d ? new Date(d).toISOString().slice(0, 10) : ""; };
@@ -159,7 +164,7 @@
     data ? data.axes.map((a) => ({ a, s: Math.round(data!.scores[a.key]?.[i] ?? 50), note: data!.notes[i]?.[a.key] || "" }))
       .filter((x) => x.note).sort((x, y) => Math.abs(y.s - 50) - Math.abs(x.s - 50)).slice(0, 6) : [];
   const topAxes = (i: number) =>
-    data ? data.axes.map((a) => ({ n: a.name, s: Math.round(data!.scores[a.key]?.[i] ?? 50) }))
+    data ? data.axes.map((a) => ({ n: a.name, s: Math.round(data!.scores[a.key]?.[i] ?? 50), w: !!a.weak }))
       .sort((x, y) => Math.abs(y.s - 50) - Math.abs(x.s - 50)).slice(0, 3) : [];
 
   // ═══ SELECT (eid-r8t6) — the lasso gesture ═══════════════════════════════════════════════════════
@@ -608,7 +613,7 @@
               <div class="mb-1 flex items-center gap-2">
                 <span class="w-4 flex-none font-mono text-[10px] uppercase opacity-60">{ax.ch}</span>
                 <select bind:value={m.channels[ax.ch]} data-axis={scope + ":" + ax.ch} aria-label="{ax.ch} axis" class="select select-xs min-w-0 flex-1">
-                  {#each scalarDims as d}<option value={d.key}>{d.name}</option>{/each}
+                  {#each scalarDims as d}<option value={d.key}>{d.name}{dimTag(d)}</option>{/each}
                 </select>
               </div>
               {#if ax.d && !ax.d.fixedNorm}
@@ -667,7 +672,7 @@
             <li class="menu-title text-[10px] tracking-widest uppercase">color by</li>
             <li><button data-opt="{scope}:color:region" aria-pressed={m.channels.color === "region"} title="colour by the region clustering at the current grain" onclick={() => (m.channels.color = "region")}><span class="w-3">{m.channels.color === "region" ? "✓" : ""}</span>region</button></li>
             {#each catDims as d}<li><button data-opt="{scope}:color:{d.key}" aria-pressed={m.channels.color === d.key} title="colour by {d.name} — {d.ord?.length} values" onclick={() => (m.channels.color = d.key)}><span class="w-3">{m.channels.color === d.key ? "✓" : ""}</span><span class="truncate">{d.name}</span></button></li>{/each}
-            {#each scalarDims as d}<li><button data-opt="{scope}:color:{d.key}" aria-pressed={m.channels.color === d.key} title="colour by {d.name} (a gradient low → high)" onclick={() => (m.channels.color = d.key)}><span class="w-3">{m.channels.color === d.key ? "✓" : ""}</span><span class="truncate">{d.source === "axis" ? "axis: " + d.name : d.name}</span></button></li>{/each}
+            {#each scalarDims as d}<li><button data-opt="{scope}:color:{d.key}" aria-pressed={m.channels.color === d.key} title="colour by {d.name} (a gradient low → high)" onclick={() => (m.channels.color = d.key)}><span class="w-3">{m.channels.color === d.key ? "✓" : ""}</span><span class="truncate">{d.source === "axis" ? "axis: " + d.name : d.name}</span>{#if d.variance != null}<span class="ml-auto flex-none font-mono text-[10px] opacity-50">{pctOf(d.variance)}{d.weak ? " thin" : ""}</span>{/if}</button></li>{/each}
             {@render propItems(colorDim)}
           </ul>
         </div>
@@ -698,7 +703,7 @@
           <li class="menu-title text-[10px] tracking-widest uppercase">size by</li>
           <li><button data-opt="{scope}:size:uniform" aria-pressed={m.channels.size === "uniform"} title="every card the same radius" onclick={() => (m.channels.size = "uniform")}><span class="w-3">{m.channels.size === "uniform" ? "✓" : ""}</span>uniform</button></li>
           {#each allDims.filter((d) => d.kind === "scalar") as d}
-            <li><button data-opt="{scope}:size:{d.key}" aria-pressed={m.channels.size === d.key} title="size by {d.name}" onclick={() => (m.channels.size = d.key)}><span class="w-3">{m.channels.size === d.key ? "✓" : ""}</span><span class="truncate">{d.name}</span></button></li>
+            <li><button data-opt="{scope}:size:{d.key}" aria-pressed={m.channels.size === d.key} title="size by {d.name}" onclick={() => (m.channels.size = d.key)}><span class="w-3">{m.channels.size === d.key ? "✓" : ""}</span><span class="truncate">{d.name}</span>{#if d.variance != null}<span class="ml-auto flex-none font-mono text-[10px] opacity-50">{pctOf(d.variance)}{d.weak ? " thin" : ""}</span>{/if}</button></li>
           {/each}
           {@render propItems(sizeDim)}
         </ul>
@@ -718,7 +723,7 @@
           <div class="mb-2 flex items-center gap-2">
             <span class="flex-none font-mono text-[10px] uppercase opacity-60">window</span>
             <select bind:value={m.channels.scrub} onchange={resetScrub} data-testid="scrub-field" aria-label="which dimension the scrubber windows" class="select select-xs min-w-0 flex-1">
-              {#each scrubFields as f}<option value={f.key}>{f.name}</option>{/each}
+              {#each scrubFields as f}<option value={f.key}>{f.name}{dimTag(f)}</option>{/each}
             </select>
           </div>
           <div class="scrub">
@@ -924,8 +929,13 @@
 
           <div class="mt-3 mb-1 font-mono text-[10px] uppercase tracking-wide opacity-60">where it sits</div>
           {#each placements(selected) as p}
+            <!-- the placement names its POLE ("▲81 toward dense theory"), and a thin axis says so — an
+                 extreme score on a 1%-variance axis must not read like the card's most prominent fact -->
             <div class="flex items-center justify-between gap-2 border-b border-base-200 py-1 text-xs" title={(p.s >= 50 ? p.a.high : p.a.low) + " — " + p.note}>
-              <span class="truncate opacity-70">{p.a.name}</span>
+              <span class="min-w-0">
+                <span class="block truncate opacity-70">{p.a.name}{#if p.a.weak}<span class="opacity-60"> · thin ({pctOf(p.a.variance ?? 0)})</span>{/if}</span>
+                <span class="block truncate font-mono text-[10px] opacity-50">toward {p.s >= 50 ? p.a.high : p.a.low}</span>
+              </span>
               <span class="flex-none font-mono text-[10px]">{p.s >= 50 ? "▲" : "▼"} <b>{p.s}</b></span>
             </div>
           {/each}
@@ -994,7 +1004,7 @@
           {/if}
           {#each m.selectionAxes as a}
             <div data-sel-axis class="flex items-center justify-between gap-2 border-b border-base-200 py-1 text-xs" title="{a.name}: mean {a.mean}/100 (corpus mean is 50)">
-              <span class="truncate opacity-70">{a.name} <span class="opacity-60">→ {a.pole}</span></span>
+              <span class="truncate opacity-70">{a.name}{#if data.axes.find((x) => x.name === a.name)?.weak}<span class="opacity-60"> · thin</span>{/if} <span class="opacity-60">→ {a.pole}</span></span>
               <span class="flex-none font-mono text-[10px]">{a.mean >= 50 ? "▲" : "▼"} <b>{a.mean}</b></span>
             </div>
           {/each}
@@ -1051,7 +1061,7 @@
           <span class="font-mono text-[10px] opacity-60">{deckList.length} cards</span>
           <label class="flex items-center gap-1 text-xs"><span class="font-mono text-[10px] opacity-60">sort</span>
             <select bind:value={m.channels.sort} aria-label="sort the deck" class="select select-xs">
-              {#each scalarDims as d}<option value={d.key}>{d.name}</option>{/each}
+              {#each scalarDims as d}<option value={d.key}>{d.name}{dimTag(d)}</option>{/each}
             </select></label>
           {#if hasRead}<button class="btn btn-xs normal-case {deckUnread ? 'btn-active' : 'btn-ghost'}" aria-pressed={deckUnread} title="hide cards already marked read" onclick={() => (deckUnread = !deckUnread)}>unread only</button>{/if}
           <input bind:value={deckQ} placeholder="find in list…" aria-label="find in the list — narrows these rows only, not the map" class="input input-xs min-w-0 flex-1" />
@@ -1068,7 +1078,7 @@
               <div class="my-1 line-clamp-2 text-[11px] opacity-70">{data.cores[i].slice(0, 160)}</div>
               <div class="flex flex-wrap gap-1">
                 <span class="badge badge-xs font-mono">◆ {regionOf(i)}</span>
-                {#each topAxes(i) as t}<span class="badge badge-xs badge-ghost font-mono">{axShort(t.n)} {t.s}</span>{/each}
+                {#each topAxes(i) as t}<span class="badge badge-xs badge-ghost font-mono" title={t.w ? t.n + " — thin axis (under 2% variance)" : t.n}>{t.w ? "~" : ""}{axShort(t.n)} {t.s}</span>{/each}
               </div>
             </button>
           {/each}
