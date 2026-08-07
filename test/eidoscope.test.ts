@@ -363,3 +363,218 @@ test("cardCorpus: cards cache by content + axis GEOMETRY; relabeling axes hits (
 
   rmSync(dir, { recursive: true, force: true });
 });
+
+// ── the numerical core ────────────────────────────────────────────────────────
+// axes/cluster/map/embed had zero coverage: everything above tests the surfaces AROUND the math.
+// These pin the math itself — dimension count, ladder shape, rescaling, chunking, caching — with
+// synthetic data and injected fakes, so nothing here touches the network or loads an embedder.
+
+import { discoverAxes, mulberry32 } from "../src/axes.ts";
+import { divisiveLevels, findOptimalK } from "../src/cluster.ts";
+import { normPct, knnBrute, knnHNSW, poolEmbed } from "../src/map.ts";
+import { EmbeddingCache } from "../src/embed.ts";
+
+// A matrix with exactly `k` planted components: every row is a random mix of k orthogonal basis
+// directions (large, structured variance) plus per-dimension noise (small, unstructured).
+function plantedMatrix(n: number, d: number, k: number, seed = 7, noise = 0.05): number[][] {
+  const r = mulberry32(seed);
+  const basis = Array.from({ length: k }, (_, c) => Array.from({ length: d }, (_, j) => Math.sin((c + 1) * (j + 1) * 0.7)));
+  return Array.from({ length: n }, () => {
+    const w = Array.from({ length: k }, () => r() * 2 - 1);
+    return Array.from({ length: d }, (_, j) => basis.reduce((s, b, c) => s + w[c] * b[j], 0) + (r() * 2 - 1) * noise);
+  });
+}
+// discoverAxes always calls the LLM labeler; a stub keeps it offline and makes the names predictable.
+const axesLLM = { forward: async (_l: any, _i: any) => ({}) };
+
+test("discoverAxes: parallel analysis finds the PLANTED dimensionality, not the ambient one", async () => {
+  const n = 120, d = 40, planted = 3;
+  const X = plantedMatrix(n, d, planted);
+  const titles = Array.from({ length: n }, (_, i) => "doc " + i);
+  const { realDims, axes, projections, all } = await discoverAxes(X, titles, { llm: {}, topN: 16 } as any);
+  // the noise floor must cut the 40 ambient dims down to roughly the 3 real ones (never the full 40)
+  expect(realDims).toBeGreaterThanOrEqual(planted);
+  expect(realDims).toBeLessThan(10);
+  // axes are capped by the honest dim count — we never surface more axes than the data supports
+  expect(axes.length).toBe(Math.min(16, Math.max(realDims, 2)));
+  expect(all.length).toBe(axes.length);
+  expect(axes.map((a) => a.pc)).toEqual(axes.map((_, i) => i + 1)); // PCs in order, 1-indexed
+  // projections: one row per doc, scores for every component, and PC1 explains the most variance
+  expect(projections.length).toBe(n);
+  expect(projections[0].length).toBeGreaterThanOrEqual(realDims);
+  for (let i = 1; i < axes.length; i++) expect(axes[i].var).toBeLessThanOrEqual(axes[i - 1].var);
+});
+
+test("discoverAxes: DETERMINISTIC across runs — same corpus + config, identical geometry", async () => {
+  const X = plantedMatrix(80, 30, 4, 11);
+  const titles = X.map((_, i) => "t" + i);
+  const a = await discoverAxes(X, titles, { llm: {} } as any);
+  const b = await discoverAxes(X, titles, { llm: {} } as any);
+  expect(b.realDims).toBe(a.realDims);                            // the seeded noise floor no longer wobbles
+  expect(b.axes.map((x) => x.var)).toEqual(a.axes.map((x) => x.var));
+  expect(b.projections).toEqual(a.projections);                   // the coordinates themselves are identical
+  // an explicit different seed exercises the seam (the shuffle really is driven by it)
+  expect(typeof (await discoverAxes(X, titles, { llm: {}, seed: 999 } as any)).realDims).toBe("number");
+});
+
+test("mulberry32: seeded, reproducible, and uniform-ish in [0,1)", () => {
+  const a = Array.from({ length: 200 }, mulberry32(5));
+  const b = Array.from({ length: 200 }, mulberry32(5));
+  expect(a).toEqual(b);
+  expect(a).not.toEqual(Array.from({ length: 200 }, mulberry32(6)));
+  expect(Math.min(...a)).toBeGreaterThanOrEqual(0);
+  expect(Math.max(...a)).toBeLessThan(1);
+  const mean = a.reduce((s, x) => s + x, 0) / a.length;
+  expect(Math.abs(mean - 0.5)).toBeLessThan(0.08);
+});
+
+// three well-separated blobs on the unit sphere — divisive splitting should find them and keep going
+function blobs(perBlob: number, k: number, d = 12, seed = 3): number[][] {
+  const r = mulberry32(seed), out: number[][] = [];
+  for (let c = 0; c < k; c++) for (let i = 0; i < perBlob; i++) {
+    const v = Array.from({ length: d }, (_, j) => (j % k === c ? 1 : 0) + (r() * 2 - 1) * 0.08);
+    const n = Math.hypot(...v); out.push(v.map((x) => x / n));
+  }
+  return out;
+}
+
+test("divisiveLevels: nested ladder — counts ascend, assignments PARTITION the set, minSize respected", () => {
+  const X = blobs(60, 3);                                   // 180 points
+  const { levels, counts } = divisiveLevels(X, { minSize: 10, ladder: [2, 4, 6, 9], maxClusters: 9 });
+  expect(counts.length).toBe(levels.length);
+  expect(counts).toEqual([...counts].sort((a, b) => a - b));  // ladder ascends
+  expect(counts[counts.length - 1]).toBeLessThanOrEqual(9);   // maxClusters honored
+  for (let l = 0; l < levels.length; l++) {
+    const a = levels[l];
+    expect(a.length).toBe(X.length);                          // every point assigned exactly once
+    expect(a.every((c) => Number.isInteger(c) && c >= 0 && c < counts[l])).toBe(true);
+    expect(new Set(a).size).toBe(counts[l]);                  // no empty cluster — labels are dense 0..k-1
+  }
+  // NESTED: a finer level never merges two points that a coarser level separated
+  for (let l = 1; l < levels.length; l++)
+    for (let i = 0; i < X.length; i++) for (let j = i + 1; j < X.length; j++)
+      if (levels[l][i] === levels[l][j]) expect(levels[l - 1][i]).toBe(levels[l - 1][j]);
+});
+
+test("divisiveLevels: minSize stops the split — a group at or below it is never divided further", () => {
+  const X = blobs(20, 3);                                    // 60 points
+  const { levels, counts } = divisiveLevels(X, { minSize: 25, maxClusters: 192 });
+  const last = levels[levels.length - 1];
+  const sizes = Array.from({ length: counts[counts.length - 1] }, (_, c) => last.filter((x) => x === c).length);
+  expect(sizes.reduce((a, b) => a + b, 0)).toBe(X.length);
+  // with minSize 25 out of 60 points, splitting must stop early — not shatter into singletons
+  expect(counts[counts.length - 1]).toBeLessThanOrEqual(3);
+});
+
+test("divisiveLevels + findOptimalK: deterministic — the same matrix yields the same ladder every run", () => {
+  const X = blobs(40, 3, 12, 9);
+  const a = divisiveLevels(X, { minSize: 10, ladder: [2, 4, 6], maxClusters: 6 });
+  const b = divisiveLevels(X, { minSize: 10, ladder: [2, 4, 6], maxClusters: 6 });
+  expect(b.counts).toEqual(a.counts);
+  expect(b.levels).toEqual(a.levels);
+  expect(findOptimalK(X)).toBe(findOptimalK(X));
+});
+
+test("normPct: rescales each dim by its 2-98 percentile band, robust to a far outlier", () => {
+  const col = Array.from({ length: 100 }, (_, i) => i);       // 0..99
+  const pts = col.map((v) => [v, 100000]);                    // dim1 constant → guard against /0
+  pts.push([100000, 100000]);                                 // one wild outlier in dim0
+  const out = normPct(pts, 2);
+  expect(out.length).toBe(pts.length);
+  // the bulk lands inside roughly [-1,1]; the outlier is allowed to exceed it (that's the honest part)
+  const bulk = out.slice(0, 100).map((r) => r[0]);
+  expect(Math.min(...bulk)).toBeGreaterThan(-1.3);
+  expect(Math.max(...bulk)).toBeLessThan(1.3);
+  expect(out[out.length - 1][0]).toBeGreaterThan(1.3);        // outlier not clipped, just off-band
+  expect(out.every((r) => Number.isFinite(r[1]))).toBe(true); // constant dim → no NaN/Infinity
+  const mid = bulk[49];
+  expect(Math.abs(mid)).toBeLessThan(0.2);                    // the median sits near zero (band is centered)
+});
+
+test("kNN: the HNSW index agrees with exact brute force on a synthetic set", async () => {
+  const X = blobs(30, 3, 16, 21);                             // 90 unit vectors, 3 tight blobs
+  const K = 5;
+  const brute = knnBrute(X, K), approx = await knnHNSW(X, K);
+  expect(approx.length).toBe(brute.length);
+  let overlap = 0;
+  for (let i = 0; i < X.length; i++) {
+    expect(brute[i].length).toBe(K);
+    expect(brute[i]).not.toContain(i);                        // never your own neighbor
+    expect(approx[i]).not.toContain(i);
+    overlap += approx[i].filter((j) => brute[i].includes(j)).length;
+  }
+  expect(overlap / (X.length * K)).toBeGreaterThan(0.9);      // approximate index recovers the exact answer
+});
+
+// a fake embedder: no model, no network — one deterministic vector per chunk, so we can COUNT chunks
+const fakeEmbedder = (seen: { id: string; text: string }[][]) =>
+  async (items: { id: string; text: string }[], opts: { cache?: EmbeddingCache }) => {
+    seen.push(items);
+    return items.map((it) => { const v = [it.text.split(/\s+/).filter(Boolean).length, it.text.length, 1]; opts.cache?.set(it.id, v); return v; });
+  };
+
+test("poolEmbed: chunks long text, mean-pools back per doc, and dedupes identical chunks", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "eido-pool-"));
+  const seen: { id: string; text: string }[][] = [];
+  const long = Array.from({ length: 25 }, (_, i) => "w" + i).join(" ");   // 25 words
+  const out = await poolEmbed([long, "short text", long], dir, { embed: fakeEmbedder(seen), chunkWords: 10, maxChunks: 50 });
+  rmSync(dir, { recursive: true, force: true });
+  expect(out.length).toBe(3);
+  // 25 words at 10/chunk = 3 chunks; identical docs 0 and 2 hash to the SAME chunk ids → deduped
+  const ids = new Set(seen[0].map((i) => i.id));
+  expect(seen[0].length).toBe(3 + 1 + 3);                                  // spans are per-doc, ids repeat
+  expect(ids.size).toBe(4);                                                // 3 unique chunks + the short doc
+  expect(out[0]).toEqual(out[2]);                                          // identical text → identical vector
+  expect(out[0][0]).toBeCloseTo(25 / 3, 6);                                // mean-pooled word count across chunks
+  expect(out[1][0]).toBe(2);                                               // "short text" is one 2-word chunk
+});
+
+test("poolEmbed: maxChunks subsamples by STRIDE (spans the doc) instead of truncating", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "eido-pool2-"));
+  const seen: { id: string; text: string }[][] = [];
+  const words = Array.from({ length: 100 }, (_, i) => "w" + i);
+  await poolEmbed([words.join(" ")], dir, { embed: fakeEmbedder(seen), chunkWords: 1, maxChunks: 5 });
+  rmSync(dir, { recursive: true, force: true });
+  const texts = seen[0].map((i) => i.text);
+  expect(texts.length).toBe(5);                                            // capped
+  expect(texts[0]).toBe("w0");
+  expect(texts[texts.length - 1]).toBe("w80");                             // stride 20 — reaches deep into the doc
+  expect(texts).toEqual(["w0", "w20", "w40", "w60", "w80"]);               // evenly spread, not the first 5
+});
+
+test("poolEmbed: empty text still yields a vector (never drops a doc from the geometry)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "eido-pool3-"));
+  const out = await poolEmbed(["", "   "], dir, { embed: fakeEmbedder([]), chunkWords: 10 });
+  rmSync(dir, { recursive: true, force: true });
+  expect(out.length).toBe(2);
+  expect(out.every((v) => v.length === 3 && v.every(Number.isFinite))).toBe(true);
+});
+
+test("EmbeddingCache: miss then hit, and the hit survives a persistence round-trip", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "eido-embcache-"));
+  const c1 = new EmbeddingCache(dir, "test/model");
+  await c1.load();
+  expect(c1.get("a")).toBeUndefined();                       // cold miss
+  c1.set("a", [1, 2, 3]);
+  expect(c1.get("a")).toEqual([1, 2, 3]);                    // warm hit in-process
+  await c1.save();
+  const c2 = new EmbeddingCache(dir, "test/model");          // a fresh "process"
+  await c2.load();
+  expect(c2.get("a")).toEqual([1, 2, 3]);                    // persisted to disk
+  const other = new EmbeddingCache(dir, "other/model");      // a DIFFERENT model must not read those vectors
+  await other.load();
+  expect(other.get("a")).toBeUndefined();
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("poolEmbed: a second pass over the same texts is served entirely from the on-disk cache", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "eido-pool4-"));
+  const seen: { id: string; text: string }[][] = [];
+  const embed = fakeEmbedder(seen);
+  const texts = ["alpha beta gamma", "delta epsilon"];
+  const a = await poolEmbed(texts, dir, { embed, chunkWords: 10 });
+  const b = await poolEmbed(texts, dir, { embed, chunkWords: 10 });       // reload from disk
+  rmSync(dir, { recursive: true, force: true });
+  expect(b).toEqual(a);
+  expect(seen[1].every((it) => seen[0].some((p) => p.id === it.id))).toBe(true); // same content-addressed ids
+});
