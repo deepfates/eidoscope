@@ -54,11 +54,12 @@ OpenAI-compatible provider incl. local servers like LM Studio, so cloud or local
 ```sh
 bun install
 bun run src/cli.ts example           # try it: a bundled 24-doc demo corpus across domains
-bun run src/cli.ts <folder>          # any folder of .md/.txt -> out/<name>/: deck.jsonl + map-data.json + <name>.eido + <name>.html + REPORT.md (+ STATE.md if dated)
+bun run src/cli.ts <folder>          # any folder of .md/.txt -> out/<name>/: deck.jsonl + <name>.eido + <name>.html + REPORT.md (+ STATE.md if dated)
 bun run src/cli.ts <folder> --limit 200
 bun run src/cli.ts <folder> --min-chars 100  # include short entries (default: skip bodies < 200 chars, and it says how many)
 bun run src/cli.ts <folder> --frontier   # also pull the citation frontier (arxiv corpora)
 bun run src/cli.ts <folder> --embed raw   # A/B: build the map from raw full-text instead of the cards (to see what the bottleneck buys)
+bun run src/cli.ts <folder> --debug-json  # also dump map-data.json (see below) — off by default: it OOMs on big corpora
 open out/<folder-name>/<folder-name>.html
 ```
 
@@ -135,7 +136,8 @@ arrays — coordinates, per-axis scores, the grain ladder, neighbor and citation
 Float32/Int32 buffers (parsed straight into GPU attributes); strings and sparse metadata ride in a
 JSON header. ~5× smaller than the JSON. `MapContract` is the **only** coupling between pipeline and
 viewer: either side can change freely as long as both honor that (versioned) shape. `map-data.json`
-is the same data, human-readable, for debugging.
+is the same data, human-readable, for debugging — written only under `--debug-json`, because
+serializing the whole contract as one JSON string exceeds the string limit on large corpora.
 
 ## Develop / verify
 

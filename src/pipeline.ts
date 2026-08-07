@@ -16,7 +16,7 @@ import { loadFixture, type Doc } from "./corpus.ts";
 
 // The full instrument, end to end: docs (+embeddings) -> discover axes -> card -> embed cards ->
 // project + cluster -> name regions -> deck.jsonl + map-data.json + <slug>.eido + <slug>.html (self-contained viewer).
-export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?: boolean; name?: string; source?: string; embed?: "card" | "raw"; out?: string } = {}) {
+export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?: boolean; name?: string; source?: string; embed?: "card" | "raw"; out?: string; debugJson?: boolean } = {}) {
   const llm = provider();
   // Every corpus gets its OWN self-describing output directory + `<slug>.eido` — the .eido is a portable,
   // addressable L-space you hand around, so mapping two corpora must never clobber a shared `map.eido`.
@@ -111,7 +111,11 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
     generated: Date.now(),
   };
   D.metaFields = buildMetaFields(D);   // typed dimension manifest for the channel grammar
-  writeFileSync(join(outDir, "map-data.json"), JSON.stringify(D));
+  // map-data.json is a DEBUG artifact: one JSON.stringify of the entire contract (including the card
+  // vectors), which blows past the string length limit and crashes the run somewhere near 100k docs —
+  // right where you most want the map. The .eido below is the real output and is ~5x smaller, so the
+  // JSON is opt-in behind --debug-json and default runs skip it entirely.
+  if (opts.debugJson) writeFileSync(join(outDir, "map-data.json"), JSON.stringify(D));
   const enc = encodeMap(D);
   writeFileSync(join(outDir, eidoName), enc);   // the portable artifact (~5× smaller)
   // self-contained offline explorer = the built Svelte+deck viewer with this .eido inlined (one HTML, no server)
@@ -125,7 +129,7 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
   console.error(`   → map   ${join(outDir, eidoName)}   (the portable L-space; open in the viewer)`);
   if (html) console.error(`   → open  ${join(outDir, htmlName)}   (self-contained interactive explorer)`);
   console.error(`   → read  ${join(outDir, "REPORT.md")}        (shareable summary${state ? " + STATE.md trajectory" : ""})`);
-  console.error(`   → data  ${join(outDir, "deck.jsonl")} · ${join(outDir, "map-data.json")}`);
+  console.error(`   → data  ${join(outDir, "deck.jsonl")}${opts.debugJson ? ` · ${join(outDir, "map-data.json")}` : ""}`);
   return D;
 }
 
