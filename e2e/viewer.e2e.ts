@@ -253,10 +253,28 @@ try {
   const alt = await st();
   ok(alt.k === 2 && alt.regions === 2, `?map=alt.eido loads the alternate 2-region map (not the default 12) — k=${alt.k} regions=${alt.regions}`);
 
+  // 12b. PRESENCE-GATING (eid-3zao): a control whose backing data THIS corpus lacks does not render —
+  // absent, not disabled. alt.eido carries ONE cluster level, no read-state, no cite/ghosts, no vectors
+  // and no dates, so every control fed by those is gone (the default synth map proves the presence side:
+  // grain at #2, cite/frontier at #8, unread-only at #10, + axis just below at #13).
+  await btn(/explore/i).click().catch(() => {}); await p.waitForTimeout(150);
+  ok((await p.locator("[data-testid=grain]").count()) === 0, "grain slider absent when the hierarchy has a single level");
+  ok((await p.locator('[data-menu="bar:axis"]').count()) === 0, "+ axis (query) absent when the file carries no card vectors");
+  await menu("layout");
+  ok((await p.locator('[data-opt="bar:overlay:cite"]').count()) === 0 && (await p.locator('[data-opt="bar:overlay:ghosts"]').count()) === 0, "cite/frontier overlay toggles absent without citation data");
+  await closeMenus();
+  await btn(/^deck$/).click(); await p.waitForTimeout(250);
+  ok((await p.locator("button", { hasText: /unread only/i }).count()) === 0, "unread-only absent when the corpus carries no read state");
+  const altSort = await p.evaluate(() => [...document.querySelectorAll('select[aria-label="sort the deck"] option')].map((o) => o.textContent));
+  ok(!altSort.includes("date") && altSort.length === 3, `deck sort offers only dimensions this corpus has (no date) — ${JSON.stringify(altSort)}`);
+  await p.keyboard.press("Escape"); await p.waitForTimeout(150);
+
   // 13. OPEN ANY .eido by DROPPING a file — the "hand someone a file" story (eid-0gs7). Reload the default
   // 12-region map, then drop the 2-region alt file onto the app; it should tear down + re-mount to 2 regions.
   await p.goto(base + "/index.html");
   await p.waitForFunction(() => ((window as any).__eido?.()?.regions ?? 0) > 2, null, { timeout: 15000 });
+  // …and the presence side of 12b: the synth map DOES carry card vectors, so + axis renders here.
+  ok((await p.locator('[data-menu="bar:axis"]').count()) === 1, "+ axis (query) present when the file carries card vectors");
   await p.evaluate(async () => {
     const bytes = new Uint8Array(await (await fetch("/alt.eido")).arrayBuffer());
     const file = new File([bytes], "dropped.eido", { type: "application/octet-stream" });
