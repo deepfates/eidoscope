@@ -6,9 +6,11 @@
    ships a curated set and stamps the choice on <html data-theme>, which is the
    same signal DaisyUI keys off. `black` is the default ground (deck.gl points
    glow hardest against it); `light` is the paper counterpart the ☾/☀ toggle
-   flips to. See THEMES in App.svelte for the canvas dark|light mapping. */
+   flips to. This list and THEMES in App.svelte must agree: a theme offered in the
+   picker but missing here stamps data-theme with no tokens behind it, and the map
+   would derive its palette from the DEFAULT theme's tokens instead. */
 @plugin "daisyui" {
-  themes: black --default, light, dim, night, nord, sunset, corporate, winter;
+  themes: black --default, light, dim, night, nord, sunset, synthwave, retro, corporate, winter;
 }
 
 html, body { margin: 0; height: 100%; overscroll-behavior: none; background: var(--color-base-100); }
