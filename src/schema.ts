@@ -105,6 +105,10 @@ export type MapContract = {
   tags?: (string[] | undefined)[];
   dates?: (number | undefined)[];
   read?: (boolean | undefined)[];
+  // source folder per node (parent directory of the ingested file). Carried as a real column because the
+  // viewer can only DERIVE a folder from file:// urls — docs with real web urls (e.g. tldr's upstream
+  // links) would otherwise lose their on-disk organization, which is often the best categorical facet.
+  folders?: (string | undefined)[];
 
   // frontier telescope
   ghosts?: GhostDef[];

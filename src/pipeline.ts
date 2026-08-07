@@ -78,6 +78,8 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
     scores, rawScores,
     xy, xyz, cluster, k, di, hub, nbr, clusters, levels, counts, levelLabels, levelBlurbs,
     urls: deck.map((c) => c.url || (c.path ? "file://" + c.path : undefined)),
+    // parent-directory facet, carried explicitly (docs with web urls would otherwise lose it — schema.ts)
+    folders: deck.map((c) => { const p = (c.path || "").split("/").filter(Boolean); return p.length >= 2 ? p[p.length - 2].replace(/_/g, " ") : undefined; }),
     sources: deck.map((c) => c.source), siteNames: deck.map((c) => c.siteName),
     authors: deck.map((c) => c.author), tags: deck.map((c) => c.tags), dates: deck.map((c) => c.date),
     read: deck.map((c) => (c.readProgress != null ? c.readProgress > 0.05 : undefined)),

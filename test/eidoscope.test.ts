@@ -280,7 +280,12 @@ test("metaFields: pipeline declares each present field with the right TYPE; only
   expect(byKey.length.type).toBe("scalar");            // always derivable from cores
   expect(byKey["axis:a"].type).toBe("scalar");         // each discovered axis is a scalar dimension
   expect(byKey["axis:a"].source).toBe("axis:a");
-  expect(byKey.folder).toBeDefined();                  // urls present → folder declared (viewer derives values)
+  // folder: carried column preferred; url-derivation only promised when file:// urls actually exist
+  const withCol = buildMetaFields({ axes, hub: [1, 2], folders: ["linux", "osx"] } as any);
+  expect(withCol.find((f) => f.key === "folder")?.source).toBe("col:folders");
+  const fileUrls = buildMetaFields({ axes, hub: [1, 2], urls: ["file:///a/linux/x.md", "file:///a/osx/y.md"] } as any);
+  expect(fileUrls.find((f) => f.key === "folder")?.source).toBe("derived:folder");
+  expect(rich.find((f) => f.key === "folder")).toBeUndefined();   // web urls, no folders col → no phantom folder
   // a BARE corpus (no optional metadata) declares only the always-present dims — no phantom fields
   const bare = buildMetaFields({ axes, hub: [1, 2] } as any);
   expect(bare.find((f) => f.key === "author")).toBeUndefined();
@@ -294,8 +299,9 @@ test("mapbin v2: metaFields manifest round-trips in the wire format", () => {
     axes: [{ key: "a", name: "AxisA", low: "lo", high: "hi" }], scores: { a: [10, 90] },
     xy: [[0, 0], [1, 1]], xyz: [[0, 0, 0], [1, 1, 0]], cluster: [0, 1], k: 2, di: 0,
     clusters: [{ c: 0, n: 1, label: "p" }, { c: 1, n: 1, label: "q" }], hub: [1, 2], nbr: [[1], [0]],
-    dates: [1, 2], read: [true, false],
+    dates: [1, 2], read: [true, false], folders: ["linux", undefined],
     metaFields: [
+      { key: "folder", label: "folder", type: "categorical", source: "col:folders" },
       { key: "date", label: "date", type: "temporal", source: "col:dates" },
       { key: "read", label: "read", type: "boolean", source: "col:read" },
       { key: "hub", label: "influence", type: "scalar", source: "col:hub" },
@@ -303,6 +309,7 @@ test("mapbin v2: metaFields manifest round-trips in the wire format", () => {
   };
   const back = decodeMap(encodeMap(D));
   expect(back.metaFields).toEqual(D.metaFields);
+  expect(back.folders).toEqual(D.folders);   // the carried folder column survives (sparse-restored)
   // a map WITHOUT metaFields decodes with it absent (back-compat)
   const { metaFields, ...lite } = D;
   expect(decodeMap(encodeMap(lite as MapContract)).metaFields).toBeUndefined();
