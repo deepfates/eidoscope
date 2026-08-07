@@ -187,7 +187,7 @@ UI over `ghosts` in the code.
 
 | Current | Proposed | Why |
 |---|---|---|
-| toolbar button **`time`** | **`window`** | The single worst mislabel in the app. This control windows *any* scalar or temporal dimension — on `map.eido` it offers **19 dimensions, 18 of which are not time** (16 PCA axes, influence, length). A user windowing "length" is clicking a button labelled "time". The popover's own inner label is already `window`. Caught in the wild: on `tldr.eido` the toolbar reads **`time 0 – 100`**, because the scrubber parked on a unitless PCA axis (see `scratchpad/shell-tldr.png`). |
+| toolbar button **`time`** | **`window`** | The single worst mislabel in the app. This control windows *any* scalar or temporal dimension — on `map.eido` it offers **19 dimensions, 18 of which are not time** (16 PCA axes, influence, length). A user windowing "length" is clicking a button labelled "time". The popover's own inner label is already `window`. Caught in the wild: on `tldr.eido` the toolbar reads **`time 0 – 100`**, because the scrubber parked on a unitless PCA axis (verified live on tldr.eido; fixed in cc236f5). |
 | **`+ query`** (button) · **`semantic axis`** (popover title) · **`⌕`** (submit) · **`⌕ <text>`** (the dimension's name in menus) | **`+ axis`** everywhere, dimension shown as **`? <text>`** | Four names for one concept, and `⌕` is *also* the find box's glyph — the same symbol means "substring search" in one place and "embed a semantic query" in another. |
 | **`find`** (toolbar, filters the map) vs **`filter…`** (deck, filters only the list) | **`find`** for both, with the deck's scoped as **`find in list`** | Same verb, same input type, same substring semantics, two names — and the difference that actually matters (map-wide vs list-only) is the one thing neither name states. |
 | **`source`** = the *author* dimension · **`source site`** = siteNames · **`from <source>`** = provenance path · **`original →`** = the document's own URL | author dimension → **`author`**; provenance → **`corpus source`** | "Source" currently means four different things on screen. The pipeline's own manifest calls this field `author / source`; the viewer shows `source`. Settling this row un-pinned `NAME_OVERRIDE` in `dimensions.ts`, which had been holding the viewer's own names in front of the manifest's; the manifest is now the single source of a dimension's name. |
@@ -283,9 +283,10 @@ Selected results:
   ✓ no console/page errors during the run
 ```
 
-Screenshots: `scratchpad/shell-about.png` (the About popover on `map.eido`),
-`scratchpad/shell-tldr-facet.png` (isolate on `read`, the manifest-only categorical — chip, camera fit
-and `1012 / 1446 cards` all visible), `scratchpad/shell-tldr.png` (`tldr.eido`, region isolate,
+Verification evidence (screenshots were taken and reviewed at the time; they are not committed —
+the repo tracks source, not artifacts, and `git show 9fa904b` still has them if needed):
+the About popover on `map.eido`; isolate on `read`, the manifest-only categorical — chip, camera fit
+and `1012 / 1446 cards` all visible; `tldr.eido` region isolate,
 `244 / 6261 cards`).
 
 **A note on `tldr.eido` and folders.** It was expected to exercise folder facets. It does not, and
