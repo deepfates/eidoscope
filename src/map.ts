@@ -6,7 +6,7 @@ import type { Doc } from "./corpus.ts";
 import { CFG, cachePath } from "./config.ts";
 import { getTextEmbeddings, EmbeddingCache } from "./embed.ts";
 import { divisiveLevels } from "./cluster.ts";
-import { HNSW } from "hnsw";
+import { HierarchicalNSW } from "hnswlib-node";
 import type { MapContract, MetaField } from "./schema.ts";
 
 // Declare each corpus field as a TYPED encodable dimension (the channel-grammar substrate). Presence-based:
@@ -121,12 +121,28 @@ export function knnBrute(X: number[][], K: number): number[][] {
   }
   return nbr;
 }
+// One approximate index answers BOTH consumers: rows are SELF-INCLUSIVE ([i, ...K neighbors]) with
+// matching distances converted to euclidean-on-the-unit-sphere (sqrt(2·cosineDist)) — exactly the
+// (indices, distances) shape umap-js's setPrecomputedKNN expects (python UMAP convention: self counts
+// as one of nNeighbors, distance 0). Callers that want plain neighbor lists slice the self column off.
+// Deterministic: hnswlib's level RNG is seeded, points are inserted sequentially in corpus order, and
+// search is exact given the built graph — same vectors in, same graph and neighbors out, every run.
+export function knnIndex(X: number[][], K: number): { idx: number[][]; dst: number[][] } {
+  const index = new HierarchicalNSW("cosine", X[0].length);
+  index.initIndex(X.length, 16, 200, SEED);
+  index.setEf(Math.max(64, K + 1));
+  for (let i = 0; i < X.length; i++) index.addPoint(X[i], i);
+  const idx: number[][] = [], dst: number[][] = [];
+  for (let i = 0; i < X.length; i++) {
+    const r = index.searchKnn(X[i], Math.min(X.length, K + 1));
+    const pairs = r.neighbors.map((j, t) => [j, r.distances[t]] as [number, number]).filter(([j]) => j !== i).slice(0, K);
+    idx.push([i, ...pairs.map(([j]) => j)]);
+    dst.push([0, ...pairs.map(([, d]) => Math.sqrt(Math.max(0, 2 * d)))]);
+  }
+  return { idx, dst };
+}
 export async function knnHNSW(X: number[][], K: number): Promise<number[][]> {
-  const index = new HNSW(16, 200, X[0].length, "cosine");
-  await index.buildIndex(X.map((v, i) => ({ id: i, vector: v })));
-  const nbr: number[][] = [];
-  for (let i = 0; i < X.length; i++) nbr.push((await index.searchKNN(X[i], K + 1)).map((r: any) => r.id as number).filter((j) => j !== i).slice(0, K));
-  return nbr;
+  return knnIndex(X, K).idx.map((row) => row.slice(1));
 }
 
 export function normPct(arr: number[][], dims: number): number[][] {
@@ -143,11 +159,20 @@ export async function projectAndCluster(embs: number[][]) {
     return { xy, xyz: xy.map((p) => [p[0], p[1], 0]), cluster: one, k: 1, di: 0, levels: [one], counts: [1], hub: X.map(() => 0), nbr: X.map(() => [] as number[]) };
   }
   const nn = Math.max(2, Math.min(15, n - 1)); // small corpora have fewer points than neighbors
+  // Past HNSW_MIN, the kNN graph is computed ONCE with hnswlib and handed to umap-js as a precomputed
+  // graph — umap-js's internal nn-descent (rp-forest + heaps) was both the time and the memory wall at
+  // scale (measured: 14.7GB RSS at n=100k). Small corpora keep umap-js's exact internal path.
   // Seeded: umap-js takes a `random` fn. Unseeded it draws from Math.random for init + negative sampling,
   // so the same corpus laid out twice gave different coordinates. Each fit gets its OWN generator (from the
   // same seed) so the 2D layout is unaffected by whether the 3D one ran first.
-  const xy = normPct(new UMAP({ nComponents: 2, nNeighbors: nn, minDist: 0.15, random: mulberry32(SEED) }).fit(X), 2);
-  const xyz = normPct(new UMAP({ nComponents: 3, nNeighbors: nn, minDist: 0.15, random: mulberry32(SEED) }).fit(X), 3);
+  const pre = n > HNSW_MIN ? knnIndex(X, nn - 1) : undefined; // self-inclusive rows of length nn
+  const fitUMAP = (nComponents: number) => {
+    const u = new UMAP({ nComponents, nNeighbors: nn, minDist: 0.15, random: mulberry32(SEED) });
+    if (pre) u.setPrecomputedKNN(pre.idx, pre.dst);
+    return u.fit(X);
+  };
+  const xy = normPct(fitUMAP(2), 2);
+  const xyz = normPct(fitUMAP(3), 3);
   // GRAIN LEVELS: a nested tree of clusterings, not one arbitrary k. The viewer slides between them.
   const { levels, counts } = n < 6 ? { levels: [X.map(() => 0)], counts: [1] } : divisiveLevels(X);
   // default view = the level nearest ~18 groups (human-scannable); the slider exposes the rest.
@@ -155,7 +180,7 @@ export async function projectAndCluster(embs: number[][]) {
   const cluster = levels[di] ?? X.map(() => 0), k = counts[di] ?? 1; // di = default level index; the slider exposes the rest
   // kNN + hubness (cosine on unit vectors = dot). hnsw at scale (O(n log n)); brute for small n.
   const K = 8, hub = new Array(n).fill(0);
-  const nbr = n > HNSW_MIN ? await knnHNSW(X, K) : knnBrute(X, K);
+  const nbr = pre ? pre.idx.map((row) => row.slice(1, K + 1)) : knnBrute(X, K); // reuse the UMAP graph's index (nn-1 ≥ K past HNSW_MIN)
   for (const top of nbr) for (const j of top) hub[j]++;
   return { xy, xyz, cluster, k, di, levels, counts, hub, nbr };
 }
