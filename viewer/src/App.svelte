@@ -326,6 +326,20 @@
   const provDate = (g?: number) => (g ? new Date(g).toISOString().slice(0, 10) : "");
   $effect(() => { try { document.title = prov?.title ? `${prov.title} · eidoscope 🔭` : "eidoscope 🔭"; } catch {} });
   const weakAxes = $derived(m.layout === "axes" ? (xDim?.weak ? 1 : 0) + (yDim?.weak ? 1 : 0) : 0);
+
+  // ── ABOUT THIS MAP — projection as HYPOTHESIS, not ground truth ─────────────────────────────────────
+  // Everything here is already in the .eido (derivedBy + the axis stats); the popover just says it out loud,
+  // in the terms a reader needs to judge what the picture can and can't support. No new data, no new state.
+  const madeBy = $derived(data?.derivedBy);
+  const axStats = $derived.by(() => {
+    const A = data?.axes ?? [];
+    return { n: A.length, variance: A.reduce((s, a) => s + (a.variance ?? 0), 0), weak: A.filter((a) => a.weak).length };
+  });
+  // The two geometries have DIFFERENT bases and mean different things — the single most misread thing about
+  // the map, so it's stated first and plainly.
+  const positionsLine = $derived(madeBy?.geometryBasis === "raw"
+    ? "UMAP of raw full-text embeddings — the card bottleneck was bypassed for this map (--embed raw)"
+    : "UMAP of the card vectors — nearby means similar cards");
   // the region the legend has isolated — the sidebar reads it when no card is selected
   const pinnedRegion = $derived(pinned === null ? null : curClusters.find((c) => c.c === pinned) ?? null);
   const pinnedBlurb = $derived(pinned === null ? "" : data?.levelBlurbs?.[m.grain]?.[pinned] ?? "");
@@ -355,6 +369,57 @@
       {#if count !== undefined}<span class="ml-auto flex-none font-mono text-[10px] opacity-60">{count}</span>{/if}
     </button>
   </li>
+{/snippet}
+
+<!-- ABOUT THIS MAP — the corpus name IS the button. Says how the picture was made (from the .eido's own
+     derivedBy + axis stats) so a reader can weigh it as a hypothesis rather than read it as a fact. -->
+{#snippet about(scope: string)}
+  {#if data}
+    <Popover.Root>
+      <Popover.Trigger class="rounded-field min-w-0 cursor-pointer px-1 py-0.5 text-left hover:bg-base-300" data-menu="{scope}:about"
+        aria-label="about this map — how it was made" title="about this map — how it was made">
+        <div class="truncate text-sm font-bold leading-tight">{prov?.title ?? "eidoscope"}</div>
+        <div class="truncate font-mono text-[10px] leading-tight opacity-60">{data.ids.length} cards · {curCount} regions · about ⓘ</div>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content class="eido-pop thin-sb max-h-[min(32rem,80vh)] w-88 overflow-y-auto p-3" sideOffset={6} align="start" data-about>
+          <div class="mb-1 font-mono text-[10px] uppercase tracking-widest opacity-60">about this map</div>
+          <div class="text-sm font-bold leading-snug">{prov?.title ?? "eidoscope"}</div>
+          <div class="mt-0.5 font-mono text-[10px] leading-snug opacity-60">
+            {data.ids.length} documents · {axStats.n} discovered axes · {curCount} regions{#if prov?.generated} · {provDate(prov.generated)}{/if}
+          </div>
+          {#if prov?.source}<div class="mt-0.5 break-all font-mono text-[10px] opacity-60">from {prov.source}</div>{/if}
+
+          <div class="mt-3 space-y-2 text-[11px] leading-snug">
+            <div><span class="font-bold">positions</span> — <span class="opacity-75">{positionsLine}. Distance is relative, not a measured quantity; there are no units.</span></div>
+            <div><span class="font-bold">axes</span> — <span class="opacity-75">PCA of the full-text embeddings. A card's place on an axis is its exact projection, so an axis position IS a number you can compare.</span></div>
+            <div><span class="font-bold">regions</span> — <span class="opacity-75">clusters of the same vectors, named by a model from what each group over-uses. The grain slider picks how finely the corpus is cut.</span></div>
+          </div>
+
+          <div class="mt-3 border-t border-base-300 pt-2">
+            <div class="mb-1 font-mono text-[10px] uppercase tracking-widest opacity-60">strength</div>
+            <div class="text-[11px] leading-snug opacity-75">
+              The {axStats.n} axes together explain <b class="opacity-100">{Math.round(axStats.variance * 100)}%</b> of the variation between documents
+              {#if axStats.weak}, and <b class="opacity-100">{axStats.weak}</b> of them {axStats.weak > 1 ? "are" : "is"} thin (under 2% each) — read positions on those loosely{/if}.
+              The rest is structure no straight axis captured.
+            </div>
+          </div>
+
+          <div class="mt-3 border-t border-base-300 pt-2">
+            <div class="mb-1 font-mono text-[10px] uppercase tracking-widest opacity-60">made by</div>
+            <dl class="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 font-mono text-[10px] opacity-70">
+              {#if madeBy?.cardModel}<dt class="opacity-60">card model</dt><dd class="break-all">{madeBy.cardModel}</dd>{/if}
+              {#if madeBy?.embedder}<dt class="opacity-60">embedder</dt><dd class="break-all">{madeBy.embedder.id} · {madeBy.embedder.dim}d</dd>{/if}
+              {#if madeBy?.geometryBasis}<dt class="opacity-60">geometry</dt><dd>{madeBy.geometryBasis === "card" ? "card vectors (concept bottleneck)" : "raw full text"}</dd>{/if}
+              {#if madeBy?.pipelineVersion}<dt class="opacity-60">pipeline</dt><dd>{madeBy.pipelineVersion}</dd>{/if}
+              {#if madeBy?.generated}<dt class="opacity-60">generated</dt><dd>{provDate(madeBy.generated)}</dd>{/if}
+              {#if !madeBy}<dt class="opacity-60">provenance</dt><dd>not recorded (pre-v2 file)</dd>{/if}
+            </dl>
+          </div>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  {/if}
 {/snippet}
 
 {#snippet controls(scope: string)}
@@ -599,10 +664,7 @@
       <div class="hidden items-center gap-1 px-2 py-1.5 sm:flex">
         <div class="flex min-w-0 max-w-[16rem] flex-none items-center gap-2 pr-1">
           <span class="flex-none text-base leading-none">🔭</span>
-          <div class="min-w-0">
-            <div class="truncate text-sm font-bold leading-tight" title={prov?.source ?? ""}>{prov?.title ?? "eidoscope"}</div>
-            <div class="truncate font-mono text-[10px] leading-tight opacity-60">{data.ids.length} cards · {curCount} regions</div>
-          </div>
+          <div class="min-w-0">{@render about("bar")}</div>
         </div>
         <div class="divider divider-horizontal mx-0 flex-none"></div>
         <div class="thin-sb flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
@@ -615,10 +677,7 @@
 
       <!-- mobile: name + a controls button that opens the same contents as a sheet -->
       <div class="flex items-center gap-1 px-2 py-1.5 sm:hidden">
-        <div class="min-w-0 flex-1">
-          <div class="truncate text-sm font-bold leading-tight">{prov?.title ?? "eidoscope"}</div>
-          <div class="truncate font-mono text-[10px] leading-tight opacity-60">{data.ids.length} cards · {curCount} regions</div>
-        </div>
+        <div class="min-w-0 flex-1">{@render about("m")}</div>
         <button class="btn btn-sm btn-ghost flex-none normal-case" data-menu="sheet:open" onclick={() => (sheetOpen = true)} aria-label="open controls">controls ▴</button>
         <button class="btn btn-sm btn-ghost flex-none normal-case" onclick={() => (deckOpen = true)}>deck</button>
       </div>
