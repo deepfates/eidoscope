@@ -3,7 +3,7 @@ import { UMAP } from "umap-js";
 import type { Card } from "./card.ts";
 import { mulberry32, SEED, type Axis } from "./axes.ts";
 import type { Doc } from "./corpus.ts";
-import { CFG } from "./config.ts";
+import { CFG, cachePath } from "./config.ts";
 import { getTextEmbeddings, EmbeddingCache } from "./embed.ts";
 import { divisiveLevels } from "./cluster.ts";
 import { HNSW } from "hnsw";
@@ -94,12 +94,12 @@ export async function poolEmbed(texts: string[], cacheDir: string, opts: { embed
 
 // The card as the map's coordinates: one chunk-pooled embedding of the whole card text (see cardText).
 export async function embedCards(cards: Card[], axes: Axis[]): Promise<number[][]> {
-  return poolEmbed(cards.map((c) => cardText(c, axes)), "cache-eidoscope-cards");
+  return poolEmbed(cards.map((c) => cardText(c, axes)), cachePath("cache-eidoscope-cards"));
 }
 
 // Full-text embedding for the generic path (when a loader has no precomputed embeddings).
 export async function embedDocs(docs: Doc[]): Promise<number[][]> {
-  return poolEmbed(docs.map((d) => (d.title ? d.title + ". " : "") + d.body), "cache-eidoscope-fulltext");
+  return poolEmbed(docs.map((d) => (d.title ? d.title + ". " : "") + d.body), cachePath("cache-eidoscope-fulltext"));
 }
 
 const unit = (v: number[]) => { let n = 0; for (const x of v) n += x * x; n = Math.sqrt(n) || 1; return v.map((x) => x / n); };

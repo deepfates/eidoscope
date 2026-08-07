@@ -9,7 +9,7 @@ import { singlefileHTML } from "./singlefile.ts";
 import { trajectory } from "./trajectory.ts";
 import { buildReport } from "./report.ts";
 import { fetchFrontier, buildGhosts } from "./frontier.ts";
-import { CFG } from "./config.ts";
+import { CFG, cachePath, cacheRoot } from "./config.ts";
 import { encodeMap } from "./mapbin.ts";
 import { type MapContract } from "./schema.ts";
 import { loadFixture, type Doc } from "./corpus.ts";
@@ -31,7 +31,7 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
 
   console.error(`[2/5] carding ${docs.length} docs over ${axes.length} axes…`);
   const conc = Number(process.env.EIDOSCOPE_CONCURRENCY || 48); // measured sweet spot (~8.7 cards/s; throughput collapses past ~64)
-  const deck = await cardCorpus(docs, axes, { llm, concurrency: conc, cache: "." }); // cardCorpus prints its own two-phase progress
+  const deck = await cardCorpus(docs, axes, { llm, concurrency: conc, cache: cacheRoot() }); // cardCorpus prints its own two-phase progress
   writeFileSync(join(outDir, "deck.jsonl"), deckToJSONL(deck));
   console.error(`  ${deck.length} cards -> ${join(outDir, "deck.jsonl")}`);
 
@@ -55,7 +55,7 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
   const rawScores = rawProjectionScores(projections, axes);   // true-magnitude coords → viewer "honest" axis toggle
   const axLite = axes.map((a) => ({ key: a.key, name: a.name, low: a.pole_low, high: a.pole_high }));
   const { labels: levelLabels, blurbs: levelBlurbs, regionsByLevel } = await nameLevels(
-    levels, counts, deck.map((c) => c.title), deck.map((c) => c.core), scores, axLite, { llm, concurrency: conc, cache: "." });
+    levels, counts, deck.map((c) => c.title), deck.map((c) => c.core), scores, axLite, { llm, concurrency: conc, cache: cacheRoot() });
   // default-grain regions carry an on-map centroid (median position) for the label + legend
   const dGroups: number[][] = Array.from({ length: k }, () => []);
   cluster.forEach((c, i) => dGroups[c].push(i));
@@ -85,11 +85,11 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
   console.error(`  ${D.axes.length - weak}/${D.axes.length} main axes (>=2% variance)${weak ? ` · ${weak} minor` : ""}`);
   if (opts.frontier) {
     console.error(`[frontier] telescope — Semantic Scholar citations…`);
-    const fr = await fetchFrontier(docs, { cacheFile: "s2-cache.json" });
+    const fr = await fetchFrontier(docs, { cacheFile: cachePath("s2-cache.json") });
     D.cite = fr.cite; D.citec = fr.citec;
     if (fr.corpusArxiv) {
       const nEdges = fr.cite.reduce((a, e) => a + e.length, 0);
-      D.ghosts = await buildGhosts(fr.ranked, D.axes.map((a) => ({ pc: 0, var: 0, coherence: 5, key: a.key, name: a.name, pole_low: a.low, pole_high: a.high })), xy, embs, { topN: 80, cacheFile: "s2-abs-cache.json" });
+      D.ghosts = await buildGhosts(fr.ranked, D.axes.map((a) => ({ pc: 0, var: 0, coherence: 5, key: a.key, name: a.name, pole_low: a.low, pole_high: a.high })), xy, embs, { topN: 80, cacheFile: cachePath("s2-abs-cache.json") });
       console.error(`  ${fr.corpusArxiv} arxiv docs · ${nEdges} citation edges · ${fr.ranked.length} frontier papers · ${D.ghosts.length} ghosts placed`);
     } else console.error(`  no arxiv ids in corpus — frontier skipped (clean no-op)`);
   }

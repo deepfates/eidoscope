@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { loadFolder, splitOversized, type Doc } from "../src/corpus.ts";
@@ -577,4 +577,33 @@ test("poolEmbed: a second pass over the same texts is served entirely from the o
   rmSync(dir, { recursive: true, force: true });
   expect(b).toEqual(a);
   expect(seen[1].every((it) => seen[0].some((p) => p.id === it.id))).toBe(true); // same content-addressed ids
+});
+
+test("cachePath/cacheRoot: every cache lands under one root, and legacy CWD files migrate by rename", async () => {
+  // cachePath resolves relative to CWD, so run this inside a throwaway dir seeded with the OLD layout
+  const dir = mkdtempSync(join(tmpdir(), "eido-cwd-"));
+  const prevCwd = process.cwd(), prevEnv = process.env.EIDOSCOPE_CACHE_DIR;
+  process.chdir(dir);
+  delete process.env.EIDOSCOPE_CACHE_DIR;
+  try {
+    writeFileSync(join(dir, "card-cache.jsonl"), '{"k":"v"}\n');        // an expensive pre-existing cache
+    mkdirSync(join(dir, "cache-eidoscope-cards"), { recursive: true });
+    writeFileSync(join(dir, "cache-eidoscope-cards", "m.json"), "{}");
+    const { CFG, cachePath, cacheRoot } = await import("../src/config.ts");
+    expect(cacheRoot()).toBe(CFG.cacheDir);
+    expect(cachePath("s2-cache.json")).toBe(join(CFG.cacheDir, "s2-cache.json"));
+    cachePath("cache-eidoscope-cards");
+    // migrated, not duplicated: the old paths are gone and the content moved intact
+    expect(existsSync(join(dir, "card-cache.jsonl"))).toBe(false);
+    expect(readFileSync(join(dir, CFG.cacheDir, "card-cache.jsonl"), "utf8")).toBe('{"k":"v"}\n');
+    expect(existsSync(join(dir, "cache-eidoscope-cards"))).toBe(false); // directories migrate too
+    expect(existsSync(join(dir, CFG.cacheDir, "cache-eidoscope-cards", "m.json"))).toBe(true);
+    // idempotent: a second run neither throws nor clobbers the migrated cache
+    cachePath("card-cache.jsonl");
+    expect(readFileSync(join(dir, CFG.cacheDir, "card-cache.jsonl"), "utf8")).toBe('{"k":"v"}\n');
+  } finally {
+    process.chdir(prevCwd);
+    if (prevEnv === undefined) delete process.env.EIDOSCOPE_CACHE_DIR; else process.env.EIDOSCOPE_CACHE_DIR = prevEnv;
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
