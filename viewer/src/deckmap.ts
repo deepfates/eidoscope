@@ -2,7 +2,8 @@ import { Deck, OrthographicView, OrbitView, LinearInterpolator } from "@deck.gl/
 import { ScatterplotLayer, LineLayer, PolygonLayer, TextLayer } from "@deck.gl/layers";
 import { DataFilterExtension } from "@deck.gl/extensions";
 import type { MapContract } from "../../src/schema";
-import { col, type RGB } from "./encode";
+import { col, setActiveTheme, type RGB } from "./encode";
+import { themePalette } from "./palette";
 import { easeCubicInOut } from "d3-ease";
 
 // The map's rendering + interaction core. ONE Deck for its whole life (canvas pointer capture never lost);
@@ -26,7 +27,7 @@ export type MapHandle = {
   project: (world: number[]) => number[];  // world [x,y,z?] → screen px, so tests can click exact nodes/ghosts
   pickAt: (x: number, y: number) => { layer: string | null; url: string | null; index: number } | null;  // what deck picks at a screen px
 };
-type Opts = { getColor: (i: number) => RGB; getRadius: (i: number) => number; layout: Layout; getX: (i: number) => number; getY: (i: number) => number; getZ: (i: number) => number; posSig?: string; showLabels: boolean; grain: number; citeOn?: boolean; ghostsOn?: boolean; theme?: "dark" | "light" };
+type Opts = { getColor: (i: number) => RGB; getRadius: (i: number) => number; layout: Layout; getX: (i: number) => number; getY: (i: number) => number; getZ: (i: number) => number; posSig?: string; showLabels: boolean; grain: number; citeOn?: boolean; ghostsOn?: boolean; theme?: string };
 
 const hull2d = (pts: number[][]): number[][] => {
   if (pts.length < 3) return pts;
@@ -57,12 +58,18 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   let citeOn = init.citeOn ?? false, ghostsOn = init.ghostsOn ?? false;
   let clickTimer: ReturnType<typeof setTimeout> | null = null;  // single-click card-open, cancelled by a double-click (drill)
   let suppressClickUntil = 0;  // wall-clock deadline set by dblclick so a trailing deck onClick can't open a card (timestamp, not a timer — Date.now() isn't throttled like setTimeout in a hidden tab)
-  let theme: "dark" | "light" = init.theme ?? "dark", themeVer = 0;
-  const dark = () => theme !== "light";
-  // theme-aware map ink: on a light ground, white spokes/ghost strokes and the dark label pill invert.
-  const spokeCol = () => (dark() ? [255, 255, 255, 110] : [38, 38, 52, 130]) as [number, number, number, number];
-  const labelBg = () => (dark() ? [10, 12, 18, 180] : [255, 255, 255, 214]) as [number, number, number, number];
-  const ghostCol = () => (dark() ? [200, 210, 225, 190] : [82, 92, 112, 205]) as [number, number, number, number];
+  // The map's ink is read from the ACTIVE THEME's own tokens, not from a hardcoded dark/light binary:
+  // ground = base-100, ink = base-content, and "dark" is simply L(base-100) < 0.5. Any theme — stock,
+  // custom, one we've never seen — lands legible ink on its own canvas. Alpha levels are unchanged.
+  let theme: string = init.theme || "black", themeVer = 0;
+  const pal = () => themePalette(theme);
+  const dark = () => pal()?.dark ?? theme !== "light";
+  const ink = (): RGB => pal()?.ink ?? (dark() ? [255, 255, 255] : [38, 38, 52]);
+  const ground = (): RGB => pal()?.bg ?? (dark() ? [10, 12, 18] : [255, 255, 255]);
+  const spokeCol = () => [...ink(), 110] as [number, number, number, number];
+  const labelBg = () => [...ground(), dark() ? 180 : 214] as [number, number, number, number];
+  const ghostCol = () => [...ink(), dark() ? 190 : 205] as [number, number, number, number];
+  setActiveTheme(theme);   // the palette must be live before the first getFillColor call
 
   // per-region (at the CURRENT grain level) member indices + label — for hulls, labels, dimming, drill.
   // Recomputed whenever the grain slider moves. Falls back to the default cluster if no ladder is present.
@@ -185,7 +192,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     data: h ? [h] : [],
     getPolygon: (d: any) => d, stroked: true, filled: true,
     getFillColor: [...hullColor(), 22] as any, getLineColor: [...hullColor(), 150] as any, getLineWidth: 1.5, lineWidthUnits: "pixels",
-    updateTriggers: { data: [highlight, posVer], getFillColor: [highlight], getLineColor: [highlight] },
+    updateTriggers: { data: [highlight, posVer], getFillColor: [highlight, themeVer], getLineColor: [highlight, themeVer] },
   }); };
   const labelLayer = () => new TextLayer({
     id: "labels",
@@ -195,7 +202,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     fontFamily: "ui-monospace, monospace", fontWeight: 700, getTextAnchor: "middle", getAlignmentBaseline: "center",
     getPixelOffset: (d: any) => [d.dx || 0, 0],  // keep edge labels on-screen
     getBackgroundColor: labelBg(), background: true, backgroundPadding: [4, 2],
-    updateTriggers: { getPosition: [posVer], data: [posVer], getColor: [highlight], getPixelOffset: [posVer], getBackgroundColor: themeVer },
+    updateTriggers: { getPosition: [posVer], data: [posVer], getColor: [highlight, themeVer], getPixelOffset: [posVer], getBackgroundColor: themeVer },
   });
   // 3D region labels: billboarded at each region's 3D centroid, so the fly-through stays isomorphic with the
   // 2D map (same regions, colours, names — one mental map at a different angle). No screen-space declutter in
@@ -209,7 +216,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     getColor: (d: any) => [...col(d.c), highlight != null && d.c !== highlight ? 70 : 245] as any, getSize: 14, sizeUnits: "pixels", sizeMaxPixels: 22, billboard: true,
     fontFamily: "ui-monospace, monospace", fontWeight: 700, getTextAnchor: "middle", getAlignmentBaseline: "center", characterSet: "auto",
     getBackgroundColor: labelBg(), background: true, backgroundPadding: [4, 2],
-    updateTriggers: { getPosition: [posVer, grain], data: [posVer, grain], getColor: [highlight], getBackgroundColor: themeVer },
+    updateTriggers: { getPosition: [posVer, grain], data: [posVer, grain], getColor: [highlight, themeVer], getBackgroundColor: themeVer },
   });
   // frontier telescope (only for --frontier arxiv corpora; absent otherwise): intra-corpus citation edges
   // + "ghost" papers cited-but-not-in-corpus, placed near the work that cites them, sized by citation count.
@@ -217,8 +224,8 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     id: "cite",
     data: (D.cite || []).flatMap((tgts, s) => tgts.map((t) => ({ s, t }))),
     getSourcePosition: (d: any) => pos(d.s) as any, getTargetPosition: (d: any) => pos(d.t) as any,
-    getColor: [147, 161, 183, 40], getWidth: 0.6,
-    updateTriggers: { getSourcePosition: [posVer], getTargetPosition: [posVer] },
+    getColor: [...ink(), 40] as any, getWidth: 0.6,
+    updateTriggers: { getSourcePosition: [posVer], getTargetPosition: [posVer], getColor: themeVer },
   });
   const gmax = Math.max(1, ...(D.ghosts || []).map((g) => g.n));
   const ghostLayer = () => new ScatterplotLayer({
@@ -318,7 +325,9 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
       if (o.showLabels !== undefined) showLabels = o.showLabels;
       if (o.citeOn !== undefined) citeOn = o.citeOn;
       if (o.ghostsOn !== undefined) ghostsOn = o.ghostsOn;
-      if (o.theme && o.theme !== theme) { theme = o.theme; themeVer++; }
+      // a theme change re-inks the chrome layers (themeVer) AND repaints every point, because the
+      // categorical palette itself is theme-derived (colorVer drives the points' getFillColor trigger).
+      if (o.theme && o.theme !== theme) { theme = o.theme; setActiveTheme(theme); themeVer++; colorVer++; }
       if (o.grain !== undefined && o.grain !== grain) { grain = o.grain; recomputeGrain(); highlight = null; colorVer++; }  // grain change clears stale highlight
       const prev = layout;
       if (o.layout) layout = o.layout;
