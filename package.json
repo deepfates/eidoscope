@@ -23,6 +23,7 @@
   "dependencies": {
     "@ax-llm/ax": "^23.0.5",
     "@huggingface/transformers": "3.8.1",
+    "fflate": "^0.8.3",
     "hnsw": "^1.1.1",
     "ml-kmeans": "^6.0.0",
     "ml-pca": "^4.1.1",
