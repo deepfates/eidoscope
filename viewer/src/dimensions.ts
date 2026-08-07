@@ -91,7 +91,7 @@ function dimOf(D: MapContract, f: MetaField): Dimension | null {
 
 // What a pre-manifest (v1) .eido gets: exactly the set the viewer used to hardcode.
 const LEGACY_FIELDS: MetaField[] = [
-  { key: "hub", label: "influence", type: "scalar", source: "col:hub" },
+  { key: "hub", label: "connections", type: "scalar", source: "col:hub" },
   { key: "citec", label: "citation impact", type: "scalar", source: "col:citec" },
   { key: "length", label: "length", type: "scalar", source: "derived:length" },
   { key: "date", label: "date", type: "temporal", source: "col:dates" },

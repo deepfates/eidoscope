@@ -22,7 +22,7 @@ export function buildMetaFields(D: Partial<MapContract> & { axes: MapContract["a
   if (has(D.tags)) f.push({ key: "tags", label: "tag", type: "categorical", multi: true, source: "col:tags" });
   if (has(D.dates)) f.push({ key: "date", label: "date", type: "temporal", source: "col:dates" });
   if (has(D.read)) f.push({ key: "read", label: "read", type: "boolean", source: "col:read" });
-  f.push({ key: "hub", label: "influence", type: "scalar", source: "col:hub" });
+  f.push({ key: "hub", label: "connections", type: "scalar", source: "col:hub" });
   if (has(D.citec)) f.push({ key: "citec", label: "citation impact", type: "scalar", source: "col:citec" });
   f.push({ key: "length", label: "length", type: "scalar", source: "derived:length" });
   for (const a of D.axes) f.push({ key: "axis:" + a.key, label: a.name, type: "scalar", source: "axis:" + a.key });

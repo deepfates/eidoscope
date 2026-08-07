@@ -130,7 +130,11 @@
   const axShort = (name: string) => name.split(/ vs\.? | and /i)[0].slice(0, 15);
   const deckList = $derived.by(() => {
     if (!data) return [] as number[];
-    let list = data.ids.map((_, i) => i);
+    // LINKED VIEWS: the deck is the accessible parallel of the map, so it must show the SAME cards.
+    // It used to ignore filterMask entirely — isolate a 208-card region and the deck still listed all
+    // 13,830, which quietly made the two surfaces disagree about what corpus you were looking at.
+    const mask = filterMask;
+    let list = data.ids.map((_, i) => i).filter((i) => !mask || mask[i] === 1);
     const q = deckQ.trim().toLowerCase();
     if (q) list = list.filter((i) => data!.titles[i].toLowerCase().includes(q) || data!.cores[i].toLowerCase().includes(q));
     if (deckUnread && hasRead) list = list.filter((i) => data!.read![i] !== true);
@@ -241,7 +245,10 @@
   function reset() { focusCard(null); m.clearFilters(); m.selectMode = false; handle?.setHighlight(null); m.grain = data?.di ?? 0; handle?.resetView(); }
 
   // The current label for each channel button — the toolbar states the view, so nothing is hidden in a menu.
-  const LAYOUT_LABELS: Record<string, string> = { mde: "neighbor map", axes: "axis scatter", orbit: "3D neighbor map", axes3d: "3D axis scatter" };
+  // NOTE: "3D cloud" is an INDEPENDENT 3D embedding of the same cards, not the 2D map with depth —
+  // measured on pathfinder.eido, only ~2.7 of a card's 8 nearest neighbours in 2D are still among its 8
+  // nearest in 3D. Calling it "3D neighbor map" implied a continuity that does not exist.
+  const LAYOUT_LABELS: Record<string, string> = { mde: "neighbor map", axes: "axis scatter", orbit: "3D cloud", axes3d: "3D axis scatter" };
   const colorLabel = $derived(m.channels.color === "region" ? "region" : colorDim?.name ?? "region");
   const sizeLabel = $derived(m.channels.size === "uniform" ? "uniform" : sizeDim?.name ?? "uniform");
 
@@ -1071,8 +1078,8 @@
         <div class="mt-1 font-mono text-[11px] opacity-60">{data.ids.length} documents · {data.axes.length} discovered axes · {data.k} regions{#if prov?.generated} · {provDate(prov.generated)}{/if}</div>
         {#if prov?.source}<div class="mt-0.5 truncate font-mono text-[10px] opacity-60"><span class="uppercase tracking-widest opacity-70">corpus source</span> {prov.source}</div>{/if}
         <ul class="mt-3 space-y-2 text-sm opacity-80">
-          <li><b class="opacity-100">Proximity is similarity</b> — nearby cards are alike; colour is an emergent region, size is influence.</li>
-          <li><b class="opacity-100">Slide the grain</b> to move regions from continents to towns; click a region to isolate, double-click the map to drill in.</li>
+          <li><b class="opacity-100">Proximity is similarity</b> — in the neighbour map, nearby cards are alike. In axis scatter, position means each card's score on the two axes you chose.</li>
+          <li><b class="opacity-100">Slide the grain</b> to move regions from continents to towns; click a region in the colour menu to isolate it.</li>
           <li><b class="opacity-100">Tap any card</b> to read it, see its nearest neighbours, and open the source.</li>
           <li><b class="opacity-100">Open the deck</b> to read the corpus as a sortable, filterable list — or switch layout to axis scatter.</li>
         </ul>
