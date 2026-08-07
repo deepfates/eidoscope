@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { UMAP } from "umap-js";
 import type { Card } from "./card.ts";
-import type { Axis } from "./axes.ts";
+import { mulberry32, SEED, type Axis } from "./axes.ts";
 import type { Doc } from "./corpus.ts";
 import { CFG } from "./config.ts";
 import { getTextEmbeddings, EmbeddingCache } from "./embed.ts";
@@ -114,8 +114,11 @@ export async function projectAndCluster(embs: number[][]) {
     return { xy, xyz: xy.map((p) => [p[0], p[1], 0]), cluster: one, k: 1, di: 0, levels: [one], counts: [1], hub: X.map(() => 0), nbr: X.map(() => [] as number[]) };
   }
   const nn = Math.max(2, Math.min(15, n - 1)); // small corpora have fewer points than neighbors
-  const xy = normPct(new UMAP({ nComponents: 2, nNeighbors: nn, minDist: 0.15 }).fit(X), 2);
-  const xyz = normPct(new UMAP({ nComponents: 3, nNeighbors: nn, minDist: 0.15 }).fit(X), 3);
+  // Seeded: umap-js takes a `random` fn. Unseeded it draws from Math.random for init + negative sampling,
+  // so the same corpus laid out twice gave different coordinates. Each fit gets its OWN generator (from the
+  // same seed) so the 2D layout is unaffected by whether the 3D one ran first.
+  const xy = normPct(new UMAP({ nComponents: 2, nNeighbors: nn, minDist: 0.15, random: mulberry32(SEED) }).fit(X), 2);
+  const xyz = normPct(new UMAP({ nComponents: 3, nNeighbors: nn, minDist: 0.15, random: mulberry32(SEED) }).fit(X), 3);
   // GRAIN LEVELS: a nested tree of clusterings, not one arbitrary k. The viewer slides between them.
   const { levels, counts } = n < 6 ? { levels: [X.map(() => 0)], counts: [1] } : divisiveLevels(X);
   // default view = the level nearest ~18 groups (human-scannable); the slider exposes the rest.
