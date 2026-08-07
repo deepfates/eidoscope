@@ -671,3 +671,25 @@ test("loadFolder: exact content duplicates collapse to one doc (exporter twins)"
   expect(docs.length).toBe(2);
   expect(docs.filter((d) => d.title === "Same Title").length).toBe(2);
 });
+
+// ── REAL-CORPUS CONTRACT ────────────────────────────────────────────────────────────────────────────
+// The synthetic corpus in e2e/synth.ts makes assertions sharp (known ground truth) but it is OURS — it
+// can't catch what real text, real LLM cards and real metadata do to the contract. This 24-document
+// example map is a genuine pipeline output (real cards, real discovered axes), committed at 36KB so CI
+// exercises a real corpus on every push instead of only our own fixture.
+test("real corpus fixture: a genuine .eido decodes with every invariant the viewer relies on", () => {
+  const D = decodeMap(readFileSync(join(import.meta.dir, "fixtures", "example.eido")));
+  const n = D.ids.length;
+  expect(n).toBeGreaterThan(20);
+  // every node-indexed array is aligned — the exact class of bug that shipped misaligned scores (d2dc949)
+  for (const [name, arr] of [["titles", D.titles], ["cores", D.cores], ["notes", D.notes], ["xy", D.xy], ["xyz", D.xyz], ["cluster", D.cluster], ["hub", D.hub], ["nbr", D.nbr]] as [string, unknown[]][])
+    expect(`${name}:${arr.length}`).toBe(`${name}:${n}`);
+  for (const a of D.axes) expect(`${a.key}:${D.scores[a.key]?.length}`).toBe(`${a.key}:${n}`);
+  // the cards are real prose, not placeholders, and the axes were named by the model
+  expect(D.cores.every((c) => c.length > 40)).toBe(true);
+  expect(D.axes.every((a) => a.name && a.low && a.high)).toBe(true);
+  // honest-axis substrate present (raw projections, not just ranks) — what the honest⇄rank toggle needs
+  expect(D.rawScores ? Object.keys(D.rawScores).length : 0).toBe(D.axes.length);
+  // provenance the "about this map" surface reads
+  expect(D.derivedBy?.embedder?.dim).toBeGreaterThan(0);
+});

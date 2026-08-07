@@ -15,12 +15,17 @@ if (!existsSync(join(dist, "index.html"))) { console.error("run `cd viewer && bu
 // real (LLM-key-requiring) pipeline run. The check is about the single-file transport, not about any
 // particular corpus — and this is what lets CI enforce the gate CLAUDE.md promises.
 const html = readFileSync(join(dist, "index.html"), "utf8");
-const eido = existsSync(join(dist, "map.eido")) ? readFileSync(join(dist, "map.eido")) : Buffer.from(encodeMap(synthMap()));
+// Prefer a REAL corpus: the committed 24-doc example (real cards, real discovered axes) so this check
+// exercises genuine data everywhere including CI; fall back to the dev fixture, then to the synthetic map.
+const realFixture = join(import.meta.dir, "..", "test", "fixtures", "example.eido");
+const eido = existsSync(realFixture) ? readFileSync(realFixture)
+  : existsSync(join(dist, "map.eido")) ? readFileSync(join(dist, "map.eido"))
+  : Buffer.from(encodeMap(synthMap()));
 const b64 = eido.toString("base64");
 const standalone = html.replace("</head>", `<script>window.__EIDO_DATA__=${JSON.stringify(b64)}</script></head>`);
 const out = join(tmpdir(), "eidoscope-standalone-test.html");
 writeFileSync(out, standalone);
-const targetId = decodeMap(eido).ids[10];   // a real card id to deep-link to
+const targetId = decodeMap(eido).ids[Math.min(10, decodeMap(eido).ids.length - 1)];   // a real card id to deep-link to
 
 const fails: string[] = [];
 const ok = (c: boolean, m: string) => { console.log(c ? "  ✓" : "  ✗", m); if (!c) fails.push(m); };
