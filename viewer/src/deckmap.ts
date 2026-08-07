@@ -51,7 +51,15 @@ const hull2d = (pts: number[][]): number[][] => {
 export type HoverPayload = { kind: "point"; i: number } | { kind: "ghost"; g: any };
 export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts & { onClick?: (i: number) => void; onHover?: (h: HoverPayload | null, x: number, y: number) => void; onGrainChange?: (g: number) => void }): MapHandle {
   const n = D.ids.length;
-  const reduce = typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;  // a11y: no motion
+  // a11y: reduced-motion means BRIEF motion, not none. Camera fits, layout eases and position morphs carry
+  // object constancy — which point became which, where the camera went — and the interaction law leans on
+  // them, so under the OS setting they shorten sharply (≤160ms) instead of vanishing. Measured on the iOS
+  // simulator (eid-aw7x): a default phone sends no-preference; only the explicit accessibility setting
+  // ("Reduce Motion" / Android "Remove animations") sends reduce. Live: toggling it mid-session takes effect.
+  const rmq = typeof window !== "undefined" ? window.matchMedia?.("(prefers-reduced-motion: reduce)") : undefined;
+  let reduce = !!rmq?.matches;
+  rmq?.addEventListener?.("change", (e) => { reduce = e.matches; });
+  const dur = (ms: number) => (reduce ? Math.min(ms, 160) : ms);
   let { getColor, getRadius, layout, showLabels, grain } = init;
   // resolved position accessors from the App (dimension → -1..1 coord, with the dimension's norm/invert applied);
   // deckmap is a renderer — it does not resolve axis values itself.
@@ -201,7 +209,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     getFilterValue: (_: any, { index }: any) => (filterMask ? filterMask[index] : 1),
     filterRange: filterMask ? [0.5, 1.5] : [-1e30, 1e30],
     pickable: true, autoHighlight: n < 4000, highlightColor: [255, 255, 255, 180],
-    transitions: reduce ? undefined : { getPosition: { duration: 700, easing: easeCubicInOut } },
+    transitions: { getPosition: { duration: dur(700), easing: easeCubicInOut } },
     updateTriggers: { getFillColor: colorVer, getRadius: [sizeVer, posVer], getPosition: posVer, getFilterValue: filterVer },
   });
   // the EMPHASIS overlay: only the attended indices, drawn full-strength above the dimmed base cloud.
@@ -213,7 +221,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     getFillColor: (i: number) => { const c = getColor(i); return [c[0], c[1], c[2], 255] as any; },
     getRadius: (i: number) => getRadius(i),
     radiusUnits: "pixels", radiusMinPixels: 1.2, billboard: true, pickable: false,
-    transitions: reduce ? undefined : { getPosition: { duration: 700, easing: easeCubicInOut } },
+    transitions: { getPosition: { duration: dur(700), easing: easeCubicInOut } },
     updateTriggers: { getFillColor: colorVer, getRadius: [sizeVer, posVer], getPosition: posVer },
   });
   const spokesLayer = () => new LineLayer({
@@ -334,7 +342,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     const b = Math.min(window.innerWidth, window.innerHeight), h = home(layout);
     const ext = Math.max(x1 - x0 || 0.1, y1 - y0 || 0.1, is3d(layout) ? z1 - z0 || 0.1 : 0);
     const zoom = Math.max(h.minZoom, Math.min(h.maxZoom, Math.log2((b * 0.6) / ext)));
-    viewState = { ...viewState, target: [(x0 + x1) / 2, (y0 + y1) / 2, is3d(layout) ? (z0 + z1) / 2 : 0], zoom, transitionDuration: reduce ? 0 : 500 };
+    viewState = { ...viewState, target: [(x0 + x1) / 2, (y0 + y1) / 2, is3d(layout) ? (z0 + z1) / 2 : 0], zoom, transitionDuration: dur(500) };
     deck.setProps({ viewState });
   };
   // drill: step grain finer so the clicked region resolves into sub-clumps (gentle, ≤3 levels), fit to it.
@@ -386,7 +394,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
         // (points are already easing onto the z=0 plane), then swap to ortho at the same target+zoom and ease
         // to the 2D home frame. 3D<->3D (orbit vs axes3d = different world scales): ease to the new home.
         const interp = new LinearInterpolator(["target", "zoom", "rotationX", "rotationOrbit"] as any);
-        const ease = { transitionDuration: reduce ? 0 : 700, transitionInterpolator: interp, transitionEasing: easeCubicInOut };
+        const ease = { transitionDuration: dur(700), transitionInterpolator: interp, transitionEasing: easeCubicInOut };
         const t = viewState?.target ?? [0, 0, 0];
         if (is3d(layout) && !is3d(prev)) {
           const h = home(layout);
@@ -406,12 +414,10 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
             viewState = { ...h, target: [t2[0], t2[1], 0], zoom: viewState?.zoom ?? h.zoom };
             deck.setProps({ views: [view()], viewState, controller: controllerFor(layout) });
           };
-          if (reduce) swap();
-          else {
-            viewState = { ...viewState, rotationX: 0, rotationOrbit: 0, transitionDuration: 320, transitionInterpolator: interp, transitionEasing: easeCubicInOut };
-            deck.setProps({ viewState });
-            setTimeout(swap, 340);  // after the leveling ease: the flat orbit view and the ortho view now agree
-          }
+          const level = dur(320);
+          viewState = { ...viewState, rotationX: 0, rotationOrbit: 0, transitionDuration: level, transitionInterpolator: interp, transitionEasing: easeCubicInOut };
+          deck.setProps({ viewState });
+          setTimeout(swap, level + 20);  // after the leveling ease: the flat orbit view and the ortho view now agree
         } else if (is3d(layout) && is3d(prev)) {
           viewState = { ...home(layout), ...ease };
           deck.setProps({ viewState });

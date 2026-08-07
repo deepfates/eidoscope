@@ -24,10 +24,11 @@ button:focus-visible, select:focus-visible, input:focus-visible, a:focus-visible
   border-radius: 4px;
 }
 
-/* a11y: honour reduced-motion — kill CSS transitions/animations and the panel blur (deck.gl's own
-   position transitions are disabled from JS, see deckmap.ts). */
+/* a11y: honour reduced-motion — reduce means BRIEF, not none (matching deckmap.ts): one-shot state
+   transitions (panel slides, fades) are capped short so state changes stay legible, while looping
+   keyframe animations and the panel blur are killed outright. */
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; scroll-behavior: auto !important; }
+  *, *::before, *::after { transition-duration: 120ms !important; animation-duration: 0.01ms !important; scroll-behavior: auto !important; }
   [class*="backdrop-blur"] { backdrop-filter: none !important; }
 }
 
