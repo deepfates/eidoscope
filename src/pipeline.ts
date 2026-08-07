@@ -46,13 +46,19 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
   // id (else xy/cluster get the dropped doc's row and every node-indexed array is off by one).
   const embOfId = useRaw ? new Map(docs.map((d, i) => [d.id, embeddings[i]])) : null;
   const embs = useRaw ? deck.map((c) => embOfId!.get(c.id)!) : await embedCards(deck, axes);
+  // The axis projections were computed over ALL docs (axis discovery runs before carding) — align them
+  // to the deck by id too, or a single failed card shifts every scores row after it (emit invariant
+  // catches the length; without it every downstream array would be silently off by one). Bug found by
+  // the invariant on the tldr corpus: 1 failed card of 6261 → scores.length 6261 vs ids.length 6260.
+  const projOfId = new Map(docs.map((d, i) => [d.id, projections[i]]));
+  const deckProjections = deck.map((c) => projOfId.get(c.id)!);
   const { xy, xyz, cluster, k, di, levels, counts, hub, nbr } = await projectAndCluster(embs);
 
   // Name EVERY grain level contrastively — the deterministic layer computes what makes each region
   // distinct (over-used terms + extreme axes), the LLM only phrases it. Deduped across levels + cached.
   console.error(`[4/5] naming regions across ${counts.length} grain levels (${counts.join("·")}; default ${k})…`);
-  const scores = projectionScores(projections, axes);
-  const rawScores = rawProjectionScores(projections, axes);   // true-magnitude coords → viewer "honest" axis toggle
+  const scores = projectionScores(deckProjections, axes);
+  const rawScores = rawProjectionScores(deckProjections, axes);   // true-magnitude coords → viewer "honest" axis toggle
   const axLite = axes.map((a) => ({ key: a.key, name: a.name, low: a.pole_low, high: a.pole_high }));
   const { labels: levelLabels, blurbs: levelBlurbs, regionsByLevel } = await nameLevels(
     levels, counts, deck.map((c) => c.title), deck.map((c) => c.core), scores, axLite, { llm, concurrency: conc, cache: cacheRoot() });
