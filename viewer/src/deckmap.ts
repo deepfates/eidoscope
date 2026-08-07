@@ -1,4 +1,4 @@
-import { Deck, OrthographicView, OrbitView } from "@deck.gl/core";
+import { Deck, OrthographicView, OrbitView, LinearInterpolator } from "@deck.gl/core";
 import { ScatterplotLayer, LineLayer, PolygonLayer, TextLayer } from "@deck.gl/layers";
 import { DataFilterExtension } from "@deck.gl/extensions";
 import type { MapContract } from "../../src/schema";
@@ -23,7 +23,7 @@ export type MapHandle = {
   resetView: () => void;
   destroy: () => void;
   debug: () => { zoom: number; labels: number; regions: number; grain: number; rot: number | null; rotX: number | null; target: number[] | null; span3: number };  // read-only seam for integration tests
-  project: (worldXY: number[]) => number[];  // world → screen px, so tests can click exact nodes/ghosts
+  project: (world: number[]) => number[];  // world [x,y,z?] → screen px, so tests can click exact nodes/ghosts
   pickAt: (x: number, y: number) => { layer: string | null; url: string | null; index: number } | null;  // what deck picks at a screen px
 };
 type Opts = { getColor: (i: number) => RGB; getRadius: (i: number) => number; layout: Layout; xKey: string; yKey: string; zKey?: string; getX?: (i: number) => number; getY?: (i: number) => number; getZ?: (i: number) => number; posVer?: number; posSig?: string; showLabels: boolean; grain: number; citeOn?: boolean; ghostsOn?: boolean; theme?: "dark" | "light" };
@@ -237,7 +237,9 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     ...(citeOn && D.cite ? [citeLayer()] : []),
     ...(focus != null ? [spokesLayer()] : []),
     pointsLayer(),
-    ...(ghostsOn && D.ghosts ? [ghostLayer()] : []),
+    // ghosts only have 2D placements (laid out near their citing work in the flat map) — drawing them at
+    // xy in a 3D layout put them at wrong depths, floating in space. Honest: hide them outside 2D.
+    ...(ghostsOn && D.ghosts && !is3d(layout) ? [ghostLayer()] : []),
     ...(showLabels ? [is3d(layout) ? label3dLayer() : labelLayer()] : []),
   ];
 
@@ -274,18 +276,23 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   });
 
 
+  // frame a set of points: 3D-aware — the bbox and the camera target track all three dims (the old 2D-only
+  // version parked the orbit camera at depth 0 and framed by a flat extent, so isolating a region in 3D
+  // mis-centred). Zoom fits the LARGEST extent, so the whole set is in frame at any rotation.
   const fit = (idx: number[]) => {
     if (!idx.length) return;
-    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    for (const i of idx) { const p = pos(i); if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0]; if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1]; }
+    let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+    for (const i of idx) { const p = pos(i); if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0]; if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1]; const z = p[2] ?? 0; if (z < z0) z0 = z; if (z > z1) z1 = z; }
     const b = Math.min(window.innerWidth, window.innerHeight), h = home(layout);
-    const zoom = Math.max(h.minZoom, Math.min(h.maxZoom, Math.log2((b * 0.6) / Math.max(x1 - x0 || 0.1, y1 - y0 || 0.1))));
-    viewState = { ...viewState, target: [(x0 + x1) / 2, (y0 + y1) / 2, 0], zoom, transitionDuration: reduce ? 0 : 500 };
+    const ext = Math.max(x1 - x0 || 0.1, y1 - y0 || 0.1, is3d(layout) ? z1 - z0 || 0.1 : 0);
+    const zoom = Math.max(h.minZoom, Math.min(h.maxZoom, Math.log2((b * 0.6) / ext)));
+    viewState = { ...viewState, target: [(x0 + x1) / 2, (y0 + y1) / 2, is3d(layout) ? (z0 + z1) / 2 : 0], zoom, transitionDuration: reduce ? 0 : 500 };
     deck.setProps({ viewState });
   };
   // drill: step grain finer so the clicked region resolves into sub-clumps (gentle, ≤3 levels), fit to it.
+  // Works in every layout — drilling only changes the grain (regions), never positions, and fit() is 3D-aware.
   const drill = (nodeIdx: number) => {
-    const levels = D.levels; if (!levels || is3d(layout)) return;
+    const levels = D.levels; if (!levels) return;
     const curRegion = (levels[grain] ?? D.cluster)[nodeIdx];
     const curMembers = members[curRegion] || [];
     let newGrain = grain;
@@ -322,15 +329,46 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
       if (o.layout) layout = o.layout;
       if (layout !== prev) {
         posVer++;
-        // Never reset the camera on a layout switch — that snapped the zoom before the points eased (the
-        // jarring pre-jump). mde<->axes share the OrthographicView, so we change nothing but posVer and let
-        // the positions ease. ortho<->orbit changes the VIEW TYPE, but `zoom` means the same in both
-        // (2^zoom px per world unit), so KEEP the current target+zoom and only swap the view + add/drop the
-        // orbit rotation. The points still ease from the flat plane (z=0) up into xyz — that's the 3D reveal.
-        // Reset the camera when crossing 2D<->3D, AND when switching BETWEEN the two 3D layouts (orbit's xyz vs
-        // axes3d's ~[-1,1] axis box are different world scales, so the old zoom/target would be wrong).
-        const viewChanged = is3d(layout) !== is3d(prev) || (is3d(layout) && is3d(prev) && layout !== prev);
-        if (viewChanged) { viewState = home(layout); deck.setProps({ views: [view()], viewState, controller: controllerFor(layout) }); }  // reset to the new view's home
+        // Camera CONTINUITY on layout switch. The old behavior snapped viewState to home(layout) the moment
+        // the view type changed, so the camera teleported to a new angle+zoom while the points were still
+        // easing — the jarring "jump then slurp". The shapes morphing into each other is fine; the camera
+        // teleporting is not. So: mde<->axes share a view — change nothing, let positions ease. Crossing
+        // 2D->3D: swap the view but START the orbit camera flat (rotation 0) at the current target+zoom
+        // (`zoom` means the same px-per-world-unit in both views), then EASE it to the tilted home while the
+        // points rise off the plane. Crossing 3D->2D: flatten first — ease rotation to 0 in the orbit view
+        // (points are already easing onto the z=0 plane), then swap to ortho at the same target+zoom and ease
+        // to the 2D home frame. 3D<->3D (orbit vs axes3d = different world scales): ease to the new home.
+        const interp = new LinearInterpolator(["target", "zoom", "rotationX", "rotationOrbit"] as any);
+        const ease = { transitionDuration: reduce ? 0 : 700, transitionInterpolator: interp, transitionEasing: easeCubicInOut };
+        const t = viewState?.target ?? [0, 0, 0];
+        if (is3d(layout) && !is3d(prev)) {
+          const h = home(layout);
+          viewState = { ...h, target: [t[0], t[1], h.target[2] ?? 0], zoom: viewState?.zoom ?? h.zoom, rotationX: 0, rotationOrbit: 0 };
+          deck.setProps({ views: [view()], viewState, controller: controllerFor(layout) });
+          // the ease must start on the NEXT frame: the new view id has no prior camera, and two setProps in
+          // one tick collapse (deck diffs once per frame) — same-tick meant the flat start pose never rendered
+          // and the camera snapped straight to home (verified live before this fix).
+          requestAnimationFrame(() => { viewState = { ...h, ...ease }; deck.setProps({ viewState }); });
+        } else if (!is3d(layout) && is3d(prev)) {
+          const swap = () => {
+            // keep the camera WHERE IT IS (target/zoom carry over; `zoom` = px per world unit in both views).
+            // No re-zoom to home — continuity is the point; the user can reframe. (An ease-to-home here kept
+            // getting cancelled by the leveling transition's echo and snapped instead — measured live.)
+            const h = home(layout);
+            const t2 = viewState?.target ?? [0, 0, 0];
+            viewState = { ...h, target: [t2[0], t2[1], 0], zoom: viewState?.zoom ?? h.zoom };
+            deck.setProps({ views: [view()], viewState, controller: controllerFor(layout) });
+          };
+          if (reduce) swap();
+          else {
+            viewState = { ...viewState, rotationX: 0, rotationOrbit: 0, transitionDuration: 320, transitionInterpolator: interp, transitionEasing: easeCubicInOut };
+            deck.setProps({ viewState });
+            setTimeout(swap, 340);  // after the leveling ease: the flat orbit view and the ortho view now agree
+          }
+        } else if (is3d(layout) && is3d(prev)) {
+          viewState = { ...home(layout), ...ease };
+          deck.setProps({ viewState });
+        }
       }
       paint();
     },
@@ -338,7 +376,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     setHighlight: (c) => { highlight = c; colorVer++; paint(); },
     fitToIndices: (idx) => fit(idx),
     debug: () => ({ zoom: (deck.getViewports?.()?.[0] as any)?.zoom ?? viewState?.zoom ?? 0, labels: decluttered().length, regions: members.filter((m) => m.length).length, grain, rot: viewState?.rotationOrbit ?? null, rotX: viewState?.rotationX ?? null, target: viewState?.target ?? null, span3 }),
-    project: (worldXY) => { const vp = (deck as any).getViewports?.()[0]; return vp ? vp.project([worldXY[0], worldXY[1], 0]).slice(0, 2) : [0, 0]; },
+    project: (world) => { const vp = (deck as any).getViewports?.()[0]; return vp ? vp.project([world[0], world[1], world[2] ?? 0]).slice(0, 2) : [0, 0]; },  // honors z, so 3D layouts project correctly (was hardcoded z=0)
     pickAt: (x, y) => { const o = (deck as any).pickObject?.({ x, y, radius: 8 }); return o ? { layer: o.layer?.id ?? null, url: o.object?.url ?? null, index: o.index ?? -1 } : null; },
     resetView: () => { viewState = home(layout); deck.setProps({ viewState }); },
     setFilterMask: (mask) => { filterMask = mask; filterVer++; paint(); },

@@ -227,7 +227,7 @@ try {
   // 11e. FACET ISOLATE: colour by a facet, click a facet legend row → isolates just that value (eid-zvh9)
   await p.goto(`${base}/index.html`); await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
   await btn(/explore/i).click().catch(() => {}); await p.waitForTimeout(150);
-  await setControl("color", "meta:author"); await p.waitForTimeout(250);
+  await setControl("color", "author"); await p.waitForTimeout(250);  // dimension KEY (the registry replaced the old meta: prefix)
   const facetRow = p.locator('[role="button"][aria-label^="isolate source"]').first();
   await facetRow.click(); await p.waitForTimeout(250);
   let fs = await st();
