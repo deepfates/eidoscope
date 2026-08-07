@@ -27,7 +27,10 @@ function synth(): MapContract {
     const jx = (((i0 * 37) % 11) / 11 - 0.5) * 0.5, jy = (((i0 * 53) % 11) / 11 - 0.5) * 0.5;
     ids.push("d" + k); titles.push(`Doc ${b}.${i0}`); cores.push(`blob${b} item ${i0} ${["alpha", "beta", "gamma"][b]}`);
     xy.push(k === 0 ? [0, 0] : [centers[b][0] + jx, centers[b][1] + jy]);
-    xyz.push([centers[b][0], centers[b][1], 0]);
+    // The 3D cloud is deliberately NOT flat, and blob 0 is a COLUMN along the depth axis through the
+    // camera target. Diving into an orbit camera then puts blob 0's near half BEHIND the eye while it is
+    // still dead-centre on screen — which is exactly the case the lasso's NDC-z guard exists to reject.
+    xyz.push([centers[b][0], centers[b][1], b === 0 ? (i0 / PER - 0.5) * 9 : (b - 1) * 2.5]);
     L0.push(b); L1.push(b * 2 + (i0 < 15 ? 0 : 1));
     L2.push(b * 4 + Math.min(3, Math.floor(i0 / 7.5)));
     L3.push(b * 8 + Math.min(7, Math.floor(i0 / 3.75)));
@@ -315,6 +318,174 @@ try {
   await p.waitForFunction(() => (window as any).__eido?.()?.regions === 2, null, { timeout: 15000 }).catch(() => {});
   const dropped = await st();
   ok(dropped.k === 2 && dropped.regions === 2, `dropping a .eido file opens it (12-region → dropped 2-region) — k=${dropped.k} regions=${dropped.regions}`);
+
+  // ═══ 14. SELECT (eid-r8t6) — circle dots → a held, materialized set → verbs ═══════════════════════
+  await p.goto(`${base}/index.html`);
+  await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
+  await btn(/explore/i).click().catch(() => {});
+  await p.waitForTimeout(200);
+
+  // 14a. it is an explicit MODE: the toolbar button, the `s` key and Escape all drive the same state
+  await p.click('[data-testid="bar:select"]'); await p.waitForTimeout(150);
+  ok((await st()).selectMode === true, "the select button enters select mode");
+  await p.keyboard.press("Escape"); await p.waitForTimeout(150);
+  ok((await st()).selectMode === false, "Escape leaves select mode (before it touches the overlay stack)");
+  await p.keyboard.press("s"); await p.waitForTimeout(150);
+  ok((await st()).selectMode === true, "the `s` key toggles select mode");
+
+  // 14b. a REAL pointer-drawn lasso around blob 1 (indices 30..59, centred at world [1.6, 1.1]) holds
+  // exactly that clump — nothing from the other two blobs.
+  const [bx, by] = await proj([1.6, 1.1]);
+  const [ex] = await proj([2.0, 1.1]);
+  const rad = Math.abs(ex - bx);
+  await p.mouse.move(bx + rad, by);
+  await p.mouse.down();
+  for (let a = 1; a <= 36; a++) { const t = (a / 36) * Math.PI * 2; await p.mouse.move(bx + rad * Math.cos(t), by + rad * Math.sin(t)); }
+  await p.mouse.up();
+  await p.waitForTimeout(400);
+  s = await st();
+  ok(s.selection === 30, `a pointer-drawn lasso holds exactly the circled clump (blob 1 = 30 cards) — got ${s.selection}`);
+  const selIds = await p.evaluate(() => new URL(location.href).searchParams.get("sel")?.split(",") ?? []);
+  ok(selIds.length === 30 && selIds.every((id: string) => +id.slice(1) >= 30 && +id.slice(1) < 60), `the held set is the RIGHT 30 cards (all of blob 1, none of the others) — e.g. ${selIds.slice(0, 3).join(",")}`);
+
+  // 14c. THE EXPLAIN STEP: the pane says what distinguishes the set, not just how many it grabbed
+  const selPane = await p.evaluate(() => {
+    const d = document.querySelector('[role="dialog"][aria-label="selection detail"]');
+    if (!d) return null;
+    return {
+      count: (d.querySelector("[data-sel-count]")?.textContent || "").trim(),
+      terms: [...d.querySelectorAll("[data-sel-terms] .badge")].map((e) => (e.textContent || "").trim()),
+      axes: [...d.querySelectorAll("[data-sel-axis]")].length,
+      verbs: [...d.querySelectorAll("button[data-testid]")].map((e) => (e as HTMLButtonElement).dataset.testid),
+      derivDisabled: (d.querySelector('[data-testid="sel-derive"]') as HTMLButtonElement | null)?.disabled,
+    };
+  });
+  ok(selPane?.count === "30 cards", `the reading pane shows the selection count — "${selPane?.count}"`);
+  ok(!!selPane && selPane.terms.includes("beta"), `the pane EXPLAINS the set: blob 1's distinctive term surfaces — terms=[${selPane?.terms.join(", ")}]`);
+  ok((selPane?.axes ?? 0) === 2, `the pane names the set's most-distinctive axes — got ${selPane?.axes}`);
+  ok(JSON.stringify(selPane?.verbs) === JSON.stringify(["sel-filter", "sel-export", "sel-derive", "sel-clear"]), `the verbs appear on a held set — ${JSON.stringify(selPane?.verbs)}`);
+  ok(selPane?.derivDisabled === true, "the `derive axis` verb is present but disabled (wave 3 wires it)");
+
+  // 14d. FILTER TO THESE: the selection becomes a Filter, so it flows through the normal mask + chips row
+  await p.click('[data-testid="sel-filter"]'); await p.waitForTimeout(350);
+  s = await st();
+  ok(s.filters.includes("selection (30)"), `filter-to-these lands in the chips row — filters=${JSON.stringify(s.filters)}`);
+  ok(s.visible === 30, `…and hides everything else — visible=${s.visible}/90`);
+  ok(s.selection === 0, "…and the selection is consumed by the filter (one state, not two)");
+  // it COMPOSES: intersect the set filter with a text filter and the mask narrows further
+  await p.locator('input[aria-label="find a card"]').first().fill("Doc 1.1");
+  await p.waitForTimeout(300);
+  s = await st();
+  ok(s.filters.length === 2 && s.visible > 0 && s.visible < 30, `a set filter INTERSECTS with the others — filters=${JSON.stringify(s.filters)} visible=${s.visible}`);
+
+  // 14e. clear, then re-select and clear via the pane's own verb
+  await btn(/^reset$/).click(); await p.waitForTimeout(300);
+  s = await st();
+  ok(s.filters.length === 0 && s.visible === 90 && s.selectMode === false, `reset clears the set filter AND leaves select mode — ${JSON.stringify({ f: s.filters.length, v: s.visible, sm: s.selectMode })}`);
+  const circle = (cx0: number, cy0: number, r: number) => Array.from({ length: 32 }, (_, a) => { const t = (a / 32) * Math.PI * 2; return [cx0 + r * Math.cos(t), cy0 + r * Math.sin(t)]; });
+  await p.evaluate((path) => (window as any).__eidoLasso(path), circle(bx, by, rad));
+  await p.waitForTimeout(250);
+  ok((await st()).selection === 30, "re-selecting the same clump holds it again");
+  await p.click('[data-testid="sel-clear"]'); await p.waitForTimeout(250);
+  ok((await st()).selection === 0, "the pane's `clear` verb releases the selection");
+
+  // 14f. a SELECTION is shareable: sel=<ids> round-trips through a reload
+  await p.evaluate((path) => (window as any).__eidoLasso(path), circle(bx, by, rad));
+  await p.waitForTimeout(300);
+  const shareUrl = p.url();
+  ok(new URL(shareUrl).searchParams.get("sel")!.split(",").length === 30, "a held selection serializes to the URL as sel=<ids>");
+  await p.goto(shareUrl);
+  await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
+  await p.waitForTimeout(600);
+  s = await st();
+  ok(s.selection === 30, `?sel= restores the held selection on load — got ${s.selection}`);
+  // ids that no longer exist are DROPPED, not faked
+  await p.goto(`${base}/index.html?sel=d30,d31,nosuchcard`);
+  await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
+  await p.waitForTimeout(600);
+  ok((await st()).selection === 2, `?sel= drops ids the corpus doesn't have — got ${(await st()).selection}`);
+
+  // 14g. THE 3D BEHIND-CAMERA GUARD. Dive into the orbit cloud until part of it sits behind the eye. A
+  // perspective projection MIRRORS those points onto the screen, so a naive polygon test would sweep them
+  // into the loop. The lasso rejects any point whose NDC z leaves [-1, 1]; this asserts the exact identity:
+  // whole-viewport lasso == the cards that are on-screen AND in front, with the mirrored ones excluded.
+  await p.goto(`${base}/index.html?layout=orbit`);
+  await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
+  await btn(/explore/i).click().catch(() => {});
+  await p.waitForTimeout(300);
+  const [ox, oy] = await proj([0, 0]);
+  await p.mouse.move(ox, oy);
+  await p.mouse.down(); await p.mouse.move(ox + 150, oy + 90, { steps: 12 }); await p.mouse.up();  // orbit off-axis
+  await p.waitForTimeout(500);
+  await p.mouse.move(ox, oy);
+  const depthOf = () => p.evaluate(() => {
+    const W = window.innerWidth, H = window.innerHeight;
+    let front = 0, mirrored = 0;
+    for (let i = 0; i < 90; i++) {
+      const q = (window as any).__eidoProjectIndex(i); if (!q) continue;
+      const on = q[0] >= 0 && q[0] <= W && q[1] >= 0 && q[1] <= H;
+      if (q[2] >= -1 && q[2] <= 1) { if (on) front++; } else if (on) mirrored++;   // ndc z out of [-1,1] = behind the eye
+    }
+    return { front, mirrored };
+  });
+  const vp = p.viewportSize()!;
+  const whole = [[2, 2], [vp.width - 2, 2], [vp.width - 2, vp.height - 2], [2, vp.height - 2]];
+  const sweep = () => p.evaluate((path) => (window as any).__eidoLasso(path), whole);
+  await p.keyboard.press("s"); await p.waitForTimeout(150);
+  // (i) at a normal 3D distance the lasso works like it does in 2D — every visible card, no clipping surprises
+  const shallow = await depthOf(), shallowCaught = await sweep();
+  ok(shallow.mirrored === 0 && shallowCaught === shallow.front && shallowCaught > 0, `a whole-viewport 3D lasso takes every visible card — caught=${shallowCaught} front=${shallow.front}`);
+  await p.click('[data-testid="sel-clear"]'); await p.waitForTimeout(250);
+  await p.mouse.move(ox, oy);   // the wheel targets whatever is under the cursor — put it back over the map
+  // (ii) …then DIVE into the depth column until part of the cloud sits behind the eye. Those cards still
+  // project on-screen (perspective mirrors w<0 through the origin), so a naive polygon test would sweep
+  // them in. The guard rejects them: the lasso's catch stays exactly the in-front set.
+  for (let i = 0; i < 14; i++) { await p.mouse.wheel(0, -170); await p.waitForTimeout(25); }
+  await p.waitForTimeout(500);
+  const deep = await depthOf(), deepCaught = await sweep();
+  ok(deep.mirrored > 0, `diving the 3D camera really does mirror behind-the-eye cards onto the screen — ${deep.mirrored} of them`);
+  // NOTE the shape of this assertion: at this depth the whole cloud is either off-screen or behind the eye,
+  // so a lasso over the ENTIRE viewport must come back with exactly the in-front set — and every one of the
+  // ${deep.mirrored} mirrored cards is refused even though its pixel is inside the loop. That the guard is
+  // what does the refusing (rather than the lasso simply selecting nothing) is pinned in test/lasso.test.ts,
+  // where the same call with clipZ off DOES take the mirrored point.
+  ok(deepCaught === deep.front, `the 3D lasso takes ONLY what is in front of the camera — caught=${deepCaught}, in-front-on-screen=${deep.front}, behind-but-on-screen and correctly REJECTED=${deep.mirrored}`);
+  await p.keyboard.press("Escape"); await p.waitForTimeout(150);
+
+  // 14h. MOBILE (375px): the mode is reachable from the controls sheet, one finger draws the lasso, and
+  // two-finger PINCH-ZOOM still works while in the mode (deck registers PINCH independently of drag).
+  const mp = await browser.newPage({ viewport: { width: 375, height: 780 }, hasTouch: true, isMobile: true });
+  const mst = () => mp.evaluate(() => (window as any).__eido());
+  await mp.goto(`${base}/index.html`);
+  await mp.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
+  await mp.locator("button", { hasText: /explore/i }).first().click().catch(() => {});
+  await mp.waitForTimeout(300);
+  await mp.click('[data-menu="sheet:open"]'); await mp.waitForTimeout(300);
+  await mp.click('[data-testid="sheet:select"]'); await mp.waitForTimeout(200);
+  await mp.locator('button[aria-label="close controls"]').click(); await mp.waitForTimeout(300);
+  ok((await mst()).selectMode === true, "mobile: select mode is reachable from the controls sheet");
+  const mcdp = await mp.context().newCDPSession(mp);
+  const mtouch = (type: string, pts: { x: number; y: number; id: number }[]) => mcdp.send("Input.dispatchTouchEvent", { type: type as any, touchPoints: pts as any });
+  const mbox = (await mp.locator("canvas").boundingBox())!;
+  // draw around the ORIGIN blob, well clear of the bottom sheet the pane will occupy
+  const [mfx, mfy] = await mp.evaluate(() => (window as any).__eidoProject([0, 0]) as number[]);
+  await mtouch("touchStart", [{ x: mfx + 60, y: mfy, id: 1 }]);
+  for (let a = 1; a <= 28; a++) { const t = (a / 28) * Math.PI * 2; await mtouch("touchMove", [{ x: mfx + 60 * Math.cos(t), y: mfy + 60 * Math.sin(t), id: 1 }]); }
+  await mtouch("touchEnd", []);
+  await mp.waitForTimeout(400);
+  const msel = (await mst()).selection;
+  ok(msel > 0, `mobile: a ONE-FINGER drag draws the lasso and holds a set — ${msel} cards`);
+  // pinch ABOVE the pane (on a phone the reading pane is a bottom sheet — it owns the lower screen)
+  const mz0 = (await mst()).zoom;
+  const py0 = mbox.y + mbox.height * 0.12;
+  await mtouch("touchStart", [{ x: mfx - 45, y: py0, id: 1 }, { x: mfx + 45, y: py0, id: 2 }]);
+  for (let k = 1; k <= 16; k++) { await mtouch("touchMove", [{ x: mfx - 45 - k * 7, y: py0, id: 1 }, { x: mfx + 45 + k * 7, y: py0, id: 2 }]); await mp.waitForTimeout(15); }
+  await mtouch("touchEnd", []);
+  await mp.waitForTimeout(500);
+  const mz1 = (await mst()).zoom;
+  ok(mz1 > mz0 + 0.1, `mobile: two-finger pinch still ZOOMS while in select mode — ${mz0.toFixed(2)}→${mz1.toFixed(2)}`);
+  ok((await mst()).selectMode === true, "mobile: pinching does not knock you out of select mode");
+  await mp.close();
 
   ok(consoleErrs.length === 0, "no console errors during the run" + (consoleErrs.length ? " — " + consoleErrs[0] : ""));
 } finally {
