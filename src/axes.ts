@@ -33,9 +33,10 @@ export const SEED = 42;
 // mulberry32 as the rest of the pipeline, so the geometry is still bit-identical run to run.
 // Defaults chosen by MEASUREMENT on the real 1446 x 384 Readwise corpus, not by taste. Embedding
 // spectra decay slowly, so the textbook (p=10, q=2) sketch is only accurate through ~PC17 there
-// (|cos| vs full PCA drops to 0.9976 by PC18) even though it's ~8.8x faster. (p=20, q=4) is exact to
-// ~1e-7 relative variance through PC40 and still ~4x faster / ~1.7x lighter than nine full SVDs —
-// the honest axes are the product's spine, so we buy the accuracy back.
+// (|cos| vs full PCA drops to 0.9976 by PC18). (p=20, q=4) reproduces the full SVD to ~1e-6 relative
+// variance and |cos| = 1.000000 through PC17, ~1e-3 through PC48 — and still runs the nine-PCA
+// discovery step in 4.0s where nine full SVDs take 31s (~7.6x). The honest axes are the product's
+// spine, so we buy the accuracy back; the speedup is what's left over.
 const OVERSAMPLE = 20, POWER_ITERS = 4;
 
 export type TruncPCA = { components: number[][]; explainedVariance: number[]; singularValues: number[]; mean: number[]; project: (X: number[][]) => number[][] };
