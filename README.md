@@ -60,6 +60,9 @@ bun run src/cli.ts <folder> --min-chars 100  # include short entries (default: s
 bun run src/cli.ts <folder> --frontier   # also pull the citation frontier (arxiv corpora)
 bun run src/cli.ts <folder> --embed raw   # A/B: build the map from raw full-text instead of the cards (to see what the bottleneck buys)
 bun run src/cli.ts <folder> --debug-json  # also dump map-data.json (see below) — off by default: it OOMs on big corpora
+bun run src/cli.ts export <map.eido> [--out <dir>]  # export a map as a markdown vault: one .md per card with
+                                     # frontmatter (id, axis scores, region, url) — readable in any markdown
+                                     # tool, and itself a valid corpus (re-run eidoscope on the vault folder)
 open out/<folder-name>/<folder-name>.html
 ```
 

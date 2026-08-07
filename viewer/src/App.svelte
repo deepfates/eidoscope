@@ -2,7 +2,7 @@
   import { onMount, untrack } from "svelte";
   import RangeSlider from "svelte-range-slider-pips";
   import { DropdownMenu, Popover } from "bits-ui";
-  import { loadMap, mapUrl, decodeEido } from "./loader";
+  import { loadMap, mapUrl, decodeEido, type Store } from "./loader";
   import { createMap, type MapHandle } from "./deckmap";
   import { col, axisColor, setActiveTheme } from "./encode";
   import { themePalette } from "./palette";
@@ -10,7 +10,6 @@
   import { ViewModel, parseUrl, type CameraOp } from "./model.svelte";
   import { embedQuery, cosineAll, resetEmbedder } from "./semantic";
   import { deriveDirection } from "./derive";
-  import type { MapContract } from "../../src/schema";
 
   // THE MODEL — channels, filters, scrubber, the dimension registry, URL (de)serialization. App keeps the DOM,
   // the deck handle, the camera and the browser APIs; it reads the model and hands it user intent.
@@ -22,6 +21,10 @@
   let loadFailed = $state(false);
   let hovered = $state<{ kind: "point"; i: number; x: number; y: number } | { kind: "ghost"; g: any; x: number; y: number } | null>(null);
   let handle = $state<MapHandle | null>(null);
+  // the mounted STORE (src/store.ts) — the read seam. The model/renderer consume the materialized
+  // contract (store.map(), mirrored as `data` via m.data); the vector-reading operators (derive, the
+  // semantic query) read store.vectors() so a future ColumnarStore can serve them without a full decode.
+  let store = $state<Store | null>(null);
   let showLabels = $state(true);
   let deckOpen = $state(false);
   let deckQ = $state("");
@@ -225,7 +228,7 @@
   // why the verb is unavailable, in the user's terms — an honest reason beats a dead button
   const deriveWhyNot = $derived.by(() => {
     if (!data) return "no map";
-    if (!data.vectors) return "this .eido carries no card vectors — the map was emitted without them, so an axis can't be derived from examples";
+    if (!store?.vectors()) return "this .eido carries no card vectors — the map was emitted without them, so an axis can't be derived from examples";
     if (!selection?.length) return "nothing held";
     if (selection.length === data.ids.length) return "the selection is the whole corpus — there is nothing to contrast it against";
     return "";
@@ -233,10 +236,11 @@
   function deriveAxis() {
     const D = data, sel = selection;
     if (!D || !sel?.length || deriveWhyNot) return;
-    const dir = deriveDirection(D.vectors, sel);
+    const V = store?.vectors();
+    const dir = deriveDirection(V, sel);
     if (!dir) { deriveErr = "these cards don't point anywhere the rest of the corpus doesn't"; return; }
     deriveErr = "";
-    mintedKey = m.addDerived((deriveLabel.trim() || deriveDefault), sel.map((i) => D.ids[i]), cosineAll(dir, D.vectors!));
+    mintedKey = m.addDerived((deriveLabel.trim() || deriveDefault), sel.map((i) => D.ids[i]), cosineAll(dir, V!));
     deriveLabel = "";
   }
   const mintedDim = $derived(mintedKey ? m.derivedDims.find((d) => d.key === mintedKey) : undefined);
@@ -273,8 +277,9 @@
     for (const d of p.derived) {
       const D = data; if (!D) break;
       const idx = d.ids.map((id) => D.ids.indexOf(id)).filter((i) => i >= 0);
-      const dir = deriveDirection(D.vectors, idx);
-      if (dir) m.addDerived(d.label, idx.map((i) => D.ids[i]), cosineAll(dir, D.vectors!));
+      const V = store?.vectors();
+      const dir = deriveDirection(V, idx);
+      if (dir) m.addDerived(d.label, idx.map((i) => D.ids[i]), cosineAll(dir, V!));
     }
     queueMicrotask(() => {
       if (p.region !== undefined && p.region >= 0 && p.region < curCount) togglePin(p.region);
@@ -316,9 +321,11 @@
   // so the viewer is a general .eido opener, not welded to one bundled map. Tears down the old GPU context,
   // resets per-corpus selection, re-wires the createMap handle + the read-only __eido test seam.
   let dragOver = $state(false);
-  function mountMap(D: MapContract, opts?: { intro?: boolean }) {
+  function mountMap(S: Store, opts?: { intro?: boolean }) {
     handle?.destroy();                                   // free the previous deck's GPU context before recreating
-    m.mount(D);                                          // per-corpus state reset + x/y/z parked on this file's axes
+    store = S;
+    const D = S.map();
+    m.mount(D);                                       // per-corpus state reset + x/y/z parked on this file's axes
     status = "";
     if (opts?.intro) showIntro = true;                    // a freshly-opened file introduces itself
     const dims0 = buildDimensions(D);   // build the registry ONCE for this mount's accessors
@@ -351,7 +358,7 @@
   // embed a text query → append a query-kind dimension; returns its key (or null). It does NOT touch any channel:
   // making an axis and placing it are separate acts (the user decides where it goes), so nothing moves underneath.
   async function embedAndAdd(q: string): Promise<string | null> {
-    const D = data; if (!D?.vectors || !q) return null;
+    const D = data, V = store?.vectors(); if (!D || !V || !q) return null;
     querying = true; queryErr = ""; queryStatus = "loading model…"; queryPct = null;
     // The first query lazy-loads a ~23MB model from a CDN. Show live progress, and detect a genuine STALL (no
     // progress for a while) vs. merely-slow — so a throttled/hung download surfaces a retry instead of freezing.
@@ -365,7 +372,7 @@
         embedQuery(q, (D as any).derivedBy?.embedder?.id, (p) => { queryStatus = p.label; queryPct = p.pct ?? null; armStall(); }),
         stalled,
       ]);
-      const key = m.addQuery(q, cosineAll(qv, D.vectors));
+      const key = m.addQuery(q, cosineAll(qv, V));
       queryStatus = "";
       return key;
     } catch (e: any) {
@@ -398,9 +405,9 @@
     } catch { setTheme(DEFAULT_DARK, false); }
     (async () => {
       try {
-        const D = await loadMap(mapUrl());
+        const S = await loadMap(mapUrl());
         try { showIntro = !localStorage.getItem("eido-seen"); } catch { showIntro = true; }
-        mountMap(D);
+        mountMap(S);
         applyUrlState(); urlReady = true;  // restore any deep-linked view/card, then start mirroring state → URL
       } catch (e: any) {
         loadFailed = true;
@@ -737,7 +744,7 @@
   </label>
 
   <!-- + AXIS — embed a question into a first-class dimension (an axis) you can place on any channel -->
-  {#if data?.vectors}
+  {#if store?.vectors()}
     <Popover.Root>
       <Popover.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case" data-menu="{scope}:axis" aria-label="add an axis from a question" title="add an axis from a question you ask the corpus">
         <span class="font-medium">+ axis</span>{#if mintedDims.length}<span class="badge badge-xs badge-primary">{mintedDims.length}</span>{/if}

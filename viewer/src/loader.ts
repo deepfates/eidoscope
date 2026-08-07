@@ -1,6 +1,7 @@
-import type { MapContract } from "../../src/schema";
 import { decodeContainer } from "../../src/eido-container";
+import { EmbeddedStore, type Store } from "../../src/store";
 export { decodeContainer };   // the ONE shared container parser (was hand-copied here — now src/eido-container.ts)
+export type { Store };
 
 // Browser side of the wire format (src/mapbin.ts). Same container, but gzip via the native
 // DecompressionStream (no library) and typed-array views over the decoded buffer. Two modes:
@@ -30,18 +31,20 @@ export function mapUrl(defaultUrl = "./map.eido"): string {
 }
 
 // Load the map: embedded payload if present (self-contained build), else fetch the url (hosted/dev).
-export async function loadMap(url = "./map.eido"): Promise<MapContract> {
+// Both loaders hand back a STORE (src/store.ts), the viewer's read seam — today always an EmbeddedStore
+// (fully decoded in memory); a ColumnarStore mounts here when scale demands it, with no App change.
+export async function loadMap(url = "./map.eido"): Promise<Store> {
   const embedded = (globalThis as any).__EIDO_DATA__;
   if (typeof embedded === "string") {
     const bin = Uint8Array.from(atob(embedded), (c) => c.charCodeAt(0));
-    return decodeContainer(await gunzip(bin));
+    return new EmbeddedStore(decodeContainer(await gunzip(bin)));
   }
   const res = await fetch(url);
   if (!res.ok) throw new Error(`eidoscope: could not load ${url} (${res.status})`);
-  return decodeContainer(await gunzip(new Uint8Array(await res.arrayBuffer())));
+  return new EmbeddedStore(decodeContainer(await gunzip(new Uint8Array(await res.arrayBuffer()))));
 }
 
 // Decode a .eido the user dropped in / opened locally (browser File → bytes). Same container, no network.
-export async function decodeEido(bytes: Uint8Array): Promise<MapContract> {
-  return decodeContainer(await gunzip(bytes));
+export async function decodeEido(bytes: Uint8Array): Promise<Store> {
+  return new EmbeddedStore(decodeContainer(await gunzip(bytes)));
 }

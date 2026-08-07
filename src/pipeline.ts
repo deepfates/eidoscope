@@ -5,12 +5,11 @@ import { cardCorpus, deckToJSONL, type Card } from "./card.ts";
 import { embedCards, projectAndCluster, projectionScores, rawProjectionScores, buildMetaFields } from "./map.ts";
 import { nameLevels } from "./regions.ts";
 import { provider } from "./provider.ts";
-import { singlefileHTML } from "./singlefile.ts";
+import { eidoSink, slugify } from "./sink.ts";
 import { trajectory } from "./trajectory.ts";
 import { buildReport } from "./report.ts";
 import { fetchFrontier, buildGhosts } from "./frontier.ts";
 import { CFG, cachePath, cacheRoot } from "./config.ts";
-import { encodeMap } from "./mapbin.ts";
 import { type MapContract } from "./schema.ts";
 import { loadFixture, type Doc } from "./corpus.ts";
 
@@ -31,10 +30,9 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
   const llm = provider();
   // Every corpus gets its OWN self-describing output directory + `<slug>.eido` — the .eido is a portable,
   // addressable L-space you hand around, so mapping two corpora must never clobber a shared `map.eido`.
-  const slug = (opts.name || "corpus").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "corpus";
+  const slug = slugify(opts.name);
   const outDir = opts.out || join("out", slug);
   mkdirSync(outDir, { recursive: true });
-  const eidoName = slug + ".eido";
   console.error(`\n[1/5] discovering axes from ${docs.length} docs…`);
   const { axes, realDims, projections } = await discoverAxes(embeddings, docs.map((d) => d.title.slice(0, 64)), { llm });
   console.error(`  ${axes.length} axes surfaced (${realDims} dims above the noise floor)`);
@@ -134,18 +132,16 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
   // right where you most want the map. The .eido below is the real output and is ~5x smaller, so the
   // JSON is opt-in behind --debug-json and default runs skip it entirely.
   if (opts.debugJson) writeFileSync(join(outDir, "map-data.json"), JSON.stringify(D));
-  const enc = encodeMap(D);
-  writeFileSync(join(outDir, eidoName), enc);   // the portable artifact (~5× smaller)
-  // self-contained offline explorer = the built Svelte+deck viewer with this .eido inlined (one HTML, no server)
-  const htmlName = slug + ".html", html = singlefileHTML(enc);
-  if (html) writeFileSync(join(outDir, htmlName), html);
-  else console.error("  ⚠ viewer not built — skipped the self-contained HTML (run `cd viewer && bun run build`); the .eido still opens in the viewer");
+  // the map artifacts go out through the SINK seam (src/sink.ts): <slug>.eido + the self-contained HTML
+  const emitted = eidoSink.emit(D, outDir, { slug });
+  const eidoOut = emitted.find((f) => f.endsWith(".eido"))!, htmlOut = emitted.find((f) => f.endsWith(".html"));
+  if (!htmlOut) console.error("  ⚠ viewer not built — skipped the self-contained HTML (run `cd viewer && bun run build`); the .eido still opens in the viewer");
   const state = trajectory({ dates: deck.map((c) => c.date), cluster: D.cluster, scores: D.scores, axes: D.axes, clusters });
   if (state) writeFileSync(join(outDir, "STATE.md"), state);
   writeFileSync(join(outDir, "REPORT.md"), buildReport(D, opts.name || "Corpus"));
   console.error(`\n✅ ${deck.length} cards · ${axes.length} axes · ${k} regions  →  ${outDir}/`);
-  console.error(`   → map   ${join(outDir, eidoName)}   (the portable L-space; open in the viewer)`);
-  if (html) console.error(`   → open  ${join(outDir, htmlName)}   (self-contained interactive explorer)`);
+  console.error(`   → map   ${eidoOut}   (the portable L-space; open in the viewer)`);
+  if (htmlOut) console.error(`   → open  ${htmlOut}   (self-contained interactive explorer)`);
   console.error(`   → read  ${join(outDir, "REPORT.md")}        (shareable summary${state ? " + STATE.md trajectory" : ""})`);
   console.error(`   → data  ${join(outDir, "deck.jsonl")}${opts.debugJson ? ` · ${join(outDir, "map-data.json")}` : ""}`);
   return D;
