@@ -1,64 +1,60 @@
 # eidoscope roadmap 🔭
 
-Single human-readable mirror of the plan. Source of truth is `tk` (epic `eid-vd9d`,
-milestone `eid-qy2v`); run `tk show eid-qy2v` and `tk ready` for live state.
+Single human-readable mirror of the plan. Source of truth is `tk` — north-star epic `eid-vd9d`,
+**v1 epic `eid-caza`**, far side `eid-8j5h`; run `tk show eid-caza` and `tk ready` for live state.
 
 ## North star
 
-Turn **anyone's** corpus into an interpretable card-map. The moat is the discipline:
-solid math **discovers** the axes (PCA + a real dimensionality/redundancy check), the LLM
-only ever **labels and scores** them — it never invents the ontology. The card (each
-document re-described on the discovered axes) is a concept bottleneck: legible coordinates,
-not a raw text vector. Everything else — map, deck, telescope, trajectory — reads the deck.
+Turn **anyone's** corpus into an honest, interpretable, portable map you look *through*. The moat
+is the discipline: solid math **discovers** the axes (PCA + a parallel-analysis check) and
+**places** every document (its position is its projection); the LLM only ever **labels** poles and
+**re-states** documents as cards — it never scores, positions, or invents the ontology. The
+neighbor map is deliberately a *different* view: UMAP over the card vectors, readable neighborhoods
+through the concept bottleneck. Axes and neighborhoods disagreeing is the instrument, not a bug.
 
-## v1 = "real product" — Definition of Done (`eid-qy2v`)
+## v1 (`eid-caza`) — the fluid honest grammar
 
-A **polished, maintained OSS package**, telescope included. Done when, *measured not asserted*:
+Make the honest model fluidly transformable through one coherent direct-manipulation grammar, in
+the portable carried-vectors regime, behind Source/Sink/Store seams so it grows to columnar scale
+without a rewrite. Positioning: unbundle the hosted-SaaS map tools into an open, local-first,
+pluggable UNIX-style instrument.
 
-1. **Standalone** — a stranger runs `eidoscope ./their-folder` with their own key **or** a local
-   OpenAI-compatible server (LM Studio, etc.); zero dependency on this machine (no local curare
-   checkout, no `curare/.env`).
-2. **Local path proven** end to end (embeddings already local; LLM → any OpenAI-compatible local
-   server, e.g. LM Studio, by config).
-3. **Honest output bar** — axis redundancy `< 0.3` (currently 0.25), summaries accurate, map legible.
-4. **Telescope** — citation-frontier "ghost" papers work on a citation corpus.
-5. **Docs** — a stranger-README + one bundled example corpus (`try it` = one command).
-6. **Green gates** — `bun test` + `tsc` + the storybook, run by CI on push.
-7. **Published** to npm as `eidoscope`.
+Shipped substrate (epic `eid-9h9j`, closed): one Dimension registry × channels (color/size/x/y/z/
+scrubber), queries as first-class dimensions, per-dimension honest⇄rank + invert, one filter
+primitive, the whole view serialized to the URL, honest axes end-to-end (raw PCA projections
+carried in the `.eido`).
 
-## Tracks (ship-order — risk-first at the product level: "will a stranger get a good result?")
+Build order (deps encoded in `tk`):
 
-**1 · Trustworthy core** (the moat)
-- ✅ Axis distinctness — one-call `labelAxes` (redundancy 0.39→0.25). `f5e1c3f`
-- ✅ `eid-ileo` — redundancy guard + fidelity now reported every run + opt-in fidelity gate (validated: gate 0.3 → redundancy 0.27, fidelity 0.50). Deep-axis fidelity is corpus-bounded; measured not forced.
-  CLI + test); ☐ deep-axis fidelity (still ~0.36) remains the harder half.
+1. **Shell** (`eid-zjbh`) — real state management extracted from the one big component (channels
+   and selection as model objects), and a chosen panel layout to replace the two floating chips.
+   The layout candidates get decided by building and looking, not prose.
+2. **Grammar coherence** (`eid-hsy3`) — naming, copy, and behavior consistency across every control.
+3. **SELECT** (`eid-r8t6`) — draw a loop, hold a set, verbs appear. Explicit select-mode button;
+   the set is materialized at gesture time (a lasso in 3D depends on the camera, so the *result*
+   is portable, the gesture is not).
+4. **DERIVE** (`eid-8139`) — query-by-example: a held set becomes a new dimension ("like these vs
+   not"), same machinery as typed queries. **DESCEND v0** (`eid-nuwd`) — export a held set as a
+   corpus, re-run the pipeline, open the child map (fluid in-browser descend is far-side).
+5. **Seams** (`eid-ege1`) — Source/Sink/Store as real interfaces; separable-parts `.eido`;
+   markdown-vault / dataset sinks.
+6. **Scale swaps** (`eid-cl83`) — standard libs, measured on real corpora (`eid-bm01` supplies
+   them): kill the JSON.stringify wall, shard the caches, truncated SVD, seeded runs, faster
+   layout. Plus tests on the numerical core (PCA / parallel analysis / clustering / kNN — currently
+   untested).
+7. **Polish** (`eid-ef7e`) — craft pass once the grammar is whole.
 
-**2 · Standalone & installable**
-- ✅ `eid-8hv4` — decoupled from curare: `@huggingface/transformers` + `ml-kmeans` used directly,
-  config drops the curare path + `.env` fallback. **Gold-matched to curare** (embeddings cosine
-  1.000000, clustering k+assignments identical) and a from-scratch folder run verified end-to-end.
-  `bce2059`. *(Remaining before publish: gate the dev-only fixture absolute paths — folded into ship.)*
-- ✅ `eid-l7z4` — verified **fully local** via LM Studio (gemma-4-12b @ 32k context): whole pipeline
-  runs, no OpenRouter/curare. Documented (needs a capable model + ample context). Provider-agnostic.
-- ✅ `eid-b2a9` — resumable card runs (cache by id) so a long run survives a crash.
+Open design forks (decide by looking at built candidates): panel layout · where selection verbs
+appear (on-map vs inspector) · what a card looks like as you zoom · mobile posture.
 
-**3 · Ship v1**
-- ◑ `eid-kgui` — ✅ LICENSE + package.json + example corpus (24-doc, runs OOTB) + small-corpus robustness + README; ☐ `npm publish` (awaits explicit go — irreversible outward action).
-- ✅ `eid-qesa` — CI: tests + typecheck on push.
+## Far side (`eid-8j5h`)
 
-**4 · Delight / included differentiator**
-- ✅ `eid-ugn6` — frontier telescope: data (S2 edges/impact/ranked, live-verified) + ghosts (verified) + viewer (rings/edges toggles, QA’d) + `--frontier` wiring. The differentiator, done.
-
-**Post-v1** (off the critical path): deck/spectrum readers, `eid-65ub` ✅ perf (batched embed), `eid-dr7o` ✅ orbit crash.
+Multimodal ingest, XR rendering, in-browser DESCEND, hosted/collab, 55M-scale tiling, npm publish,
+fancy syntheses (gaps/diffs/paths).
 
 ## The standing loop — keep it honest, keep it improving
 
-Every change is checked against **measurements, not vibes**, as regression gates:
-- **axes**: cross-axis card-score redundancy (mean |r|) and fidelity to each PC — the quality gate
-  the coherence filter never was. Target redundancy `< 0.3`.
-- **viewer**: the storybook screenshots (`bun run storybook.ts`).
-- **green**: `bun test`, `tsc --noEmit`.
-- periodic gut check: *would I use it? would a stranger?*
-
-A metric that, maximized, defeats the tool (e.g. faithfulness-to-full-text — see closed `eid-fd0e`)
-is a **guardrail, not an objective**. Keep the distinction.
+Every change is checked against **measurements, not vibes**: axis redundancy/fidelity gates,
+`bun run qa` (tsc + viewer typecheck + svelte-check + unit + e2e + offline), real-browser
+verification of interaction changes, and the periodic gut check: *would I use it? would a
+stranger?* A metric that, maximized, defeats the tool is a guardrail, not an objective.

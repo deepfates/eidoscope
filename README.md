@@ -54,12 +54,12 @@ OpenAI-compatible provider incl. local servers like LM Studio, so cloud or local
 ```sh
 bun install
 bun run src/cli.ts example           # try it: a bundled 24-doc demo corpus across domains
-bun run src/cli.ts <folder>          # any folder of .md/.txt -> deck.jsonl + map-data.json + map.eido + eidoscope.html (+ STATE.md if dated)
+bun run src/cli.ts <folder>          # any folder of .md/.txt -> out/<name>/: deck.jsonl + map-data.json + <name>.eido + <name>.html + REPORT.md (+ STATE.md if dated)
 bun run src/cli.ts <folder> --limit 200
 bun run src/cli.ts <folder> --min-chars 100  # include short entries (default: skip bodies < 200 chars, and it says how many)
 bun run src/cli.ts <folder> --frontier   # also pull the citation frontier (arxiv corpora)
 bun run src/cli.ts <folder> --embed raw   # A/B: build the map from raw full-text instead of the cards (to see what the bottleneck buys)
-open eidoscope.html
+open out/<folder-name>/<folder-name>.html
 ```
 
 Bigger is better: PCA and the axis-labeling need conceptual spread, so ~50+ documents give
@@ -87,12 +87,18 @@ fast: LM Studio serializes on a single model, so raising `EIDOSCOPE_CONCURRENCY`
 
 ## The viewer
 
-Two readers ship. `eidoscope.html` is the self-contained legacy render — one file, just open it.
-The maintained one is **`viewer/`** (Svelte 5 + deck.gl + Vite): GPU-rendered, touch-first, and it
-reads the compact binary `map.eido`.
+One viewer (**`viewer/`**, Svelte 5 + deck.gl + Vite): GPU-rendered, touch-first, reads the compact
+binary `.eido`. Every pipeline run also inlines it into a self-contained `<name>.html` — one file,
+just open it, works from `file://`.
 
-- **layout**: neighbor map (MDE) · **axis scatter** (position by any two discovered axes) · **3D orbit** (drag to rotate)
-- **color** by region, **source folder / author** (your corpus's own organization as a lens), or any axis · **size** by influence (hub-degree)
+The controls are one grammar: every **dimension** — discovered axes, metadata (folder, author,
+date, length), influence, and any **semantic query you type** — can be placed on any **channel**
+(color, size, x, y, z, scrubber), with a per-dimension **honest ⇄ rank** toggle (true magnitudes vs
+even spread) and an invert flip.
+
+- **layout**: neighbor map · **axis scatter** (any dimensions on x/y) · **3D space** (the neighbor map in 3D, drag to rotate) · **3D axis scatter** (any dimensions on x/y/z)
+- **color** by region, any metadata, any axis, or a query · **size** likewise (default: influence)
+- **filters** compose: isolate a region or folder, text-find, scrub any scalar dimension — active filters show as chips, one click to clear
 - **grain** slider — the nested region ladder from continents to towns; on-map labels declutter and *reveal as you zoom*, like a real map
 - **tap a card** → its restatement, where it sits on each axis (ranked by extremity), nearest neighbors, and links to **both** the reader and the **original source** (so a shared map opens even without the reader login)
 - **deck** — the whole corpus as a sortable/filterable list: the accessible, screen-reader parallel to the canvas
@@ -103,7 +109,7 @@ reads the compact binary `map.eido`.
 Build + serve it:
 
 ```sh
-cp map.eido viewer/public/map.eido          # the pipeline's binary map (copied into the build)
+cp out/<name>/<name>.eido viewer/public/map.eido   # the pipeline's binary map (copied into the build)
 cd viewer && bun install && bun run build    # -> viewer/dist/index.html (self-contained) + dist/map.eido
 python3 -m http.server --directory dist 8000 # open http://localhost:8000
 ```
@@ -111,8 +117,9 @@ python3 -m http.server --directory dist 8000 # open http://localhost:8000
 One build serves several corpora: **`?map=<name>.eido`** loads any sibling `.eido` next to `index.html`
 (defaults to `./map.eido`) — e.g. drop `pathfinder.eido` in and open `?map=pathfinder.eido`.
 
-**Every view is a link.** The URL mirrors the current state — layout, colour, size, grain, chosen
-axes, isolated region, and the open card — so any view is shareable and a reload restores it. Deep-link
+**Every view is a link.** The URL mirrors the whole view — layout, every channel's dimension and
+its honest/invert props, typed queries, filters, scrubber window, grain, and the open card — so any
+view is shareable and a reload restores it. Deep-link
 straight to a card with **`?card=<id>`** (e.g. `?map=pathfinder.eido&card=<id>`); the browser Back button
 (and the mobile back gesture) steps out of the deck/detail and undoes navigation.
 
