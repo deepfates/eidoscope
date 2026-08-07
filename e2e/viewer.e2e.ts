@@ -528,6 +528,26 @@ try {
   const mz1 = (await mst()).zoom;
   ok(mz1 > mz0 + 0.1, `mobile: two-finger pinch still ZOOMS while in select mode — ${mz0.toFixed(2)}→${mz1.toFixed(2)}`);
   ok((await mst()).selectMode === true, "mobile: pinching does not knock you out of select mode");
+
+  // 14i. ANIMATION (eid-aw7x): a camera FIT under mobile emulation EASES — interpolated intermediate
+  // frames, not a jump. Mobile emulation sends prefers-reduced-motion: no-preference, exactly what a
+  // default real phone sends (verified on the iOS simulator); with the OS setting on, motion is
+  // deliberately brief (deckmap.ts dur()). Headless can prove frames exist; feel needs a real phone.
+  ok(await mp.evaluate(() => matchMedia("(prefers-reduced-motion: no-preference)").matches), "mobile emulation sends reduced-motion: no-preference (the default-phone contract)");
+  // displace the camera first (pinch IN well past the fit frame) so the fit has real distance to travel
+  await mtouch("touchStart", [{ x: mfx - 20, y: py0, id: 1 }, { x: mfx + 20, y: py0, id: 2 }]);
+  for (let k = 1; k <= 20; k++) { await mtouch("touchMove", [{ x: mfx - 20 - k * 7, y: py0, id: 1 }, { x: mfx + 20 + k * 7, y: py0, id: 2 }]); await mp.waitForTimeout(15); }
+  await mtouch("touchEnd", []);
+  await mp.waitForTimeout(500);
+  // record the camera TARGET per frame (a small selection's fit zoom rides the maxZoom clamp, so the
+  // observable interpolation is the pan) — intermediate frames = the transition really ran.
+  await mp.evaluate(() => { const rec: number[] = []; (window as any).__rec = rec; const t0 = performance.now(); const loop = () => { rec.push(((window as any).__eido().target ?? [NaN, NaN])[1]); if (performance.now() - t0 < 1400) requestAnimationFrame(loop); }; requestAnimationFrame(loop); });
+  await mp.click('[data-testid="sel-fit"]');  // frame the held selection — the explicit camera move
+  await mp.waitForTimeout(1500);
+  const ys = (await mp.evaluate(() => (window as any).__rec as number[])).filter((y) => Number.isFinite(y));
+  const yA = ys[0], yB = ys[ys.length - 1];
+  const yMid = new Set(ys.filter((y) => Math.abs(y - yA) > 1e-4 && Math.abs(y - yB) > 1e-4).map((y) => y.toFixed(4)));
+  ok(Math.abs(yB - yA) > 0.05 && yMid.size >= 4, `mobile: camera fit EASES, not jumps — ${yMid.size} distinct intermediate camera frames across targetY ${yA?.toFixed(2)}→${yB?.toFixed(2)} (eid-aw7x)`);
   await mp.close();
 
   ok(consoleErrs.length === 0, "no console errors during the run" + (consoleErrs.length ? " — " + consoleErrs[0] : ""));
