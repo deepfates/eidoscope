@@ -145,6 +145,43 @@ export async function knnHNSW(X: number[][], K: number): Promise<number[][]> {
   return knnIndex(X, K).idx.map((row) => row.slice(1));
 }
 
+// kNN in LAYOUT space (euclidean over 2–3 dims): brute for small n, hnsw l2 past HNSW_MIN — same
+// scale threshold, same determinism argument as knnIndex above.
+export function layoutKnn(P: number[][], K: number): number[][] {
+  const n = P.length, d = P[0]?.length ?? 0, Kc = Math.min(K, n - 1);
+  if (n <= HNSW_MIN) {
+    const out: number[][] = [];
+    for (let i = 0; i < n; i++) {
+      const sims: [number, number][] = [];
+      for (let j = 0; j < n; j++) { if (j === i) continue; let s = 0; for (let t = 0; t < d; t++) { const dd = P[i][t] - P[j][t]; s += dd * dd; } sims.push([j, s]); }
+      sims.sort((a, b) => a[1] - b[1]);
+      out.push(sims.slice(0, Kc).map(([j]) => j));
+    }
+    return out;
+  }
+  const index = new HierarchicalNSW("l2", d);
+  index.initIndex(n, 16, 200, SEED);
+  index.setEf(Math.max(64, Kc + 1));
+  for (let i = 0; i < n; i++) index.addPoint(P[i], i);
+  const out: number[][] = [];
+  for (let i = 0; i < n; i++) out.push(index.searchKnn(P[i], Math.min(n, Kc + 1)).neighbors.filter((j) => j !== i).slice(0, Kc));
+  return out;
+}
+
+// THE HONESTY NUMBER for the 3D cloud (eid-ovo7): the 2D map and the 3D cloud are two INDEPENDENT UMAP
+// fits of the same card vectors (same seed, same precomputed kNN graph — still different embeddings;
+// measured: seeding the 3D fit from the 2D layout moved this by only ~+0.1/8, and taking the top-2 dims
+// of a 3D fit made the 2D map strictly worse, so the fits stay separate and the difference gets STATED).
+// This is the mean count of a card's K nearest 2D-layout neighbors that are still among its K nearest in
+// the 3D layout — computed per corpus at emit time and surfaced in the about pane, so the claim
+// "different arrangement" is a measured number, not vibes.
+export function xyzOverlap(xy: number[][], xyz: number[][], K = 8): number {
+  const A = layoutKnn(xy, K), B = layoutKnn(xyz, K);
+  let s = 0;
+  for (let i = 0; i < A.length; i++) { const set = new Set(B[i]); for (const j of A[i]) if (set.has(j)) s++; }
+  return A.length ? s / A.length : 0;
+}
+
 export function normPct(arr: number[][], dims: number): number[][] {
   const b = Array.from({ length: dims }, (_, j) => { const c = arr.map((r) => r[j]).sort((a, z) => a - z); const q = (p: number) => c[Math.floor(p * (c.length - 1))]; return [q(0.02), q(0.98)] as [number, number]; });
   return arr.map((r) => r.map((v, j) => +(((v - (b[j][0] + b[j][1]) / 2) / (((b[j][1] - b[j][0]) / 2) || 1))).toFixed(4)));
@@ -156,7 +193,7 @@ export async function projectAndCluster(embs: number[][]) {
   if (n < 5) { // too few points for UMAP/clustering — lay them on a ring so the tool still runs
     const xy = X.map((_, i) => [Math.cos((2 * Math.PI * i) / n) * 0.6, Math.sin((2 * Math.PI * i) / n) * 0.6] as number[]);
     const one = X.map(() => 0);
-    return { xy, xyz: xy.map((p) => [p[0], p[1], 0]), cluster: one, k: 1, di: 0, levels: [one], counts: [1], hub: X.map(() => 0), nbr: X.map(() => [] as number[]) };
+    return { xy, xyz: xy.map((p) => [p[0], p[1], 0]), xyzAgree: n > 1 ? Math.min(8, n - 1) : 0, cluster: one, k: 1, di: 0, levels: [one], counts: [1], hub: X.map(() => 0), nbr: X.map(() => [] as number[]) };
   }
   const nn = Math.max(2, Math.min(15, n - 1)); // small corpora have fewer points than neighbors
   // Past HNSW_MIN, the kNN graph is computed ONCE with hnswlib and handed to umap-js as a precomputed
@@ -182,7 +219,7 @@ export async function projectAndCluster(embs: number[][]) {
   const K = 8, hub = new Array(n).fill(0);
   const nbr = pre ? pre.idx.map((row) => row.slice(1, K + 1)) : knnBrute(X, K); // reuse the UMAP graph's index (nn-1 ≥ K past HNSW_MIN)
   for (const top of nbr) for (const j of top) hub[j]++;
-  return { xy, xyz, cluster, k, di, levels, counts, hub, nbr };
+  return { xy, xyz, xyzAgree: xyzOverlap(xy, xyz, K), cluster, k, di, levels, counts, hub, nbr };
 }
 
 // verify: (1) MiniLM embeds card text, (2) umap-js + curare-cluster lay out real card embeddings

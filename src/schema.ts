@@ -85,6 +85,11 @@ export type MapContract = {
   // geometry (Float32 on the wire): 2D map, 3D orbit
   xy: number[][];
   xyz: number[][];
+  // `xy` and `xyz` are two INDEPENDENT UMAP fits of the same card vectors — the 3D cloud is NOT the 2D
+  // map with depth. xyzAgree quantifies that honestly: mean count of a card's 8 nearest neighbors in the
+  // 2D layout that are still among its 8 nearest in the 3D layout (0..8), measured per corpus at emit
+  // time. Surfaced in the viewer's about pane (eid-ovo7). Optional: absent in pre-existing files.
+  xyzAgree?: number;
 
   // the nested grain ladder (clumps-all-the-way-down). `cluster` is the default level = levels[di].
   cluster: number[];                       // per node: region index at the default grain

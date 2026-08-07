@@ -105,7 +105,7 @@ with a live visible-count, a docked **reading pane** (cards and regions), and a 
 (black/light defaults + more; the theme rides the shareable URL) — on mobile the toolbar and pane
 become bottom sheets.
 
-- **layout**: neighbor map · **axis scatter** (any dimensions on x/y) · **3D neighbor map** (the neighbor map in 3D, drag to rotate) · **3D axis scatter** (any dimensions on x/y/z) — the camera stays continuous across 2D↔3D
+- **layout**: neighbor map · **axis scatter** (any dimensions on x/y) · **3D cloud** (an independent 3D embedding of the same card vectors — a different arrangement, not the neighbor map with depth; the about pane states the measured per-corpus neighbor agreement between the two, drag to rotate) · **3D axis scatter** (any dimensions on x/y/z) — the camera stays continuous across 2D↔3D
 - **color** by region, any metadata, or any axis (including the ones you add with **+ axis**) · **size** likewise (default: influence) — the color menu doubles as the legend (click a row to isolate)
 - **filters** compose: isolate a region or folder, **find**, **window** any scalar or temporal dimension — active filters show as chips, one click to clear
 - **grain** slider — the nested region ladder from continents to towns; on-map labels declutter and *reveal as you zoom*, like a real map
