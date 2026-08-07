@@ -596,14 +596,6 @@
             <li class="flex flex-row items-center gap-2 px-3 py-1 text-sm"><span class="h-2.5 w-2.5 flex-none rounded-xs" style="background:{rgb(axisColor(1))}"></span><span class="truncate">{cp[1]}</span></li>
           {/if}
         </ul>
-        {#if m.channels.color === "region" && nLevels > 1}
-          <!-- grain modifies the region clustering, so it belongs with the region legend -->
-          <label class="flex flex-none items-center gap-2 border-t border-base-300 px-3 py-2 text-xs">
-            <span class="flex-none font-mono text-[10px] uppercase opacity-60">grain</span>
-            <input type="range" data-testid="grain" min="0" max={nLevels - 1} bind:value={m.grain} oninput={() => (m.pinned = null)} class="range range-xs min-w-0 flex-1" aria-label="grain level: how finely the map is divided into regions" aria-valuetext="{curCount} regions" />
-            <span class="w-6 flex-none text-right font-mono text-[10px] opacity-60">{curCount}</span>
-          </label>
-        {/if}
         <div class="thin-sb max-h-56 flex-none overflow-y-auto border-t border-base-300">
           <ul class="menu menu-sm w-full p-1">
             <li class="menu-title text-[10px] tracking-widest uppercase">color by</li>
@@ -616,6 +608,18 @@
       </Popover.Content>
     </Popover.Portal>
   </Popover.Root>
+
+  <!-- GRAIN — a parameter of the REGION DIMENSION (which level of the cluster hierarchy is active), not of
+       any channel: regions drive labels, drill, isolate and the legend whatever colour shows, so their
+       resolution is a first-class, always-visible control. It briefly lived inside the colour popover —
+       that conflated "where regions are displayed" with "what regions are". -->
+  {#if nLevels > 1}
+    <label class="flex flex-none items-center gap-1.5 px-1 text-xs" title="how finely the map is divided into regions — continents to towns">
+      <span class="flex-none font-mono text-[10px] uppercase opacity-60">grain</span>
+      <input type="range" data-testid="grain" min="0" max={nLevels - 1} bind:value={m.grain} oninput={() => (m.pinned = null)} class="range range-xs w-20 min-w-0" aria-label="grain level: how finely the map is divided into regions" aria-valuetext="{curCount} regions" />
+      <span class="w-6 flex-none text-right font-mono text-[10px] opacity-60">{curCount}</span>
+    </label>
+  {/if}
 
   <!-- SIZE -->
   <Popover.Root>
@@ -788,7 +792,7 @@
   {/if}
 
   <!-- ═══ BODY: map (fills everything left) + docked details pane ═══ -->
-  <main class="flex min-h-0 flex-1">
+  <main class="relative flex min-h-0 flex-1">
     <div bind:this={mapBox} class="relative min-h-0 min-w-0 flex-1 touch-none {selectMode ? 'cursor-crosshair' : ''}" onpointerdown={lassoDown}>
       <!-- svelte-ignore a11y_no_interactive_element_to_noninteractive_role -->
       <!-- role="img"+aria-label is the intended pattern: present the canvas as one labeled image and route AT users to the deck list (the real accessible surface) -->
@@ -836,10 +840,12 @@
       {/if}
     </div>
 
-    <!-- ═══ DETAILS PANE — docked right (a bottom sheet on phones). Never floats over the map centre. ═══ -->
+    <!-- ═══ DETAILS PANE — an OVERLAY on the map's right edge (a bottom sheet on phones). It must never
+         be a flex sibling of the map: that resized the canvas on every open/close — a layout shift on
+         every dot click. The map is the primary surface; chrome floats over it, it never squeezes it. ═══ -->
     {#if sidebarOpen && data}
       <div use:focusOnOpen tabindex="-1" role="dialog" aria-label={selected !== null ? "card detail" : selection !== null ? "selection detail" : "region detail"}
-        class="thin-sb fixed inset-x-0 bottom-0 z-40 max-h-[70vh] overflow-auto border-t border-base-300 bg-base-100 p-4 text-sm shadow-2xl sm:relative sm:inset-auto sm:z-auto sm:max-h-none sm:w-88 sm:flex-none sm:border-l sm:border-t-0 sm:shadow-none">
+        class="thin-sb fixed inset-x-0 bottom-0 z-40 max-h-[70vh] overflow-auto border-t border-base-300 bg-base-100 p-4 text-sm shadow-2xl sm:absolute sm:inset-y-0 sm:right-0 sm:left-auto sm:z-30 sm:max-h-none sm:w-88 sm:border-t-0 sm:border-l sm:shadow-xl">
         <button class="btn btn-ghost btn-sm btn-square sticky top-0 float-right ml-2" onclick={() => (selected !== null ? focusCard(null) : selection !== null ? m.clearSelection() : togglePin(pinned!))} aria-label="close">✕</button>
         {#if selected !== null}
           <div class="mb-1 pr-8 font-bold">{data.titles[selected]}</div>

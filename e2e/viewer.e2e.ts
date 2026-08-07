@@ -114,9 +114,9 @@ const menu = async (channel: string) => { await closeMenus(); await p.click(`[da
 const setControl = async (channel: string, value: string) => { await menu(channel); await p.click(`[data-opt="bar:${channel}:${value}"]`); await p.waitForTimeout(180); if (channel !== "color") await closeMenus(); };
 // grain lives in the colour popover now (it modifies the region clustering it legends)
 const setGrain = async (v: number) => {
-  await menu("color");
+  // grain is a first-class toolbar control (a parameter of the region dimension, not of the colour channel)
   await p.evaluate((v) => { const s = document.querySelector('[data-testid=grain]') as HTMLInputElement; const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!; set.call(s, String(v)); s.dispatchEvent(new Event("input", { bubbles: true })); }, v);
-  await p.waitForTimeout(120); await closeMenus();
+  await p.waitForTimeout(120);
 };
 // deck's onClick fires the SAME way for a desktop mouse click and a touch tap; Playwright can't cleanly
 // drive deck's mouse-gesture recognizer (a harness limit), but touchscreen.tap reaches it reliably — so a
