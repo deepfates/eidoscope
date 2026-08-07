@@ -9,6 +9,7 @@
   import { buildDimensions, scores01, type Dimension } from "./dimensions";
   import { ViewModel, parseUrl, type CameraOp } from "./model.svelte";
   import { embedQuery, cosineAll, resetEmbedder } from "./semantic";
+  import { deriveDirection } from "./derive";
   import type { MapContract } from "../../src/schema";
 
   // THE MODEL — channels, filters, scrubber, the dimension registry, URL (de)serialization. App keeps the DOM,
@@ -72,6 +73,7 @@
   const facetPin = $derived(m.facetPin);
   const allDims = $derived(m.allDims);
   const queryDims = $derived(m.queryDims);
+  const mintedDims = $derived(m.mintedDims);   // queries + derived — one list, one ✕ path
   const colorDim = $derived(m.colorDim), xDim = $derived(m.xDim), yDim = $derived(m.yDim), zDim = $derived(m.zDim), sizeDim = $derived(m.sizeDim);
   const assignment = $derived(m.assignment);
   const curCount = $derived(m.curCount);
@@ -188,13 +190,13 @@
     const path = lasso; lasso = null; lassoPointer = -1;
     if (!commit || !path || path.length < 3 || !handle) return;
     const idx = handle.selectPolygon(path, filterMask);   // hidden cards aren't selectable — the mask rides along
-    if (idx.length) { m.setSelection(idx); focusCard(null); }
+    if (idx.length) { m.setSelection(idx); mintedKey = null; focusCard(null); }
   }
   // programmatic seam for the integration suite: synthesize the SAME path the pointer would have drawn
   function lassoFromPath(path: number[][]): number {
     if (!handle) return 0;
     const idx = handle.selectPolygon(path, filterMask);
-    if (idx.length) { m.setSelection(idx); focusCard(null); }
+    if (idx.length) { m.setSelection(idx); mintedKey = null; focusCard(null); }
     return idx.length;
   }
   function exportSelection() {
@@ -206,6 +208,34 @@
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
+
+  // ═══ DERIVE (eid-8139) — an axis from EXAMPLES. With a set held, mint a scalar dimension scoring every
+  // card by "how much like these": the mean-difference direction between the selection and the rest of the
+  // corpus, cosined against every card vector (viewer/src/derive.ts). Identical in kind to a typed query —
+  // it lands in the same registry, so every channel menu, the scrubber, honest⇄rank and the ✕ already work.
+  // THE LAW: it places itself on NOTHING and does not consume the selection. The pane offers the placement.
+  let deriveLabel = $state("");              // what the user typed (empty = use the selection's top term)
+  let mintedKey = $state<string | null>(null);  // the dimension just minted, so the pane can offer placements
+  let deriveErr = $state("");
+  const deriveDefault = $derived(m.selectionTerms[0] ?? "these");
+  // why the verb is unavailable, in the user's terms — an honest reason beats a dead button
+  const deriveWhyNot = $derived.by(() => {
+    if (!data) return "no map";
+    if (!data.vectors) return "this .eido carries no card vectors — the map was emitted without them, so an axis can't be derived from examples";
+    if (!selection?.length) return "nothing held";
+    if (selection.length === data.ids.length) return "the selection is the whole corpus — there is nothing to contrast it against";
+    return "";
+  });
+  function deriveAxis() {
+    const D = data, sel = selection;
+    if (!D || !sel?.length || deriveWhyNot) return;
+    const dir = deriveDirection(D.vectors, sel);
+    if (!dir) { deriveErr = "these cards don't point anywhere the rest of the corpus doesn't"; return; }
+    deriveErr = "";
+    mintedKey = m.addDerived((deriveLabel.trim() || deriveDefault), sel.map((i) => D.ids[i]), cosineAll(dir, D.vectors!));
+    deriveLabel = "";
+  }
+  const mintedDim = $derived(mintedKey ? m.derivedDims.find((d) => d.key === mintedKey) : undefined);
 
   function focusCard(i: number | null) { m.selected = i; handle?.setFocus(i); }
   function reset() { focusCard(null); m.clearFilters(); m.selectMode = false; handle?.setHighlight(null); m.grain = data?.di ?? 0; handle?.resetView(); }
@@ -231,6 +261,14 @@
     m.applyPatch(p);
     if (p.scrubbed) scrubNonce++;               // remount the slider so its thumbs show the restored window
     for (const t of p.queries) embedAndAdd(t);  // best-effort, background; won't block the restore or hang the app
+    // DERIVED dims re-derive from their example ids (a label alone can't reproduce a direction). Ids that the
+    // corpus no longer has are dropped; if too few survive to contrast against the rest, the axis drops too.
+    for (const d of p.derived) {
+      const D = data; if (!D) break;
+      const idx = d.ids.map((id) => D.ids.indexOf(id)).filter((i) => i >= 0);
+      const dir = deriveDirection(D.vectors, idx);
+      if (dir) m.addDerived(d.label, idx.map((i) => D.ids[i]), cosineAll(dir, D.vectors!));
+    }
     queueMicrotask(() => {
       if (p.region !== undefined && p.region >= 0 && p.region < curCount) togglePin(p.region);
       if (p.facet !== undefined && colorDim?.ord?.includes(p.facet)) toggleFacetPin(p.facet);
@@ -240,7 +278,7 @@
       if (p.sel && data) { const idx = p.sel.map((id) => data!.ids.indexOf(id)).filter((i) => i >= 0); if (idx.length) m.setSelection(idx); }
     });
   }
-  $effect(() => { void [m.layout, m.channels.color, m.channels.size, m.grain, m.channels.x, m.channels.y, m.channels.z, m.pinned, m.selected, m.channels.scrub, m.scrubLo, m.scrubHi, m.dimProps, m.filters, m.queries, m.selection, themeName]; if (urlReady) { try { history.replaceState(history.state, "", currentUrl()); } catch {} } });
+  $effect(() => { void [m.layout, m.channels.color, m.channels.size, m.grain, m.channels.x, m.channels.y, m.channels.z, m.pinned, m.selected, m.channels.scrub, m.scrubLo, m.scrubHi, m.dimProps, m.filters, m.queries, m.derived, m.selection, themeName]; if (urlReady) { try { history.replaceState(history.state, "", currentUrl()); } catch {} } });
 
   // focus-trap action (eid-vxm2): on open, move focus into the modal + keep Tab inside it (so keyboard
   // focus can't wander to the background controls behind the overlay); on close, return focus to the opener.
@@ -285,7 +323,7 @@
       onGrainChange: (g) => m.setGrain(g),
     });
     // read-only introspection seam for the integration suite (drives the REAL built app, asserts real state)
-    (window as any).__eido = () => { const d = handle?.debug(); return { grain: m.grain, k: curCount, layout: m.layout, color: m.channels.color, pin: pinned, facetPin, focus: selected, detail: selected !== null, deckOpen, cite: citeOn, ghosts: ghostsOn, theme, themeName, pal: Array.from({ length: 6 }, (_, i) => col(i)), hover: hovered ? hovered.kind : null, zoom: d?.zoom ?? 0, labels: d?.labels ?? 0, labelsOn, regions: d?.regions ?? 0, rot: d?.rot ?? null, rotX: d?.rotX ?? null, target: d?.target ?? null, span3: d?.span3 ?? null, filters: chips.map((c) => c.label), selectMode: m.selectMode, selection: selection?.length ?? 0, selShareable: m.selShareable, drawing: !!lasso, visible: filterMask ? filterMask.reduce((a, v) => a + v, 0) : (data?.ids.length ?? 0) }; };
+    (window as any).__eido = () => { const d = handle?.debug(); return { grain: m.grain, k: curCount, layout: m.layout, color: m.channels.color, pin: pinned, facetPin, focus: selected, detail: selected !== null, deckOpen, cite: citeOn, ghosts: ghostsOn, theme, themeName, pal: Array.from({ length: 6 }, (_, i) => col(i)), hover: hovered ? hovered.kind : null, zoom: d?.zoom ?? 0, labels: d?.labels ?? 0, labelsOn, regions: d?.regions ?? 0, rot: d?.rot ?? null, rotX: d?.rotX ?? null, target: d?.target ?? null, span3: d?.span3 ?? null, filters: chips.map((c) => c.label), selectMode: m.selectMode, selection: selection?.length ?? 0, selShareable: m.selShareable, derived: m.derivedDims.length, dims: m.allDims.map((x) => x.key), drawing: !!lasso, visible: filterMask ? filterMask.reduce((a, v) => a + v, 0) : (data?.ids.length ?? 0) }; };
     // the map no longer fills the window (a toolbar sits above it), so both seams speak PAGE coordinates —
     // what a test's mouse/touch actually uses — and convert at the canvas edge.
     const rect = () => canvas.getBoundingClientRect();
@@ -295,6 +333,9 @@
     // real pointerup makes, through the same viewport projection + polygon test).
     // [screenX, screenY, ndcZ] for a card, in PAGE coords — the guard's evidence surface.
     (window as any).__eidoProjectIndex = (i: number) => { const q = handle?.projectIndex(i); if (!q) return null; const r = rect(); return [q[0] + r.left, q[1] + r.top, q[2]]; };
+    // the colour a card is PAINTED, through the very accessor the deck layer uses — so a test can assert
+    // "placing this dimension on colour actually repainted the map", not merely "a menu label changed".
+    (window as any).__eidoColor = (i: number) => m.colorGet(m.allDims, m.channels.color, m.assignment)(i);
     (window as any).__eidoLasso = (path: number[][]) => { const r = rect(); return lassoFromPath(path.map(([x, y]) => [x - r.left, y - r.top])); };
   }
   // Semantic query: embed in-browser (same model that made the card vectors), cosine-rank, and append a
@@ -692,7 +733,7 @@
   {#if data?.vectors}
     <Popover.Root>
       <Popover.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case" data-menu="{scope}:axis" aria-label="add an axis from a question" title="add an axis from a question you ask the corpus">
-        <span class="font-medium">+ axis</span>{#if queryDims.length}<span class="badge badge-xs badge-primary">{queryDims.length}</span>{/if}
+        <span class="font-medium">+ axis</span>{#if mintedDims.length}<span class="badge badge-xs badge-primary">{mintedDims.length}</span>{/if}
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Content class="eido-pop w-80 p-3" sideOffset={6} align="end">
@@ -710,11 +751,11 @@
           {:else if queryErr}
             <div class="mt-2 text-[11px] leading-snug text-error">{queryErr}</div>
           {/if}
-          {#each queryDims as qd}
+          {#each mintedDims as qd}
             <div class="rounded-field mt-2 flex items-center gap-1 bg-base-200 px-2 py-1 text-[11px]">
               <span class="min-w-0 flex-1 truncate font-mono opacity-80" title={qd.name}>{qd.name}</span>
               <button onclick={() => (m.channels.color = qd.key)} title="colour by this axis" aria-label="colour by this axis" class="btn btn-ghost btn-xs">●</button>
-              <button onclick={() => m.removeQuery(qd.key)} title="remove this axis" aria-label="remove this axis" class="btn btn-ghost btn-xs">✕</button>
+              <button onclick={() => { m.removeDimension(qd.key); if (mintedKey === qd.key) mintedKey = null; }} title="remove this axis" aria-label="remove this axis" class="btn btn-ghost btn-xs">✕</button>
             </div>
           {/each}
         </Popover.Content>
@@ -890,11 +931,43 @@
             <button data-testid="sel-filter" class="btn btn-primary btn-xs normal-case" title="hide everything else — the selection becomes a filter, and composes with the others" onclick={() => m.filterToSelection()}>filter to these</button>
             <button data-testid="sel-fit" class="btn btn-xs normal-case" title="move the camera to frame these cards" onclick={() => fitTo(selection!)}>fit</button>
             <button data-testid="sel-export" class="btn btn-xs normal-case" title="download these cards as JSON (ids, titles, urls)" onclick={exportSelection}>export</button>
-            <button data-testid="sel-derive" class="btn btn-xs normal-case" disabled title="next: an axis from this set">derive axis</button>
-            <button data-testid="sel-clear" class="btn btn-ghost btn-xs normal-case" onclick={() => m.clearSelection()}>clear</button>
+            <button data-testid="sel-derive" class="btn btn-xs normal-case" disabled={!!deriveWhyNot}
+              title={deriveWhyNot || "mint an axis scoring every card by how much like these it is — it appears in every channel menu; nothing moves until you place it"}
+              onclick={deriveAxis}>derive axis</button>
+            <button data-testid="sel-clear" class="btn btn-ghost btn-xs normal-case" onclick={() => { m.clearSelection(); mintedKey = null; }}>clear</button>
           </div>
           {#if !m.selShareable}
             <div class="rounded-field mb-2 bg-base-200 px-2 py-1 text-[11px] leading-snug opacity-70">selection too large to share — the link carries up to 200 cards</div>
+          {/if}
+
+          <!-- ═══ DERIVE: name the axis before (or after) you mint it. The result appears HERE with one-tap
+               placements — minting alone moves nothing on the map. ═══ -->
+          {#if deriveWhyNot && deriveWhyNot !== "nothing held"}
+            <div data-derive-why class="rounded-field mb-2 bg-base-200 px-2 py-1 text-[11px] leading-snug opacity-70">{deriveWhyNot}</div>
+          {:else}
+            <label class="input input-xs mb-2 w-full gap-1">
+              <span class="opacity-50">≈</span>
+              <input data-testid="derive-label" bind:value={deriveLabel} placeholder={deriveDefault} aria-label="name the derived axis" class="min-w-0 grow" onkeydown={(e) => e.key === "Enter" && deriveAxis()} />
+            </label>
+          {/if}
+          {#if deriveErr}<div class="mb-2 text-[11px] leading-snug text-error">{deriveErr}</div>{/if}
+          {#if mintedDim}
+            <div data-testid="derive-minted" class="rounded-field mb-2 bg-base-200 px-2 py-1.5 text-[11px]">
+              <div class="mb-1 flex items-center gap-1">
+                <input data-testid="derive-rename" value={m.derived.find((d) => d.key === mintedDim.key)?.label ?? ""} oninput={(e) => m.renameDerived(mintedDim.key, e.currentTarget.value)}
+                  aria-label="rename this axis" class="input input-xs min-w-0 flex-1 font-mono" />
+                <button onclick={() => { m.removeDimension(mintedDim.key); mintedKey = null; }} title="remove this axis" aria-label="remove this axis" class="btn btn-ghost btn-xs">✕</button>
+              </div>
+              <div class="flex items-center gap-1">
+                <span class="opacity-60">place on</span>
+                <button data-testid="derive-place-color" class="btn btn-xs normal-case" onclick={() => (m.channels.color = mintedDim.key)}>colour</button>
+                <button data-testid="derive-place-size" class="btn btn-xs normal-case" onclick={() => (m.channels.size = mintedDim.key)}>size</button>
+                <button data-testid="derive-place-x" class="btn btn-xs normal-case" onclick={() => (m.channels.x = mintedDim.key)}>x</button>
+              </div>
+              {#if !m.derivedShareable(mintedDim.key)}
+                <div class="mt-1 leading-snug opacity-70">too many examples to share — the link carries up to 200, so this axis won't come back on reload</div>
+              {/if}
+            </div>
           {/if}
 
           <div class="mt-3 mb-1 font-mono text-[10px] uppercase tracking-wide opacity-60">what these share</div>

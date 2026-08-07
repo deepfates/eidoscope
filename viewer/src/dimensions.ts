@@ -8,7 +8,7 @@ import { col, axisColor, type RGB } from "./encode";
 // its properties uniformly — so the same little toggle works identically wherever a dimension is placed.
 
 export type DimKind = "scalar" | "categorical" | "temporal";
-export type DimSource = "axis" | "meta" | "query";
+export type DimSource = "axis" | "meta" | "query" | "derived";
 export type DimProps = { norm: "honest" | "rank"; invert: boolean };  // user-controllable, per dimension
 
 export type Dimension = {

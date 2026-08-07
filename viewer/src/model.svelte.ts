@@ -60,13 +60,20 @@ export type UrlPatch = {
   scrubKey?: string; scrubLo?: number; scrubHi?: number;
   scrubbed: boolean;    // a window was restored → App must remount the slider (scrubNonce)
   queries: string[];    // query-dimension texts, to be re-embedded best-effort
+  // DERIVED dimensions can't be recomputed from a label — they need their examples. Each arrives as
+  // `<label>~<card ids>` and is re-derived once the corpus is mounted (unresolvable ids drop out).
+  derived: { label: string; ids: string[] }[];
   region?: number; facet?: string; find?: string; card?: string;
   sel?: string[];       // a shared SELECTION, as card ids (mapped to indices once the corpus is mounted)
 };
 
 export function parseUrl(search: string): UrlPatch {
   const p = new URLSearchParams(search);
-  const out: UrlPatch = { scrubbed: false, queries: p.getAll("q") };
+  const out: UrlPatch = {
+    scrubbed: false,
+    queries: p.getAll("q"),
+    derived: p.getAll("d").map((s) => { const t = s.indexOf("~"); return { label: t < 0 ? s : s.slice(0, t), ids: (t < 0 ? "" : s.slice(t + 1)).split(",").filter(Boolean) }; }).filter((d) => d.label && d.ids.length),
+  };
   const L = p.get("layout"); if (L === "mde" || L === "axes" || L === "orbit" || L === "axes3d") out.layout = L;
   const c = p.get("color"); if (c) out.color = c;
   const s = p.get("size"); if (s) out.size = s;
@@ -111,6 +118,9 @@ export class ViewModel {
   // N semantic queries, each a first-class dimension: {key, text, raw cosines}. Once added, a query shows up in
   // every channel menu like any other dimension. Filtering by a query = putting it on the scrubber.
   queries = $state<{ key: string; text: string; raw: number[] }[]>([]);
+  // DERIVED dimensions (eid-8139): the same object a query produces, but the direction came from EXAMPLES.
+  // `ids` are the example cards' ids (not indices) so the dimension can be re-derived from a shared URL.
+  derived = $state<{ key: string; label: string; ids: string[]; raw: number[] }[]>([]);
   query = $state("");                              // the find-box substring (mirrored into a "text" filter)
   scrubLo = $state<number | null>(null);           // window lower bound; null = field min
   scrubHi = $state<number | null>(null);           // window upper bound; null = field max (both null = show all)
@@ -121,6 +131,7 @@ export class ViewModel {
   selection = $state<number[] | null>(null);
   selectMode = $state(false);                      // the lasso owns the pointer while this is on
   private qN = 0;                                  // monotonic id source for stable query keys
+  private dN = 0;                                  // …and for derived-dimension keys
 
   // App owns the slider-remount nonce (a view hack), so a model-side scrub reset tells it to re-read.
   onScrubReset: (() => void) | undefined;
@@ -129,7 +140,12 @@ export class ViewModel {
   dimList = $derived(this.data ? buildDimensions(this.data) : []);
   queryDims = $derived.by((): Dimension[] =>
     this.queries.map((q) => ({ key: q.key, name: "? " + q.text, kind: "scalar", source: "query", raw: q.raw, bipolar: false, low: "unrelated", high: q.text })));
-  allDims = $derived([...this.dimList, ...this.queryDims]);
+  derivedDims = $derived.by((): Dimension[] =>
+    this.derived.map((d) => ({ key: d.key, name: "≈ " + d.label, kind: "scalar", source: "derived", raw: d.raw, bipolar: false, low: "unlike", high: d.label })));
+  // ONE registry. A derived dimension is not special-cased anywhere downstream: every channel menu, the
+  // scrubber, the deck sort, honest⇄rank + invert and the ✕ all read this list.
+  mintedDims = $derived([...this.queryDims, ...this.derivedDims]);
+  allDims = $derived([...this.dimList, ...this.mintedDims]);
 
   colorDim = $derived(this.channels.color === "region" ? undefined : this.allDims.find((d) => d.key === this.channels.color)); // undefined = the region clustering
   xDim = $derived(this.allDims.find((d) => d.key === this.channels.x));
@@ -237,6 +253,9 @@ export class ViewModel {
   // loud rather than silently truncating (a truncated selection would be a LIE about what was shared).
   static SEL_URL_CAP = 200;
   selShareable = $derived(!this.selection || this.selection.length <= ViewModel.SEL_URL_CAP);
+  // …and the same honesty for a derived dimension: past the cap its examples don't ride in the link, so the
+  // dimension won't come back on reload — say it rather than let a shared view quietly lose an axis.
+  derivedShareable = (key: string): boolean => (this.derived.find((d) => d.key === key)?.ids.length ?? 0) <= ViewModel.SEL_URL_CAP;
   // The isolated facet VALUE is derived, never stored: it is simply "is there a categorical filter on the
   // dimension colour currently shows". Switching the colour lens therefore cannot delete a filter (it used
   // to — an effect wrote state and ate "author = Alice" when you coloured by folder); the filter lives on
@@ -305,12 +324,23 @@ export class ViewModel {
     this.queries = [...this.queries, { key, text, raw }];
     return key;
   }
-  // remove a query dimension; every channel pointing at it falls back to its default. ONE loop, not seven ifs.
-  // If it was the WINDOWED dimension, the window's numbers must die with it: cosine bounds silently
-  // re-applied to whatever dimension the scrubber lands on next (dates in epoch-ms) hid the whole corpus.
-  removeQuery(key: string) {
+  // ---- derived dimensions (DERIVE): minted from a selection, registered exactly like a query ----
+  // Minting changes EXACTLY ONE THING: a new dimension exists. It places itself on no channel, and the
+  // selection it came from stays held (deriving doesn't consume it).
+  addDerived(label: string, ids: string[], raw: number[]): string {
+    const key = "d" + this.dN++;
+    this.derived = [...this.derived, { key, label, ids, raw }];
+    return key;
+  }
+  renameDerived(key: string, label: string) { this.derived = this.derived.map((d) => (d.key === key ? { ...d, label } : d)); }
+  // remove a MINTED dimension (query or derived); every channel pointing at it falls back to its default.
+  // ONE loop, not seven ifs. If it was the WINDOWED dimension, the window's numbers must die with it:
+  // cosine bounds silently re-applied to whatever dimension the scrubber lands on next (dates in epoch-ms)
+  // hid the whole corpus.
+  removeDimension(key: string) {
     const wasWindowed = this.channels.scrub === key;
     this.queries = this.queries.filter((q) => q.key !== key);
+    this.derived = this.derived.filter((d) => d.key !== key);
     this.releaseDimension(key);
     if (wasWindowed) this.resetScrub();
   }
@@ -330,6 +360,7 @@ export class ViewModel {
     this.selection = null; this.selectMode = false;
     this.filters = []; this.query = "";
     this.queries = []; this.qN = 0;
+    this.derived = []; this.dN = 0;
     this.dimProps = {};
     this.channels = { ...INITIAL, ...defaultsFor(D) };
     this.scrubLo = null; this.scrubHi = null;
@@ -357,6 +388,9 @@ export class ViewModel {
     if (this.facetPin !== null) p.set("facet", this.facetPin);
     const tf = this.filters.find((f) => f.kind === "text") as Extract<Filter, { kind: "text" }> | undefined; if (tf) p.set("find", tf.q);
     for (const qq of this.queries) p.append("q", qq.text);   // query dims by text (re-embedded on load, best-effort)
+    // derived dims by <label>~<example ids> (re-derived on load). Past the same cap a selection uses, the
+    // examples stop being a link and start being a payload: we serialize NOTHING and the pane says so.
+    for (const dd of this.derived) if (dd.ids.length <= ViewModel.SEL_URL_CAP) p.append("d", dd.label.replace(/~/g, "-") + "~" + dd.ids.join(","));
     if (this.selected !== null && this.data) p.set("card", this.data.ids[this.selected]);
     // a held SELECTION rides as card IDS, not indices (ids survive a re-render of the same corpus; indices
     // don't). Capped — past the cap we serialize NOTHING and the UI says the selection is too large to share.

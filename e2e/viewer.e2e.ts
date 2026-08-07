@@ -313,7 +313,53 @@ try {
   ok(!!selPane && selPane.terms.includes("beta"), `the pane EXPLAINS the set: blob 1's distinctive term surfaces — terms=[${selPane?.terms.join(", ")}]`);
   ok((selPane?.axes ?? 0) === 2, `the pane names the set's most-distinctive axes — got ${selPane?.axes}`);
   ok(JSON.stringify(selPane?.verbs) === JSON.stringify(["sel-filter", "sel-fit", "sel-export", "sel-derive", "sel-clear"]), `the verbs appear on a held set — ${JSON.stringify(selPane?.verbs)}`);
-  ok(selPane?.derivDisabled === true, "the `derive axis` verb is present but disabled (wave 3 wires it)");
+  ok(selPane?.derivDisabled === false, "the `derive axis` verb is LIVE on a held set");
+
+  // 14c-bis. DERIVE: mint an axis from the examples, then place it. Minting alone must move nothing.
+  const beforeColors = await p.evaluate(() => [0, 30, 60].map((i) => (window as any).__eidoColor(i)));
+  await p.locator('[data-testid="derive-label"]').fill("blobby");
+  await p.click('[data-testid="sel-derive"]'); await p.waitForTimeout(300);
+  s = await st();
+  ok(s.derived === 1 && s.dims.includes("d0"), `derive mints a first-class dimension — derived=${s.derived}`);
+  ok(s.color === "region" && s.selection === 30, "…and THE LAW holds: it places itself on nothing, and the selection stays held");
+  // it is in the registry, so every channel menu offers it
+  await menu("color");
+  const inMenu = await p.locator('[data-opt="bar:color:d0"]').count();
+  await closeMenus();
+  ok(inMenu === 1, "the derived dimension appears in the colour menu like any other dimension");
+  // place it on colour from the pane — NOW the map repaints
+  await p.click('[data-testid="derive-place-color"]'); await p.waitForTimeout(350);
+  s = await st();
+  const afterColors = await p.evaluate(() => [0, 30, 60].map((i) => (window as any).__eidoColor(i)));
+  ok(s.color === "d0", `placing it on colour is a separate act — color=${s.color}`);
+  ok(JSON.stringify(afterColors) !== JSON.stringify(beforeColors), "…and the map's actual card colours change");
+  // the circled blob really does score highest on its own axis (the direction means something)
+  const scoreOrder = await p.evaluate(() => {
+    const g = (window as any).__eido();
+    return g.color;
+  });
+  ok(scoreOrder === "d0", "the derived axis is what's painting");
+  const dParam = new URL(p.url()).searchParams.get("d");
+  ok(!!dParam && dParam.startsWith("blobby~") && dParam.split("~")[1].split(",").length === 30, `the derived axis rides in the URL as d=<label>~<ids> — ${dParam?.slice(0, 24)}…`);
+  const deriveUrl = p.url();
+  await p.goto(deriveUrl);
+  await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
+  await p.waitForTimeout(700);
+  s = await st();
+  ok(s.derived === 1 && s.color === "d0", `?d= re-derives the axis on load and the placement survives — derived=${s.derived} color=${s.color}`);
+  await p.goto(`${base}/index.html?d=ghost~nosuch1,nosuch2`);
+  await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
+  await p.waitForTimeout(600);
+  ok((await st()).derived === 0, "a d= whose example ids don't resolve drops cleanly instead of faking an axis");
+
+  // back to a held selection for the rest of the SELECT walk
+  await p.goto(`${base}/index.html`);
+  await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
+  await p.waitForTimeout(500);
+  await p.keyboard.press("s"); await p.waitForTimeout(150);
+  await p.evaluate((path) => (window as any).__eidoLasso(path), Array.from({ length: 32 }, (_, a) => { const t = (a / 32) * Math.PI * 2; return [bx + rad * Math.cos(t), by + rad * Math.sin(t)]; }));
+  await p.waitForTimeout(300);
+  ok((await st()).selection === 30, "the clump is held again for the filter walk");
 
   // 14d. FILTER TO THESE: the selection becomes a Filter, so it flows through the normal mask + chips row
   await p.click('[data-testid="sel-filter"]'); await p.waitForTimeout(350);
