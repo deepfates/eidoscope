@@ -69,7 +69,6 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   let selectMode = false;
   let highlight: number | null = null;
   let citeOn = init.citeOn ?? false, ghostsOn = init.ghostsOn ?? false;
-  let clickTimer: ReturnType<typeof setTimeout> | null = null;  // single-click card-open, cancelled by a double-click (drill)
   let suppressClickUntil = 0;  // wall-clock deadline set by dblclick so a trailing deck onClick can't open a card (timestamp, not a timer — Date.now() isn't throttled like setTimeout in a hidden tab)
   // The map's ink is read from the ACTIVE THEME's own tokens, not from a hardcoded dark/light binary:
   // ground = base-100, ink = base-content, and "dark" is simply L(base-100) < 0.5. Any theme — stock,
@@ -159,9 +158,14 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   // A held SELECTION is the strongest emphasis source — it outranks focus and highlight, because the user
   // just asserted it by hand. Otherwise the existing focus → highlight precedence is untouched.
   const dimSet = () => (selSet ? selSet : focus != null ? fSet : highlight != null ? new Set(members[highlight]) : null);
-  // a point dims (soft emphasis) if excluded by the active focus/highlight preview. (Filtering is a HARD hide
-  // via the DataFilterExtension mask, a separate concern — text search is now a filter, not a dim.)
-  const isDim = (index: number) => { const ds = dimSet(); return ds ? !ds.has(index) : false; };
+  // EMPHASIS is a channel, distinct from ENCODING (eid-54lx). Attending to a card must not cost O(n):
+  // the base cloud NEVER changes when focus/selection/highlight change — it dims as a whole via the layer
+  // `opacity` uniform (one GPU uniform write, zero accessor re-runs), and the attended set is redrawn at
+  // full strength by a tiny overlay layer whose data is just those indices. Click cost scales with the
+  // emphasized set, not the corpus. deck 9 applies layer opacity as pow(opacity, 1/2.2) in the shader, so
+  // 0.008 ≈ the old per-point dim alpha of 28/255 (0.11^2.2).
+  const DIM_OPACITY = 0.008;
+  const emphIdx = (): number[] => { const ds = dimSet(); if (!ds) return []; const out: number[] = []; for (const i of ds) if (i >= 0 && i < n && (!filterMask || filterMask[i])) out.push(i); return out; };
 
   // 3D uses deck.gl's OWN default OrbitController — drag rotates, scroll zooms — the battle-tested interaction
   // for a point cloud. No custom wheel-dolly, no bounds clamp, no dragMode override (those were blind patches
@@ -179,12 +183,18 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   // 2D and 3D differ only in the PROJECTION of its position (orthographic vs perspective) — never the dot. Depth
   // in 3D reads from motion parallax + occlusion as you orbit/dive, not from resizing dots (that was an ad-hoc
   // world-unit regime that made 3D dots ~4× the 2D ones — an isomorphism break). billboard keeps discs facing you.
+  // STABLE data identities. deck diffs `data` by reference: a fresh `{ length: n }` per build would make
+  // every paint() regenerate every attribute for all n points (the O(n) click cost eid-54lx measured),
+  // silently defeating updateTriggers. One object for the layer's lifetime = deck trusts the triggers.
+  const POINTS_DATA = { length: n };
+  const CITE_DATA = (D.cite || []).flatMap((tgts, s) => tgts.map((t) => ({ s, t })));
   const pointsLayer = () => new ScatterplotLayer({
-    id: "points", data: { length: n },
+    id: "points", data: POINTS_DATA,
     getPosition: (_: any, { index }: any) => pos(index) as any,
-    getFillColor: (_: any, { index }: any) => { const c = getColor(index); return (isDim(index) ? [c[0], c[1], c[2], 28] : [c[0], c[1], c[2], 255]) as any; },
+    getFillColor: (_: any, { index }: any) => { const c = getColor(index); return [c[0], c[1], c[2], 255] as any; },
     getRadius: (_: any, { index }: any) => getRadius(index),
     radiusUnits: "pixels", radiusMinPixels: 1.2, billboard: true,
+    opacity: dimSet() ? DIM_OPACITY : 1,  // emphasis dims the WHOLE base cloud via one uniform — never the per-point accessor
     // unified filter: GPU cull of any point the intersection mask marks 0 (filtered-out points also go
     // non-pickable). No mask = pass everything ([1,1] range with a constant 1 keeps all points in).
     extensions: [dataFilter],
@@ -193,6 +203,18 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     pickable: true, autoHighlight: n < 4000, highlightColor: [255, 255, 255, 180],
     transitions: reduce ? undefined : { getPosition: { duration: 700, easing: easeCubicInOut } },
     updateTriggers: { getFillColor: colorVer, getRadius: [sizeVer, posVer], getPosition: posVer, getFilterValue: filterVer },
+  });
+  // the EMPHASIS overlay: only the attended indices, drawn full-strength above the dimmed base cloud.
+  // Data size = |emphasized set| (focus+neighbours, a region, a selection) — independent of corpus size.
+  // Not pickable: the base layer under it still owns picking with the same indices.
+  const emphLayer = () => new ScatterplotLayer({
+    id: "emph", data: emphIdx(),
+    getPosition: (i: number) => pos(i) as any,
+    getFillColor: (i: number) => { const c = getColor(i); return [c[0], c[1], c[2], 255] as any; },
+    getRadius: (i: number) => getRadius(i),
+    radiusUnits: "pixels", radiusMinPixels: 1.2, billboard: true, pickable: false,
+    transitions: reduce ? undefined : { getPosition: { duration: 700, easing: easeCubicInOut } },
+    updateTriggers: { getFillColor: colorVer, getRadius: [sizeVer, posVer], getPosition: posVer },
   });
   const spokesLayer = () => new LineLayer({
     id: "spokes", data: focus == null ? [] : (D.nbr[focus] || []).map((j) => ({ j })),
@@ -241,7 +263,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   // + "ghost" papers cited-but-not-in-corpus, placed near the work that cites them, sized by citation count.
   const citeLayer = () => new LineLayer({
     id: "cite",
-    data: (D.cite || []).flatMap((tgts, s) => tgts.map((t) => ({ s, t }))),
+    data: CITE_DATA,
     getSourcePosition: (d: any) => pos(d.s) as any, getTargetPosition: (d: any) => pos(d.t) as any,
     getColor: [...ink(), 40] as any, getWidth: 0.6,
     updateTriggers: { getSourcePosition: [posVer], getTargetPosition: [posVer], getColor: themeVer },
@@ -261,6 +283,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     ...(citeOn && D.cite ? [citeLayer()] : []),
     ...(focus != null ? [spokesLayer()] : []),
     pointsLayer(),
+    ...(dimSet() ? [emphLayer()] : []),
     // ghosts only have 2D placements (laid out near their citing work in the flat map) — drawing them at
     // xy in a 3D layout put them at wrong depths, floating in space. Honest: hide them outside 2D.
     ...(ghostsOn && D.ghosts && !is3d(layout) ? [ghostLayer()] : []),
@@ -287,8 +310,9 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
       if (Date.now() < suppressClickUntil) return;  // ignore the click deck fires right after a double-click
       if (info?.layer?.id === "ghosts" && info.object?.url) { window.open(info.object.url, "_blank"); return; }  // ghosts open immediately
       const idx = info?.layer?.id === "points" && info.index >= 0 ? info.index : -1;
-      if (clickTimer) clearTimeout(clickTimer);
-      clickTimer = setTimeout(() => { clickTimer = null; init.onClick?.(idx); }, 220);  // wait out a possible double-click (drill)
+      // OPTIMISTIC card-open (eid-54lx): fire immediately — no debounce taxing every click. If a dblclick
+      // follows, its handler undoes the open (onClick(-1)) and drills instead.
+      init.onClick?.(idx);
     },
     onHover: (info: any) => {
       if (!init.onHover) return;
@@ -329,10 +353,9 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   };
   canvas.addEventListener("dblclick", (e) => {
     if (selectMode) return;   // in select mode the pointer draws; it does not drill
-    if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; }  // a double-click drills; cancel the pending card-open
-    suppressClickUntil = Date.now() + 350;  // …and swallow the trailing onClick deck fires right after this
+    suppressClickUntil = Date.now() + 350;  // swallow the trailing onClick deck fires right after a dblclick
     const info = (deck as any).pickObject({ x: (e as MouseEvent).offsetX, y: (e as MouseEvent).offsetY, radius: 8 });
-    if (info && info.layer?.id === "points" && info.index >= 0) drill(info.index);
+    if (info && info.layer?.id === "points" && info.index >= 0) { init.onClick?.(-1); drill(info.index); }  // undo the optimistic card-open, then drill
   });
   return {
     update: (o) => {
@@ -396,14 +419,17 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
       }
       paint();
     },
-    setFocus: (i) => { focus = i; fSet = i == null ? null : new Set<number>([i, ...(D.nbr[i] || [])]); colorVer++; paint(); },
-    setHighlight: (c) => { highlight = c; colorVer++; paint(); },
+    // EMPHASIS setters (eid-54lx): no colorVer bump — the base cloud's colour buffer is encoding, and
+    // attending must never invalidate it. paint() re-diffs the stack, but the points layer's accessors
+    // are untouched (same updateTriggers), so deck re-uploads nothing for the n-point cloud.
+    setFocus: (i) => { focus = i; fSet = i == null ? null : new Set<number>([i, ...(D.nbr[i] || [])]); paint(); },
+    setHighlight: (c) => { highlight = c; paint(); },
     fitToIndices: (idx) => fit(idx),
     debug: () => ({ zoom: (deck.getViewports?.()?.[0] as any)?.zoom ?? viewState?.zoom ?? 0, labels: decluttered().length, regions: members.filter((m) => m.length).length, grain, rot: viewState?.rotationOrbit ?? null, rotX: viewState?.rotationX ?? null, target: viewState?.target ?? null, span3 }),
     project: (world) => { const vp = (deck as any).getViewports?.()[0]; return vp ? vp.project([world[0], world[1], world[2] ?? 0]).slice(0, 2) : [0, 0]; },  // honors z, so 3D layouts project correctly (was hardcoded z=0)
     projectIndex: (i) => { const vp = (deck as any).getViewports?.()[0]; if (!vp || i < 0 || i >= n) return null; const q = pos(i); return vp.project([q[0], q[1], q[2] ?? 0]); },
     pickAt: (x, y) => { const o = (deck as any).pickObject?.({ x, y, radius: 8 }); return o ? { layer: o.layer?.id ?? null, url: o.object?.url ?? null, index: o.index ?? -1 } : null; },
-    setSelection: (idx) => { selSet = idx && idx.length ? new Set(idx) : null; colorVer++; paint(); },
+    setSelection: (idx) => { selSet = idx && idx.length ? new Set(idx) : null; paint(); },
     setSelectMode: (on) => { if (on === selectMode) return; selectMode = on; deck.setProps({ controller: controllerFor(layout) }); },
     // The camera-dependent half of SELECT, answered against the LIVE viewport: project every card with
     // deck's own viewport (OrbitViewport inherits project(), so 3D projects correctly) and crossing-test the
