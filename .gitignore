@@ -34,3 +34,4 @@ story/*.png
 /card-cache.jsonl
 /region-cache.jsonl
 /viewer/dist-pathfinder/
+.claude/worktrees/
