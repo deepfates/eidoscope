@@ -257,8 +257,10 @@
 
   // The current label for each channel button — the toolbar states the view, so nothing is hidden in a menu.
   // NOTE: "3D cloud" is an INDEPENDENT 3D embedding of the same cards, not the 2D map with depth —
-  // measured on pathfinder.eido, only ~2.7 of a card's 8 nearest neighbours in 2D are still among its 8
-  // nearest in 3D. Calling it "3D neighbor map" implied a continuity that does not exist.
+  // measured on pathfinder.eido, only ~2.3 of a card's 8 nearest neighbours in 2D are still among its 8
+  // nearest in 3D. Calling it "3D neighbor map" implied a continuity that does not exist. The pipeline
+  // now measures that agreement per corpus (MapContract.xyzAgree) and the about pane states it
+  // (eid-ovo7: seeding/sharing the fits was measured and doesn't close the gap, so it is stated instead).
   const LAYOUT_LABELS: Record<string, string> = { mde: "neighbor map", axes: "axis scatter", orbit: "3D cloud", axes3d: "3D axis scatter" };
   const colorLabel = $derived(m.channels.color === "region" ? "region" : colorDim?.name ?? "region");
   const sizeLabel = $derived(m.channels.size === "uniform" ? "uniform" : sizeDim?.name ?? "uniform");
@@ -545,6 +547,10 @@
 
           <div class="mt-3 space-y-2 text-[11px] leading-snug">
             <div><span class="font-bold">positions</span> — <span class="opacity-75">{positionsLine}. Distance is relative, not a measured quantity; there are no units.</span></div>
+            <!-- the 3D cloud is an INDEPENDENT UMAP fit, not the map with depth (eid-ovo7) — say so, with
+                 the per-corpus measured neighbor agreement when the file carries it, so the difference
+                 between the two layouts is a number the reader can weigh, not a vibe. -->
+            <div><span class="font-bold">3D cloud</span> — <span class="opacity-75">an independent 3D embedding of the same card vectors, not the neighbor map with depth added — the two layouts arrange the cards differently{#if data.xyzAgree != null}: on this corpus, {data.xyzAgree.toFixed(1)} of a card's 8 nearest neighbors on the map are still among its 8 nearest in the cloud{/if}.</span></div>
             <div><span class="font-bold">axes</span> — <span class="opacity-75">PCA of the full-text embeddings. A card's place on an axis is its exact projection, so an axis position IS a number you can compare.</span></div>
             <div><span class="font-bold">regions</span> — <span class="opacity-75">clusters of the same vectors, named by a model from what each group over-uses. The grain slider walks {nLevels} nested levels, from {data.counts?.[0] ?? data.k} to {data.counts?.[data.counts.length - 1] ?? data.k} regions, ×{GRAIN_RATIO} per notch — a slider pragmatic, since the corpus clumps at every scale and prefers none (measured; no level is more "real"). The top is where splitting would cut regions below {GRAIN_MIN_REGION} cards; the default is the finest level that still fits the {GRAIN_PALETTE_N}-colour palette.</span></div>
           </div>

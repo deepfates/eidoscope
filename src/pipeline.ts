@@ -61,7 +61,7 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
   // the invariant on the tldr corpus: 1 failed card of 6261 → scores.length 6261 vs ids.length 6260.
   const projOfId = new Map(docs.map((d, i) => [d.id, projections[i]]));
   const deckProjections = deck.map((c) => projOfId.get(c.id)!);
-  const { xy, xyz, cluster, k, di, levels, counts, hub, nbr } = await projectAndCluster(embs);
+  const { xy, xyz, xyzAgree, cluster, k, di, levels, counts, hub, nbr } = await projectAndCluster(embs);
 
   // Name EVERY grain level contrastively — the deterministic layer computes what makes each region
   // distinct (over-used terms + extreme axes), the LLM only phrases it. Deduped across levels + cached.
@@ -80,7 +80,7 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
     notes: deck.map((c) => Object.fromEntries(axes.map((a) => [a.key, c.axes[a.key]?.note || ""]))),
     axes: axes.map((a) => ({ key: a.key, name: a.name, low: a.pole_low, high: a.pole_high, variance: a.var })),
     scores, rawScores,
-    xy, xyz, cluster, k, di, hub, nbr, clusters, levels, counts, levelLabels, levelBlurbs,
+    xy, xyz, xyzAgree, cluster, k, di, hub, nbr, clusters, levels, counts, levelLabels, levelBlurbs,
     urls: deck.map((c) => c.url || (c.path ? "file://" + c.path : undefined)),
     // parent-directory facet, carried explicitly (docs with web urls would otherwise lose it — schema.ts)
     folders: deck.map((c) => { const p = (c.path || "").split("/").filter(Boolean); return p.length >= 2 ? p[p.length - 2].replace(/_/g, " ") : undefined; }),
@@ -197,7 +197,7 @@ export async function descendMap(P: MapContract, selIds: string[], opts: { llm?:
   const rawScores = rawProjectionScores(projections, axes);
 
   if (!opts.quiet) console.error(`[2/3] re-projecting + re-clustering the subset…`);
-  const { xy, xyz, cluster, k, di, levels, counts, hub, nbr } = await projectAndCluster(vectors);
+  const { xy, xyz, xyzAgree, cluster, k, di, levels, counts, hub, nbr } = await projectAndCluster(vectors);
 
   if (!opts.quiet) console.error(`[3/3] naming ${counts.length} grain levels (${counts.join("·")}; default ${k})…`);
   const axLite = axes.map((a) => ({ key: a.key, name: a.name, low: a.pole_low, high: a.pole_high }));
@@ -215,7 +215,7 @@ export async function descendMap(P: MapContract, selIds: string[], opts: { llm?:
     ids: selIds.slice(), titles, cores,
     notes: idx.map(() => ({})),   // parent notes are placements on the PARENT's axes — honest is empty, not misfiled
     axes: axes.map((a) => ({ key: a.key, name: a.name, low: a.pole_low, high: a.pole_high, variance: a.var, weak: a.var < 0.02 })),
-    scores, rawScores, xy, xyz, cluster, k, di, levels, counts, levelLabels, levelBlurbs, clusters, hub, nbr,
+    scores, rawScores, xy, xyz, xyzAgree, cluster, k, di, levels, counts, levelLabels, levelBlurbs, clusters, hub, nbr,
     cite, citec: sub(P.citec ?? undefined),
     urls: sub(P.urls), sources: sub(P.sources), siteNames: sub(P.siteNames), authors: sub(P.authors),
     tags: sub(P.tags), dates: sub(P.dates), read: sub(P.read), folders: sub(P.folders),

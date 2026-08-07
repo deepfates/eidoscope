@@ -121,7 +121,7 @@ export function decodeContainer(buf: Uint8Array): MapContract {
 
   return {
     version: meta.version, provenance: meta.provenance, derivedBy: meta.derivedBy, metaFields: meta.metaFields, ids: meta.ids, titles: meta.titles, cores: meta.cores, notes,
-    axes: meta.axes, scores, rawScores, xy: unflat(get("xy"), 2), xyz: unflat(get("xyz"), 3),
+    axes: meta.axes, scores, rawScores, xy: unflat(get("xy"), 2), xyz: unflat(get("xyz"), 3), xyzAgree: meta.xyzAgree,
     cluster: Array.from(get("cluster")), k: meta.k, di: meta.di, levels, counts: meta.counts,
     levelLabels: meta.levelLabels, levelBlurbs: meta.levelBlurbs, clusters: meta.clusters,
     hub: Array.from(get("hub")), nbr, cite, citec: meta.citec, vectors,

@@ -194,7 +194,7 @@ test("mapbin: binary codec round-trips the contract losslessly and is much small
     notes: [{ x: "nx" }, { x: "ny" }, { x: "nz" }],
     axes: [{ key: "x", name: "X", low: "lo", high: "hi" }],
     scores: { x: [10, 55, 90] },
-    xy: [[-0.5, 0.1], [0.2, -0.3], [0.9, 0.4]], xyz: [[-0.5, 0.1, 0], [0.2, -0.3, 0.1], [0.9, 0.4, -0.2]],
+    xy: [[-0.5, 0.1], [0.2, -0.3], [0.9, 0.4]], xyz: [[-0.5, 0.1, 0], [0.2, -0.3, 0.1], [0.9, 0.4, -0.2]], xyzAgree: 2.7,
     cluster: [0, 0, 1], k: 2, di: 1,
     levels: [[0, 0, 0], [0, 0, 1]], counts: [1, 2], levelLabels: [["all"], ["p", "q"]],
     clusters: [{ c: 0, n: 2, label: "p" }, { c: 1, n: 1, label: "q" }],
@@ -214,6 +214,7 @@ test("mapbin: binary codec round-trips the contract losslessly and is much small
   expect(back.sources).toEqual(D.sources);                          // original source links survive round-trip
   expect(back.siteNames).toEqual(D.siteNames);                      // and their labels
   expect(back.provenance).toEqual(D.provenance);                    // provenance (so a file introduces itself) survives
+  expect(back.xyzAgree).toBe(2.7);                                  // the 2D↔3D neighbor-agreement honesty number (eid-ovo7)
   expect(bin.byteLength).toBeLessThan(JSON.stringify(D).length);    // smaller than the JSON form
   expect(back.rawScores).toBeUndefined();                          // absent when the map carries no raw projections
 });
@@ -417,7 +418,21 @@ import { discoverAxes, mulberry32, truncatedPCA } from "../src/axes.ts";
 import { PCA } from "ml-pca";
 import { divisiveLevels, findOptimalK, grainLadder } from "../src/cluster.ts";
 import { GRAIN_MIN_REGION } from "../src/schema.ts";
-import { normPct, knnBrute, knnHNSW, poolEmbed } from "../src/map.ts";
+import { normPct, knnBrute, knnHNSW, poolEmbed, xyzOverlap, layoutKnn } from "../src/map.ts";
+
+// The 2D↔3D honesty number (eid-ovo7): identical layouts must agree fully; unrelated layouts must not.
+test("xyzOverlap: full agreement when the 3D layout IS the 2D layout, near-zero when unrelated", () => {
+  const r = mulberry32(11);
+  const n = 200;
+  const xy = Array.from({ length: n }, () => [r() * 2 - 1, r() * 2 - 1]);
+  const same = xy.map((p) => [p[0], p[1], 0]);
+  expect(xyzOverlap(xy, same, 8)).toBe(8);                     // same arrangement → all 8 neighbors survive
+  const scrambled = xy.map(() => [r() * 2 - 1, r() * 2 - 1, r() * 2 - 1]);
+  expect(xyzOverlap(xy, scrambled, 8)).toBeLessThan(2);        // unrelated arrangement → chance-level agreement
+  // layoutKnn is euclidean in layout space: nearest neighbor of a point on a line is its adjacent point
+  const line = Array.from({ length: 10 }, (_, i) => [i, 0]);
+  expect(layoutKnn(line, 1).map((r2) => r2[0])).toEqual([1, 0, 1, 2, 3, 4, 5, 6, 7, 8]);
+});
 import { EmbeddingCache } from "../src/embed.ts";
 
 // A matrix with exactly `k` planted components: every row is a random mix of k orthogonal basis
