@@ -386,8 +386,7 @@
           <div class="mb-1 font-mono text-[10px] uppercase tracking-widest opacity-60">about this map</div>
           <div class="text-sm font-bold leading-snug">{prov?.title ?? "eidoscope"}</div>
           <div class="mt-0.5 font-mono text-[10px] leading-snug opacity-60">
-            {data.ids.length} documents · {axStats.n} discovered axes · {curCount} regions{#if prov?.generated} · {provDate(prov.generated)}{/if}
-          </div>
+            {data.ids.length} documents · {axStats.n} discovered axes · {curCount} regions{#if prov?.generated} · {provDate(prov.generated)}{/if}</div>
           {#if prov?.source}<div class="mt-0.5 break-all font-mono text-[10px] opacity-60">from {prov.source}</div>{/if}
 
           <div class="mt-3 space-y-2 text-[11px] leading-snug">
@@ -399,9 +398,7 @@
           <div class="mt-3 border-t border-base-300 pt-2">
             <div class="mb-1 font-mono text-[10px] uppercase tracking-widest opacity-60">strength</div>
             <div class="text-[11px] leading-snug opacity-75">
-              The {axStats.n} axes together explain <b class="opacity-100">{Math.round(axStats.variance * 100)}%</b> of the variation between documents
-              {#if axStats.weak}, and <b class="opacity-100">{axStats.weak}</b> of them {axStats.weak > 1 ? "are" : "is"} thin (under 2% each) — read positions on those loosely{/if}.
-              The rest is structure no straight axis captured.
+              The {axStats.n} axes together explain <b class="opacity-100">{Math.round(axStats.variance * 100)}%</b> of the variation between documents{#if axStats.weak}, and <b class="opacity-100">{axStats.weak}</b> of them {axStats.weak > 1 ? "are" : "is"} thin (under 2% each) — read positions on those loosely{/if}. The rest is structure no straight axis captured.
             </div>
           </div>
 

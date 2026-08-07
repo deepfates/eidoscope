@@ -169,7 +169,7 @@ deepfates' call. Each row is *current → proposed → why*.
 
 | Current | Proposed | Why |
 |---|---|---|
-| toolbar button **`time`** | **`window`** | The single worst mislabel in the app. This control windows *any* scalar or temporal dimension — on `map.eido` it offers **19 dimensions, 18 of which are not time** (16 PCA axes, influence, length). A user windowing "length" is clicking a button labelled "time". The popover's own inner label is already `window`. |
+| toolbar button **`time`** | **`window`** | The single worst mislabel in the app. This control windows *any* scalar or temporal dimension — on `map.eido` it offers **19 dimensions, 18 of which are not time** (16 PCA axes, influence, length). A user windowing "length" is clicking a button labelled "time". The popover's own inner label is already `window`. Caught in the wild: on `tldr.eido` the toolbar reads **`time 0 – 100`**, because the scrubber parked on a unitless PCA axis (see `scratchpad/shell-tldr.png`). |
 | **`+ query`** (button) · **`semantic axis`** (popover title) · **`⌕`** (submit) · **`⌕ <text>`** (the dimension's name in menus) | **`+ axis`** everywhere, dimension shown as **`? <text>`** | Four names for one concept, and `⌕` is *also* the find box's glyph — the same symbol means "substring search" in one place and "embed a semantic query" in another. |
 | **`find`** (toolbar, filters the map) vs **`filter…`** (deck, filters only the list) | **`find`** for both, with the deck's scoped as **`find in list`** | Same verb, same input type, same substring semantics, two names — and the difference that actually matters (map-wide vs list-only) is the one thing neither name states. |
 | **`source`** = the *author* dimension · **`source site`** = siteNames · **`from <source>`** = provenance path · **`original →`** = the document's own URL | author dimension → **`author`**; provenance → **`corpus source`** | "Source" currently means four different things on screen. The pipeline's own manifest calls this field `author / source`; the viewer shows `source`. Note: the manifest's labels are deliberately *not* applied yet — `NAME_OVERRIDE` in `dimensions.ts` pins the viewer's existing names so consuming the manifest could not silently rename a control. Settling this row is what un-pins them. |
@@ -264,6 +264,11 @@ Selected results:
   ✓ tldr fallback yields the legacy scalar set (influence, length + the 16 discovered axes)
   ✓ no console/page errors during the run
 ```
+
+Screenshots: `scratchpad/shell-about.png` (the About popover on `map.eido`),
+`scratchpad/shell-tldr-facet.png` (isolate on `read`, the manifest-only categorical — chip, camera fit
+and `1012 / 1446 cards` all visible), `scratchpad/shell-tldr.png` (`tldr.eido`, region isolate,
+`244 / 6261 cards`).
 
 **A note on `tldr.eido` and folders.** It was expected to exercise folder facets. It does not, and
 cannot: `folder` is derived from a `file://` URL, and every `tldr` document carries an `https://`
