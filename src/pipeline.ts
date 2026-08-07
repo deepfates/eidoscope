@@ -14,6 +14,17 @@ import { encodeMap } from "./mapbin.ts";
 import { type MapContract } from "./schema.ts";
 import { loadFixture, type Doc } from "./corpus.ts";
 
+// Default-grain regions with an on-map centroid (median position) for the label + legend — the ONE
+// implementation, shared by run / relabelMap / descendMap (it was hand-copied in two of them).
+function regionCentroids(regions: { c: number; n: number; label: string }[], cluster: number[], k: number, xy: number[][]) {
+  const dGroups: number[][] = Array.from({ length: k }, () => []);
+  cluster.forEach((c, i) => dGroups[c].push(i));
+  return regions.map((r, c) => {
+    const g = dGroups[c] || []; const xs = g.map((i) => xy[i][0]).sort((a, b) => a - b), ys = g.map((i) => xy[i][1]).sort((a, b) => a - b);
+    return { c: r.c, n: r.n, label: r.label, cx: xs[xs.length >> 1] || 0, cy: ys[ys.length >> 1] || 0 };
+  });
+}
+
 // The full instrument, end to end: docs (+embeddings) -> discover axes -> card -> embed cards ->
 // project + cluster -> name regions -> deck.jsonl + map-data.json + <slug>.eido + <slug>.html (self-contained viewer).
 export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?: boolean; name?: string; source?: string; embed?: "card" | "raw"; out?: string; debugJson?: boolean } = {}) {
@@ -63,12 +74,7 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
   const { labels: levelLabels, blurbs: levelBlurbs, regionsByLevel } = await nameLevels(
     levels, counts, deck.map((c) => c.title), deck.map((c) => c.core), scores, axLite, { llm, concurrency: conc, cache: cacheRoot() });
   // default-grain regions carry an on-map centroid (median position) for the label + legend
-  const dGroups: number[][] = Array.from({ length: k }, () => []);
-  cluster.forEach((c, i) => dGroups[c].push(i));
-  const clusters = regionsByLevel[di].map((r, c) => {
-    const g = dGroups[c] || []; const xs = g.map((i) => xy[i][0]).sort((a, b) => a - b), ys = g.map((i) => xy[i][1]).sort((a, b) => a - b);
-    return { c: r.c, n: r.n, label: r.label, cx: xs[xs.length >> 1] || 0, cy: ys[ys.length >> 1] || 0 };
-  });
+  const clusters = regionCentroids(regionsByLevel[di], cluster, k, xy);
 
   console.error(`[5/5] assembling map + rendering…`);
   const D: MapContract = {
@@ -155,12 +161,75 @@ export async function relabelMap(D: MapContract, opts: { llm?: any; sig?: any; c
   if (!opts.quiet) console.error(`relabeling ${counts.length} grain levels (${counts.join("·")}; default ${counts[di]})…`);
   const { labels: levelLabels, blurbs: levelBlurbs, regionsByLevel } = await nameLevels(levels, counts, D.titles, D.cores, D.scores, axLite, { llm, sig: opts.sig, concurrency: conc, cache: opts.cacheDir });
   const cluster = levels[di], k = counts[di];
-  const dGroups: number[][] = Array.from({ length: k }, () => []); cluster.forEach((c, i) => dGroups[c].push(i));
-  const clusters = regionsByLevel[di].map((r, c) => {
-    const g = dGroups[c] || []; const xs = g.map((i) => D.xy[i][0]).sort((a, b) => a - b), ys = g.map((i) => D.xy[i][1]).sort((a, b) => a - b);
-    return { c: r.c, n: r.n, label: r.label, cx: xs[xs.length >> 1] || 0, cy: ys[ys.length >> 1] || 0 };
-  });
+  const clusters = regionCentroids(regionsByLevel[di], cluster, k, D.xy);
   return { ...D, cluster, k, di, clusters, levels, counts, levelLabels, levelBlurbs };
+}
+
+// DESCEND v0 (eid-nuwd) — re-map a held Selection as its OWN L-space, from a parent .eido alone.
+// The .eido does NOT carry full text; the honest source it DOES carry is the per-card embedding
+// vectors the parent's geometry was built on (card vectors by default, raw full-text under --embed
+// raw — `derivedBy.geometryBasis` says which). So descend re-runs discovery (truncated PCA +
+// parallel analysis) over the SUBSET of those carried vectors → NEW local axes, re-projects and
+// re-clusters the subset, and re-names its regions. The cards themselves (titles/cores + metadata)
+// are REUSED verbatim — no re-carding, no embedder, no full text needed. Two honest losses, stated
+// here and in the child's provenance: (1) axes are discovered from the carried vectors, not from
+// fresh full-text embeddings; (2) the per-axis placement notes were written against the PARENT's
+// axes, so the child's cards carry no notes (positions on the new axes are exact projections).
+export async function descendMap(P: MapContract, selIds: string[], opts: { llm?: any; sig?: any; name?: string; parentFile?: string; concurrency?: number; cacheDir?: string; quiet?: boolean } = {}): Promise<MapContract> {
+  if (!P.vectors?.length) throw new Error("descend: this .eido carries no card vectors (a lite emit) — nothing honest to re-discover from");
+  const at = new Map(P.ids.map((id, i) => [id, i]));
+  const missing = selIds.filter((id) => !at.has(id));
+  if (missing.length) throw new Error(`descend: ${missing.length} selection id(s) not in the parent map (e.g. ${missing[0]})`);
+  const idx = selIds.map((id) => at.get(id)!);
+  if (idx.length < 2) throw new Error("descend: need at least 2 selected cards to discover local axes");
+  const sub = <T>(a: T[] | undefined): T[] | undefined => (a ? idx.map((i) => a[i]) : undefined);
+  const vectors = idx.map((i) => P.vectors![i]);
+  const titles = idx.map((i) => P.titles[i]), cores = idx.map((i) => P.cores[i]);
+  const llm = opts.llm ?? provider();
+  const conc = opts.concurrency ?? Number(process.env.EIDOSCOPE_CONCURRENCY || 24);
+
+  if (!opts.quiet) console.error(`[1/3] descending: re-discovering axes over ${idx.length} of ${P.ids.length} cards…`);
+  const { axes, realDims, projections } = await discoverAxes(vectors, titles.map((t) => t.slice(0, 64)), { llm });
+  if (!opts.quiet) console.error(`  ${axes.length} local axes surfaced (${realDims} dims above the noise floor)`);
+  const scores = projectionScores(projections, axes);
+  const rawScores = rawProjectionScores(projections, axes);
+
+  if (!opts.quiet) console.error(`[2/3] re-projecting + re-clustering the subset…`);
+  const { xy, xyz, cluster, k, di, levels, counts, hub, nbr } = await projectAndCluster(vectors);
+
+  if (!opts.quiet) console.error(`[3/3] naming ${counts.length} grain levels (${counts.join("·")}; default ${k})…`);
+  const axLite = axes.map((a) => ({ key: a.key, name: a.name, low: a.pole_low, high: a.pole_high }));
+  const { levelLabels, levelBlurbs, clusters } = await (async () => {
+    const r = await nameLevels(levels, counts, titles, cores, scores, axLite, { llm, sig: opts.sig, concurrency: conc, cache: opts.cacheDir });
+    return { levelLabels: r.labels, levelBlurbs: r.blurbs, clusters: regionCentroids(r.regionsByLevel[di], cluster, k, xy) };
+  })();
+
+  // intra-corpus citation edges survive descent when both ends are in the subset (indices remapped)
+  const remap = new Map(idx.map((pi, ci) => [pi, ci]));
+  const cite = P.cite ? idx.map((pi) => P.cite![pi].map((j) => remap.get(j)).filter((j): j is number => j != null)) : undefined;
+
+  const parentTitle = P.provenance?.title ?? "parent map";
+  const D: MapContract = {
+    ids: selIds.slice(), titles, cores,
+    notes: idx.map(() => ({})),   // parent notes are placements on the PARENT's axes — honest is empty, not misfiled
+    axes: axes.map((a) => ({ key: a.key, name: a.name, low: a.pole_low, high: a.pole_high, variance: a.var, weak: a.var < 0.02 })),
+    scores, rawScores, xy, xyz, cluster, k, di, levels, counts, levelLabels, levelBlurbs, clusters, hub, nbr,
+    cite, citec: sub(P.citec ?? undefined),
+    urls: sub(P.urls), sources: sub(P.sources), siteNames: sub(P.siteNames), authors: sub(P.authors),
+    tags: sub(P.tags), dates: sub(P.dates), read: sub(P.read), folders: sub(P.folders),
+    vectors,
+  };
+  // provenance — the child introduces itself AS a descent: parent map, selection size, date (about pane)
+  D.provenance = {
+    title: opts.name || `${parentTitle} ▸ descent (${idx.length})`,
+    source: `descend of "${parentTitle}" — ${idx.length} of ${P.ids.length} cards${opts.parentFile ? ` · ${opts.parentFile}` : ""}`,
+    generated: Date.now(), count: idx.length,
+  };
+  D.derivedBy = { ...P.derivedBy, generated: Date.now() };   // same basis/embedder as the parent — descend adds no new model
+  D.metaFields = buildMetaFields(D);
+  const nNodes = D.ids.length;
+  for (const key of Object.keys(D.scores)) if (D.scores[key].length !== nNodes) throw new Error(`descend invariant violated: scores.${key}.length=${D.scores[key].length} != ids.length=${nNodes}`);
+  return D;
 }
 
 if (import.meta.main) {

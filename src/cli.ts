@@ -5,12 +5,15 @@
 // eidoscope <folder> --frontier      also pull the Semantic Scholar citation frontier (arxiv corpora)
 // eidoscope <folder> --embed raw     build the map from raw full-text instead of cards (A/B the bottleneck)
 // eidoscope --relabel <dir>          re-name regions of an existing map (no re-carding) + re-render in place
+// eidoscope descend <parent.eido> <selection.json> [--out <dir>] [--name <title>]
+//                                    re-map a viewer-exported Selection as its OWN child map (new local axes
+//                                    from the parent's carried card vectors; cards reused, no re-carding)
 // eidoscope <folder> --debug-json    also dump the whole contract as map-data.json (debugging; big corpora OOM)
-import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { loadFolder, loadFixture, splitOversized, type Doc } from "./corpus.ts";
 import { embedDocs } from "./map.ts";
-import { run, relabelMap } from "./pipeline.ts";
+import { run, relabelMap, descendMap } from "./pipeline.ts";
 import { encodeMap, decodeMap } from "./mapbin.ts";
 import { singlefileHTML } from "./singlefile.ts";
 import { CFG } from "./config.ts";
@@ -19,6 +22,32 @@ const args = process.argv.slice(2);
 const val = (f: string) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : undefined; };
 const dir = args.find((a) => !a.startsWith("--"));
 const limit = val("--limit") ? Number(val("--limit")) : undefined;
+
+// descend: a viewer-exported Selection becomes its OWN map (eid-nuwd). The parent .eido already carries
+// every card + the vectors its geometry was built on, so the child needs no corpus, no embedder, and no
+// re-carding — only discovery/projection/clustering re-run over the subset, plus a few naming calls.
+if (args[0] === "descend") {
+  const VALFLAGS = new Set(["--out", "--name", "--limit", "--min-chars", "--embed"]);
+  const pos: string[] = [];
+  for (let i = 1; i < args.length; i++) { const a = args[i]; if (a.startsWith("--")) { if (VALFLAGS.has(a)) i++; continue; } pos.push(a); }
+  const [parentPath, selPath] = pos;
+  if (!parentPath || !selPath) { console.error("usage: eidoscope descend <parent.eido> <selection.json> [--out <dir>] [--name <title>]"); process.exit(1); }
+  const P = decodeMap(readFileSync(parentPath));
+  const selRaw = JSON.parse(readFileSync(selPath, "utf8"));
+  const selIds: string[] = Array.isArray(selRaw) ? selRaw : selRaw.ids;   // the viewer's export ({ids,titles,urls}) or a bare id list
+  if (!Array.isArray(selIds) || !selIds.length) { console.error(`descend: ${selPath} has no ids (expected the viewer's selection export)`); process.exit(1); }
+  const D = await descendMap(P, selIds, { name: val("--name"), parentFile: basename(parentPath) });
+  const slug = (D.provenance!.title!).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "descent";
+  const outDir = val("--out") || join("out", slug);
+  mkdirSync(outDir, { recursive: true });
+  const enc = encodeMap(D);
+  writeFileSync(join(outDir, slug + ".eido"), enc);
+  const html = singlefileHTML(enc);
+  if (html) writeFileSync(join(outDir, slug + ".html"), html);
+  console.error(`\n✅ descended ${D.ids.length}/${P.ids.length} cards · ${D.axes.length} local axes · ${D.k} regions  →  ${outDir}/`);
+  console.error(`   → map   ${join(outDir, slug + ".eido")}${html ? `\n   → open  ${join(outDir, slug + ".html")}` : ""}`);
+  process.exit(0);
+}
 
 // --relabel: geometry is cached; only the names drift. Re-name from stored cards, re-render, done.
 if (args.includes("--relabel")) {
