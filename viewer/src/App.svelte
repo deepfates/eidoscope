@@ -666,8 +666,8 @@
     <!-- ═══ DETAILS PANE — docked right (a bottom sheet on phones). Never floats over the map centre. ═══ -->
     {#if sidebarOpen && data}
       <div use:focusOnOpen tabindex="-1" role="dialog" aria-label={selected !== null ? "card detail" : "region detail"}
-        class="thin-sb fixed inset-x-0 bottom-0 z-40 max-h-[70vh] overflow-auto border-t border-base-300 bg-base-100 p-4 text-sm shadow-2xl sm:static sm:z-auto sm:max-h-none sm:w-88 sm:flex-none sm:border-l sm:border-t-0 sm:shadow-none">
-        <button class="btn btn-ghost btn-sm btn-square absolute right-2 top-2" onclick={() => (selected !== null ? focusCard(null) : togglePin(pinned!))} aria-label="close">✕</button>
+        class="thin-sb fixed inset-x-0 bottom-0 z-40 max-h-[70vh] overflow-auto border-t border-base-300 bg-base-100 p-4 text-sm shadow-2xl sm:relative sm:inset-auto sm:z-auto sm:max-h-none sm:w-88 sm:flex-none sm:border-l sm:border-t-0 sm:shadow-none">
+        <button class="btn btn-ghost btn-sm btn-square sticky top-0 float-right ml-2" onclick={() => (selected !== null ? focusCard(null) : togglePin(pinned!))} aria-label="close">✕</button>
         {#if selected !== null}
           <div class="mb-1 pr-8 font-bold">{data.titles[selected]}</div>
           <div data-meta class="mb-2 font-mono text-[10px] opacity-60">{[data.authors?.[selected], dateOf(selected), regionOf(selected)].filter(Boolean).join(" · ")}</div>
