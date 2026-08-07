@@ -57,13 +57,15 @@ export function truncatedPCA(X: number[][], k: number, opts: { seed?: number; ov
 
   const kk = Math.min(k, n, d);
   const ell = Math.min(kk + (opts.oversample ?? OVERSAMPLE), n, d);
-  const At = A.transpose();
+  // AᵀM by hand: ml-matrix would need a materialized transpose (a second n x d matrix — 300MB at 100k
+  // docs), and its lazy MatrixTransposeView measured ~4x slower through mmul. Same flops, no copy.
+  const atMul = (M: Matrix) => { const c = M.columns, out = new Matrix(d, c); for (let i = 0; i < n; i++) for (let j = 0; j < d; j++) { const a = A.get(i, j); if (!a) continue; for (let t = 0; t < c; t++) out.set(j, t, out.get(j, t) + a * M.get(i, t)); } return out; };
   let Y = A.mmul(Matrix.from1DArray(d, ell, Array.from({ length: d * ell }, gauss)));
   Y = new QR(Y).orthogonalMatrix;
   for (let it = 0; it < (opts.powerIters ?? POWER_ITERS); it++) {
-    Y = new QR(A.mmul(At.mmul(Y))).orthogonalMatrix;
+    Y = new QR(A.mmul(atMul(Y))).orthogonalMatrix;
   }
-  const B = Y.transpose().mmul(A);                     // ell x d, small
+  const B = atMul(Y).transpose();                                // ell x d, small
   const svd = new SVD(B, { autoTranspose: true });
   const V = svd.rightSingularVectors;                   // d x ell
   const sv = svd.diagonal.slice(0, kk);
