@@ -10,6 +10,7 @@
 // The generator is pure (tokens in → colours out) so it is unit-testable; readThemeTokens() is the only part
 // that touches the DOM. Callers memoize per data-theme name via themePalette().
 import { converter, clampChroma, wcagContrast, differenceEuclidean, filterDeficiencyDeuter, parse } from "culori";
+import { GRAIN_PALETTE_N } from "../../src/schema";
 
 export type RGB = [number, number, number];
 export type ThemeTokens = Record<string, string>;
@@ -24,7 +25,7 @@ const rgb255 = (c: any): RGB => {
   return [Math.round(Math.max(0, Math.min(1, r.r)) * 255), Math.round(Math.max(0, Math.min(1, r.g)) * 255), Math.round(Math.max(0, Math.min(1, r.b)) * 255)];
 };
 
-const N = 24;
+const N = GRAIN_PALETTE_N;   // shared with the pipeline: the default grain is the finest level that fits this palette
 const CONTRAST_FLOOR = 3.0;   // WCAG non-text contrast against the canvas
 const HUE_KEYS = ["primary", "secondary", "accent", "info", "success", "warning", "error", "neutral"];
 // The token names read off <html data-theme> — DaisyUI 5 publishes them as CSS custom properties.

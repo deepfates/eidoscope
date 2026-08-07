@@ -11,6 +11,7 @@
   import { embedQuery, cosineAll, resetEmbedder } from "./semantic";
   import { deriveDirection } from "./derive";
   import { resolveIdSet } from "./idset";
+  import { GRAIN_MIN_REGION, GRAIN_RATIO, GRAIN_PALETTE_N } from "../../src/schema";
 
   // THE MODEL — channels, filters, scrubber, the dimension registry, URL (de)serialization. App keeps the DOM,
   // the deck handle, the camera and the browser APIs; it reads the model and hands it user intent.
@@ -545,7 +546,7 @@
           <div class="mt-3 space-y-2 text-[11px] leading-snug">
             <div><span class="font-bold">positions</span> — <span class="opacity-75">{positionsLine}. Distance is relative, not a measured quantity; there are no units.</span></div>
             <div><span class="font-bold">axes</span> — <span class="opacity-75">PCA of the full-text embeddings. A card's place on an axis is its exact projection, so an axis position IS a number you can compare.</span></div>
-            <div><span class="font-bold">regions</span> — <span class="opacity-75">clusters of the same vectors, named by a model from what each group over-uses. The grain slider picks how finely the corpus is cut.</span></div>
+            <div><span class="font-bold">regions</span> — <span class="opacity-75">clusters of the same vectors, named by a model from what each group over-uses. The grain slider walks {nLevels} nested levels, from {data.counts?.[0] ?? data.k} to {data.counts?.[data.counts.length - 1] ?? data.k} regions, ×{GRAIN_RATIO} per notch — a slider pragmatic, since the corpus clumps at every scale and prefers none (measured; no level is more "real"). The top is where splitting would cut regions below {GRAIN_MIN_REGION} cards; the default is the finest level that still fits the {GRAIN_PALETTE_N}-colour palette.</span></div>
           </div>
 
           <div class="mt-3 border-t border-base-300 pt-2">

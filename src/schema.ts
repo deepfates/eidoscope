@@ -14,6 +14,20 @@
 // signal of capability, not a decode gate (readers gate on the has* flags, never on this number).
 export const CONTRACT_VERSION = 2;
 
+// ── THE GRAIN LADDER CONTRACT (eid-iw04) ─────────────────────────────────────────────────────────────
+// Measured on the real corpora (markdown-export n=1446, pathfinder n=13830): the card-embedding space
+// clumps at EVERY scale and selects no grain of its own — the gap statistic keeps supporting splits down
+// to near-singletons (469 of 1446), seed-perturbation stability (Jaccard ≥ 0.75, Hennig 2007) stops at 3,
+// and simplified silhouette is flat (~0.08–0.10) across all levels. So a data-derived ladder does not
+// exist; the ladder is an explicit, GENERATED UI pragmatic — these three constants are its whole
+// definition, shared structurally by pipeline and viewer (this file is the one shared seam):
+export const GRAIN_MIN_REGION = 25; // a named region should summarize a GROUP, not list a handful; splitting
+                                    // stops at this floor, so the ladder's top (kmax) EMERGES per corpus
+export const GRAIN_RATIO = 1.5;     // slider granularity: one notch ≈ ×1.5 regions, from k=2 (the smallest
+                                    // nontrivial partition) up to kmax — constant perceptual step, no list
+export const GRAIN_PALETTE_N = 24;  // categorical colours the theme-derived palette holds apart (viewer/src/
+                                    // palette.ts); the DEFAULT grain is the finest level that still fits
+
 // One discovered axis: a deterministic PCA direction, LLM-labeled. `weak` = below the variance floor.
 // Row-major flat card-embedding matrix: row i = data.subarray(i * dim, (i + 1) * dim).
 export type CardVectors = { data: Float32Array; dim: number };
@@ -87,6 +101,7 @@ export type MapContract = {
   xyz: number[][];
 
   // the nested grain ladder (clumps-all-the-way-down). `cluster` is the default level = levels[di].
+  // The ladder is GENERATED, not hand-tuned — see the GRAIN_* constants below and src/cluster.ts.
   cluster: number[];                       // per node: region index at the default grain
   k: number;                               // region count at the default grain
   di?: number;                             // default level index into levels/counts

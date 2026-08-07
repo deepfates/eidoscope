@@ -415,7 +415,8 @@ test("cardCorpus: cards cache by content + axis GEOMETRY; relabeling axes hits (
 
 import { discoverAxes, mulberry32, truncatedPCA } from "../src/axes.ts";
 import { PCA } from "ml-pca";
-import { divisiveLevels, findOptimalK } from "../src/cluster.ts";
+import { divisiveLevels, findOptimalK, grainLadder } from "../src/cluster.ts";
+import { GRAIN_MIN_REGION } from "../src/schema.ts";
 import { normPct, knnBrute, knnHNSW, poolEmbed } from "../src/map.ts";
 import { EmbeddingCache } from "../src/embed.ts";
 
@@ -528,12 +529,13 @@ function blobs(perBlob: number, k: number, d = 12, seed = 3): number[][] {
   return out;
 }
 
-test("divisiveLevels: nested ladder — counts ascend, assignments PARTITION the set, minSize respected", () => {
+test("divisiveLevels: nested ladder — counts ascend, assignments PARTITION the set, ladder is the GENERATED one", () => {
   const X = blobs(60, 3);                                   // 180 points
-  const { levels, counts } = divisiveLevels(X, { minSize: 10, ladder: [2, 4, 6, 9], maxClusters: 9 });
+  const { levels, counts } = divisiveLevels(X);
   expect(counts.length).toBe(levels.length);
   expect(counts).toEqual([...counts].sort((a, b) => a - b));  // ladder ascends
-  expect(counts[counts.length - 1]).toBeLessThanOrEqual(9);   // maxClusters honored
+  // the ladder is exactly the generated geometric one for this corpus's emergent kmax — no hand list
+  expect(counts).toEqual(grainLadder(counts[counts.length - 1]));
   for (let l = 0; l < levels.length; l++) {
     const a = levels[l];
     expect(a.length).toBe(X.length);                          // every point assigned exactly once
@@ -546,20 +548,33 @@ test("divisiveLevels: nested ladder — counts ascend, assignments PARTITION the
       if (levels[l][i] === levels[l][j]) expect(levels[l - 1][i]).toBe(levels[l - 1][j]);
 });
 
-test("divisiveLevels: minSize stops the split — a group at or below it is never divided further", () => {
-  const X = blobs(20, 3);                                    // 60 points
-  const { levels, counts } = divisiveLevels(X, { minSize: 25, maxClusters: 192 });
+test("divisiveLevels: the GRAIN_MIN_REGION floor stops the split — kmax emerges, no shattering into singletons", () => {
+  const X = blobs(20, 3);                                    // 60 points, floor 25
+  const { levels, counts } = divisiveLevels(X);
+  const kmax = counts[counts.length - 1];
   const last = levels[levels.length - 1];
-  const sizes = Array.from({ length: counts[counts.length - 1] }, (_, c) => last.filter((x) => x === c).length);
+  const sizes = Array.from({ length: kmax }, (_, c) => last.filter((x) => x === c).length);
   expect(sizes.reduce((a, b) => a + b, 0)).toBe(X.length);
-  // with minSize 25 out of 60 points, splitting must stop early — not shatter into singletons
-  expect(counts[counts.length - 1]).toBeLessThanOrEqual(3);
+  // a group at or below the floor is never divided, so no more than ceil(n / (floor/2))-ish groups —
+  // and concretely: every split's PARENT had > GRAIN_MIN_REGION members, so kmax < n / (GRAIN_MIN_REGION / 2)
+  expect(kmax).toBeLessThan(X.length / (GRAIN_MIN_REGION / 2));
+  expect(Math.min(...sizes)).toBeGreaterThan(0);
+});
+
+test("grainLadder: geometric ×GRAIN_RATIO stops from 2 to kmax inclusive, strictly ascending", () => {
+  for (const kmax of [1, 2, 3, 21, 101, 1045]) {
+    const ks = grainLadder(kmax);
+    expect(ks[ks.length - 1]).toBe(Math.max(1, kmax));
+    for (let i = 1; i < ks.length; i++) expect(ks[i]).toBeGreaterThan(ks[i - 1]);
+    if (kmax >= 2) expect(ks[0]).toBe(2);
+  }
+  expect(grainLadder(101)).toEqual([2, 3, 5, 8, 12, 18, 27, 41, 62, 93, 101]);
 });
 
 test("divisiveLevels + findOptimalK: deterministic — the same matrix yields the same ladder every run", () => {
   const X = blobs(40, 3, 12, 9);
-  const a = divisiveLevels(X, { minSize: 10, ladder: [2, 4, 6], maxClusters: 6 });
-  const b = divisiveLevels(X, { minSize: 10, ladder: [2, 4, 6], maxClusters: 6 });
+  const a = divisiveLevels(X);
+  const b = divisiveLevels(X);
   expect(b.counts).toEqual(a.counts);
   expect(b.levels).toEqual(a.levels);
   expect(findOptimalK(X)).toBe(findOptimalK(X));

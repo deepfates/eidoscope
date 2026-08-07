@@ -7,7 +7,7 @@ import { CFG, cachePath } from "./config.ts";
 import { getTextEmbeddings, EmbeddingCache } from "./embed.ts";
 import { divisiveLevels } from "./cluster.ts";
 import { HierarchicalNSW } from "hnswlib-node";
-import type { MapContract, MetaField } from "./schema.ts";
+import { GRAIN_PALETTE_N, type MapContract, type MetaField } from "./schema.ts";
 
 // Declare each corpus field as a TYPED encodable dimension (the channel-grammar substrate). Presence-based:
 // only emit what this corpus actually carries. The viewer resolves `source` to values; we just declare types.
@@ -175,8 +175,10 @@ export async function projectAndCluster(embs: number[][]) {
   const xyz = normPct(fitUMAP(3), 3);
   // GRAIN LEVELS: a nested tree of clusterings, not one arbitrary k. The viewer slides between them.
   const { levels, counts } = n < 6 ? { levels: [X.map(() => 0)], counts: [1] } : divisiveLevels(X);
-  // default view = the level nearest ~18 groups (human-scannable); the slider exposes the rest.
-  let di = 0, best = Infinity; counts.forEach((c, i) => { const d = Math.abs(c - 18); if (d < best) { best = d; di = i; } });
+  // default view = the FINEST level whose regions still fit the viewer's categorical palette without
+  // recycling colours (GRAIN_PALETTE_N, shared via schema.ts) — a UI-anchored default, since the data
+  // itself prefers no scale (see cluster.ts). The slider exposes the rest.
+  let di = 0; counts.forEach((c, i) => { if (c <= GRAIN_PALETTE_N) di = i; });
   const cluster = levels[di] ?? X.map(() => 0), k = counts[di] ?? 1; // di = default level index; the slider exposes the rest
   // kNN + hubness (cosine on unit vectors = dot). hnsw at scale (O(n log n)); brute for small n.
   const K = 8, hub = new Array(n).fill(0);
