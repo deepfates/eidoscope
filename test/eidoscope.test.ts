@@ -614,3 +614,14 @@ test("cachePath/cacheRoot: every cache lands under one root, and legacy CWD file
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("loadFolder: exact content duplicates collapse to one doc (exporter twins)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "eido-dupe-"));
+  const body = "A document long enough to clear the default minimum character floor. ".repeat(5);
+  writeFileSync(join(dir, "one.md"), `# Same Title\n\n${body}`);
+  writeFileSync(join(dir, "two.md"), `# Same Title\n\n${body}`);           // exact twin, different file
+  writeFileSync(join(dir, "three.md"), `# Same Title\n\n${body} But this one differs.`);  // same title, different body — kept
+  const docs = loadFolder(dir);
+  expect(docs.length).toBe(2);
+  expect(docs.filter((d) => d.title === "Same Title").length).toBe(2);
+});
