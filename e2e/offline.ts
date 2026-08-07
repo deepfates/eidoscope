@@ -5,14 +5,17 @@ import { chromium } from "playwright";
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { decodeMap } from "../src/mapbin.ts";
+import { decodeMap, encodeMap } from "../src/mapbin.ts";
+import { synthMap } from "./synth.ts";
 
 const dist = join(import.meta.dir, "..", "viewer", "dist");
-if (!existsSync(join(dist, "index.html")) || !existsSync(join(dist, "map.eido"))) { console.error("run `cd viewer && bun run build` first"); process.exit(2); }
+if (!existsSync(join(dist, "index.html"))) { console.error("run `cd viewer && bun run build` first"); process.exit(2); }
 
-// build the self-contained file (inline map.eido as base64 on window.__EIDO_DATA__)
+// HERMETIC: synthesize the map rather than depending on a gitignored fixture that only exists after a
+// real (LLM-key-requiring) pipeline run. The check is about the single-file transport, not about any
+// particular corpus — and this is what lets CI enforce the gate CLAUDE.md promises.
 const html = readFileSync(join(dist, "index.html"), "utf8");
-const eido = readFileSync(join(dist, "map.eido"));
+const eido = existsSync(join(dist, "map.eido")) ? readFileSync(join(dist, "map.eido")) : Buffer.from(encodeMap(synthMap()));
 const b64 = eido.toString("base64");
 const standalone = html.replace("</head>", `<script>window.__EIDO_DATA__=${JSON.stringify(b64)}</script></head>`);
 const out = join(tmpdir(), "eidoscope-standalone-test.html");

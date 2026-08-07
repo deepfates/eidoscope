@@ -4,12 +4,19 @@ on:
   push:
   pull_request:
 
+# The gate CLAUDE.md promises — types, viewer types, svelte-check, unit tests, the real-browser
+# integration suite, and the offline single-file check. It used to run only tsc + bun test, so three
+# of the six were enforced by convention alone and a viewer regression could go green here.
+# Both e2e suites synthesize their own corpus (e2e/synth.ts), so no key and no fixture is needed.
 jobs:
-  test:
+  qa:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       - run: bun install
-      - run: bunx tsc --noEmit
-      - run: bun test
+      - run: cd viewer && bun install
+      - run: cd viewer && bun run build
+      - name: install the browser the e2e drives
+        run: bunx playwright install --with-deps chromium
+      - run: bun run qa
