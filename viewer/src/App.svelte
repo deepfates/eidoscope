@@ -138,10 +138,6 @@
   let lastColorForFacet = color;
   $effect(() => { const c = color; if (c !== lastColorForFacet) { lastColorForFacet = c; const cur = untrack(() => colorDim?.key); untrack(() => { const next = filters.filter((f) => f.kind !== "cat" || f.key === cur); if (next.length !== filters.length) { filters = next; facetPin = null; } }); } });
 
-  const pct = (a: any) => (a?.variance != null ? Math.round(a.variance * 100) : null);
-  // axis label with its STRENGTH up front (variance %, ~ for weak) — the % stays visible even when the
-  // long name truncates in a narrow dropdown, so you can tell a strong dimension from a thin one (eid-4vm2).
-  const axl = (a: any) => (pct(a) != null ? (a.weak ? "~" : "") + pct(a) + "% " : a.weak ? "~ " : "") + a.name;
   const rgb = (c: [number, number, number]) => `rgb(${c[0]},${c[1]},${c[2]})`;
   const trunc = (s: string, m = 44) => (s && s.length > m ? s.slice(0, m - 1) + "…" : s);
   const regionOf = (i: number) => curClusters[assignment[i]]?.label ?? "";
@@ -244,8 +240,9 @@
     data = D;
     status = "";
     if (opts?.intro) showIntro = true;                    // a freshly-opened file introduces itself
+    const dims0 = buildDimensions(D);   // build the registry ONCE for this mount's accessors
     handle = createMap(canvas, D, {
-      getColor: colorGet(buildDimensions(D), color, D.levels?.[grain] ?? D.cluster), getRadius: sizeGet(buildDimensions(D), size), getX: posGet(buildDimensions(D), xKey), getY: posGet(buildDimensions(D), yKey), getZ: posGet(buildDimensions(D), zKey), posSig, layout, xKey, yKey, zKey, showLabels: labelsOn, grain, theme,
+      getColor: colorGet(dims0, color, D.levels?.[grain] ?? D.cluster), getRadius: sizeGet(dims0, size), getX: posGet(dims0, xKey), getY: posGet(dims0, yKey), getZ: posGet(dims0, zKey), posSig, layout, showLabels: labelsOn, grain, theme,
       onClick: (i) => focusCard(i < 0 ? null : i),
       onHover: (h, x, y) => (hovered = h == null ? null : { ...h, x, y }),
       onGrainChange: (g) => { grain = g; pinned = null; },
@@ -336,7 +333,7 @@
   $effect(() => {
     const l = layout, c = color, s = size, xk = xKey, yk = yKey, zk = zKey, sl = labelsOn, g = grain, a = assignment, co = citeOn, go = ghostsOn, th = theme, h = handle, d = data, ad = allDims, dp = dimProps, ps = posSig;
     void dp; // dimProps in deps so a norm/invert change re-pushes the accessors
-    if (h && d) h.update({ getColor: colorGet(ad, c, a), getRadius: sizeGet(ad, s), getX: posGet(ad, xk), getY: posGet(ad, yk), getZ: posGet(ad, zk), posSig: ps, layout: l, xKey: xk, yKey: yk, zKey: zk, showLabels: sl, grain: g, citeOn: co, ghostsOn: go, theme: th });
+    if (h && d) h.update({ getColor: colorGet(ad, c, a), getRadius: sizeGet(ad, s), getX: posGet(ad, xk), getY: posGet(ad, yk), getZ: posGet(ad, zk), posSig: ps, layout: l, showLabels: sl, grain: g, citeOn: co, ghostsOn: go, theme: th });
   });
   // text search = a filter (hard hide), synced from the find box below via onFind — no separate deck path.
   function onFind(v: string) { query = v; const q = v.trim(); const others = filters.filter((f) => f.kind !== "text"); filters = q ? [...others, { kind: "text", key: "text", label: "“" + q + "”", q }] : others; }
@@ -577,9 +574,6 @@
         </div>
       {/if}
     </div>
-
-    {#if selected === null && !deckOpen}
-    {/if}
   {/if}
 
   <!-- hover tooltip: a corpus card, or a frontier ghost paper (distinct content, not a mislabeled card) -->

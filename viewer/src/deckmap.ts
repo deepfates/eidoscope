@@ -26,7 +26,7 @@ export type MapHandle = {
   project: (world: number[]) => number[];  // world [x,y,z?] → screen px, so tests can click exact nodes/ghosts
   pickAt: (x: number, y: number) => { layer: string | null; url: string | null; index: number } | null;  // what deck picks at a screen px
 };
-type Opts = { getColor: (i: number) => RGB; getRadius: (i: number) => number; layout: Layout; xKey: string; yKey: string; zKey?: string; getX?: (i: number) => number; getY?: (i: number) => number; getZ?: (i: number) => number; posVer?: number; posSig?: string; showLabels: boolean; grain: number; citeOn?: boolean; ghostsOn?: boolean; theme?: "dark" | "light" };
+type Opts = { getColor: (i: number) => RGB; getRadius: (i: number) => number; layout: Layout; getX: (i: number) => number; getY: (i: number) => number; getZ: (i: number) => number; posSig?: string; showLabels: boolean; grain: number; citeOn?: boolean; ghostsOn?: boolean; theme?: "dark" | "light" };
 
 const hull2d = (pts: number[][]): number[][] => {
   if (pts.length < 3) return pts;
@@ -41,10 +41,9 @@ export type HoverPayload = { kind: "point"; i: number } | { kind: "ghost"; g: an
 export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts & { onClick?: (i: number) => void; onHover?: (h: HoverPayload | null, x: number, y: number) => void; onGrainChange?: (g: number) => void }): MapHandle {
   const n = D.ids.length;
   const reduce = typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;  // a11y: no motion
-  let { getColor, getRadius, layout, xKey, yKey, showLabels, grain } = init;
-  let zKey = init.zKey ?? "";
+  let { getColor, getRadius, layout, showLabels, grain } = init;
   // resolved position accessors from the App (dimension → -1..1 coord, with the dimension's norm/invert applied);
-  // deckmap is a renderer — it no longer resolves axis values itself. Fallback to the raw-score ax() if absent.
+  // deckmap is a renderer — it does not resolve axis values itself.
   let getX = init.getX, getY = init.getY, getZ = init.getZ;
   let posSig = init.posSig ?? "";
   let colorVer = 0, sizeVer = 0, posVer = 0, filterVer = 0;
@@ -102,10 +101,9 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     : l === "axes" ? { target: [0, 0, 0], zoom: Math.log2(vp * 0.4), minZoom: fitZoom - 3, maxZoom: fitZoom + 9 }
     : { target: [(bb.minX + bb.maxX) / 2, (bb.minY + bb.maxY) / 2, 0], zoom: fitZoom, minZoom: fitZoom - 2, maxZoom: fitZoom + 9 };
 
-  const ax = (k: string, index: number) => ((D.scores[k]?.[index] ?? 50) - 50) / 50;  // 0..100 score → -1..1 axis coord
   const pos = (index: number): number[] => {
-    if (layout === "axes") return [getX ? getX(index) : ax(xKey, index), getY ? getY(index) : ax(yKey, index)];
-    if (layout === "axes3d") return [getX ? getX(index) : ax(xKey, index), getY ? getY(index) : ax(yKey, index), getZ ? getZ(index) : ax(zKey, index)];  // three honest axes on x/y/z
+    if (layout === "axes") return [getX(index), getY(index)];
+    if (layout === "axes3d") return [getX(index), getY(index), getZ(index)];  // three honest axes on x/y/z
     if (layout === "orbit") return [D.xyz[index][0], D.xyz[index][1], D.xyz[index][2]];
     return [D.xy[index][0], D.xy[index][1]];
   };
@@ -314,9 +312,6 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
       if (o.getColor) { getColor = o.getColor; colorVer++; }
       if (o.getRadius) { getRadius = o.getRadius; sizeVer++; }
       if (o.getX) getX = o.getX; if (o.getY) getY = o.getY; if (o.getZ) getZ = o.getZ;
-      if (o.xKey && o.xKey !== xKey) xKey = o.xKey;
-      if (o.yKey && o.yKey !== yKey) yKey = o.yKey;
-      if (o.zKey && o.zKey !== zKey) zKey = o.zKey;
       // posSig folds in the axis KEYS and their norm/invert props, so it bumps on a key change OR a prop-only
       // change (same key, new normalization) — the latter is what key-only comparison missed (points wouldn't move).
       if (o.posSig !== undefined && o.posSig !== posSig) { posSig = o.posSig; posVer++; }
