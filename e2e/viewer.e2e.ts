@@ -379,7 +379,7 @@ try {
   ok(s.filters.length === 2 && s.visible > 0 && s.visible < 30, `a set filter INTERSECTS with the others — filters=${JSON.stringify(s.filters)} visible=${s.visible}`);
 
   // 14e. clear, then re-select and clear via the pane's own verb
-  await btn(/^reset$/).click(); await p.waitForTimeout(300);
+  await btn(/^reset view$/).click(); await p.waitForTimeout(300);
   s = await st();
   ok(s.filters.length === 0 && s.visible === 90 && s.selectMode === false, `reset clears the set filter AND leaves select mode — ${JSON.stringify({ f: s.filters.length, v: s.visible, sm: s.selectMode })}`);
   const circle = (cx0: number, cy0: number, r: number) => Array.from({ length: 32 }, (_, a) => { const t = (a / 32) * Math.PI * 2; return [cx0 + r * Math.cos(t), cy0 + r * Math.sin(t)]; });
@@ -462,7 +462,9 @@ try {
   await mp.waitForTimeout(300);
   await mp.click('[data-menu="sheet:open"]'); await mp.waitForTimeout(300);
   await mp.click('[data-testid="sheet:select"]'); await mp.waitForTimeout(200);
-  await mp.locator('button[aria-label="close controls"]').click(); await mp.waitForTimeout(300);
+  // click the backdrop's TOP corner — the bottom sheet grew (naming pass added rows) and now covers the
+  // element's center, which playwright refuses as an intercepted click
+  await mp.locator('button[aria-label="close controls"]').click({ position: { x: 10, y: 10 } }); await mp.waitForTimeout(300);
   ok((await mst()).selectMode === true, "mobile: select mode is reachable from the controls sheet");
   const mcdp = await mp.context().newCDPSession(mp);
   const mtouch = (type: string, pts: { x: number; y: number; id: number }[]) => mcdp.send("Input.dispatchTouchEvent", { type: type as any, touchPoints: pts as any });
