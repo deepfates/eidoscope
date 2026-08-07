@@ -2,87 +2,62 @@
   import { onMount, untrack } from "svelte";
   import RangeSlider from "svelte-range-slider-pips";
   import { loadMap, mapUrl, decodeEido } from "./loader";
-  import { createMap, type MapHandle, type Layout } from "./deckmap";
+  import { createMap, type MapHandle } from "./deckmap";
   import { col, axisColor } from "./encode";
-  import { buildDimensions, sizeAccessor, colorAccessor, scores01, defaultProps, type Dimension, type DimProps } from "./dimensions";
+  import { buildDimensions, scores01, type Dimension } from "./dimensions";
+  import { ViewModel, parseUrl, type CameraOp } from "./model.svelte";
   import { embedQuery, cosineAll, resetEmbedder } from "./semantic";
   import type { MapContract } from "../../src/schema";
+
+  // THE MODEL — channels, filters, scrubber, the dimension registry, URL (de)serialization. App keeps the DOM,
+  // the deck handle, the camera and the browser APIs; it reads the model and hands it user intent.
+  const m = new ViewModel();
 
   let canvas: HTMLCanvasElement;
   let status = $state("loading your map…");
   let loadFailed = $state(false);
-  let data = $state<MapContract | null>(null);
-  let selected = $state<number | null>(null);
   let hovered = $state<{ kind: "point"; i: number; x: number; y: number } | { kind: "ghost"; g: any; x: number; y: number } | null>(null);
-  let color = $state("region");
-  let size = $state("hub");
-  let layout = $state<Layout>("mde");
-  let xKey = $state("");
-  let yKey = $state("");
-  let zKey = $state("");
   let handle = $state<MapHandle | null>(null);
   let showLabels = $state(true);
-  let grain = $state(0);
-  let pinned = $state<number | null>(null);
-  let facetPin = $state<string | null>(null);   // isolated facet value (e.g. a folder) — study one lens at a time
   let deckOpen = $state(false);
-  let deckSort = $state("hub");
   let deckQ = $state("");
   let deckUnread = $state(false);
-  let query = $state("");
-  let semQuery = $state("");                 // the query-box text (distinct from `query`, the substring find)
+  let semQuery = $state("");                 // the query-box text (distinct from m.query, the substring find)
   let querying = $state(false);
   let queryErr = $state("");
   let queryStatus = $state("");   // live line while the first query downloads the model / embeds
   let queryPct = $state<number | null>(null);   // download % when known (drives the thin progress bar)
-  // N semantic queries, each a first-class dimension: {key, text, raw cosines}. "+ query" appends one; it then
-  // shows up in every channel menu like any other dimension. Filtering by a query = putting it on the scrubber.
-  let queries = $state<{ key: string; text: string; raw: number[] }[]>([]);
-  let qN = 0;                                 // monotonic id source for stable query keys
   let showIntro = $state(false);
   let citeOn = $state(false);
   let ghostsOn = $state(false);
   let theme = $state<"dark" | "light">("dark");
   let panelOpen = $state(true);   // control panel + legend collapse on small screens so the map is the hero
   let legendOpen = $state(true);
-  // THE DIMENSION REGISTRY (grammar unification): one list of dimensions all channels draw from. Migrating
-  // channels onto it one at a time — `size` first. dimProps holds per-dimension user overrides (norm/invert).
-  let dimProps = $state<Record<string, DimProps>>({});
-  // UNIFIED FILTER: one declarative list (facet membership · region cluster · text search). The scrubber range
-  // is folded into the same intersection mask below. Declarative (not predicates) so it serializes and diffs.
-  type Filter =
-    | { kind: "cat"; key: string; label: string; value: string }   // categorical dimension = value
-    | { kind: "region"; key: "region"; label: string; cluster: number } // cluster at the current grain
-    | { kind: "text"; key: "text"; label: string; q: string };      // title/body substring
-  let filters = $state<Filter[]>([]);
-  const dimList = $derived(data ? buildDimensions(data) : []);
-  const propsOf = (d: Dimension): DimProps => dimProps[d.key] ?? defaultProps(d);
-  const sizeGet = (dims: Dimension[], key: string) => { const d = dims.find((x) => x.key === key); return sizeAccessor(d, d ? propsOf(d) : { norm: "honest", invert: false }); };
-  // the active semantic query, as a query-kind dimension in the one registry (raw = its cosines). N queries later.
-  const queryDims = $derived.by((): Dimension[] => queries.map((q) => ({ key: q.key, name: "⌕ " + q.text, kind: "scalar", source: "query", raw: q.raw, bipolar: false, low: "unrelated", high: q.text })));
-  const allDims = $derived([...dimList, ...queryDims]);
-  const colorDim = $derived(color === "region" ? undefined : allDims.find((d) => d.key === color)); // undefined = the region clustering
-  const colorGet = (dims: Dimension[], key: string, assign: number[]) => { const d = dims.find((x) => x.key === key); return colorAccessor(d, d ? propsOf(d) : { norm: "honest", invert: false }, assign); };
-  // position accessor: a chosen scalar dimension → per-card coord in -1..1 (its norm/invert applied). Axis-scatter only.
-  const posGet = (dims: Dimension[], key: string) => { const d = dims.find((x) => x.key === key); if (!d || d.kind === "categorical") return () => 0; const s = scores01(d, propsOf(d)); return (i: number) => ((s[i] ?? 50) - 50) / 50; };
-  const xDim = $derived(allDims.find((d) => d.key === xKey));
-  const yDim = $derived(allDims.find((d) => d.key === yKey));
-  const zDim = $derived(allDims.find((d) => d.key === zKey));
-  const sizeDim = $derived(size === "uniform" ? undefined : allDims.find((d) => d.key === size));
-  // Per-dimension norm/invert lives in dimProps (keyed by dim.key) so the props travel WITH the dimension —
-  // toggling honest⇄rank on a dim changes it identically wherever it's placed (colour/size/x/y/z). One writer:
-  function setProp(d: Dimension, patch: Partial<DimProps>) { dimProps = { ...dimProps, [d.key]: { ...propsOf(d), ...patch } }; }
-  // The two poles of a scalar dim as [score-0 label, score-100 label]. scores01 applies invert, so when a dim is
-  // inverted the labels swap too — keeping the legend/axis honest (the pole where a card sits matches its label).
-  const poles = (d: Dimension): [string, string] => { const lo = d.low ?? "low " + d.name, hi = d.high ?? d.name; return propsOf(d).invert ? [hi, lo] : [lo, hi]; };
-  // Position accessors are fresh closures each update but deckmap only recomputes positions on a KEY change —
-  // so a prop-only change (same xKey, new norm) wouldn't move the points. This signature makes the change
-  // observable: deckmap bumps posVer whenever posSig differs (a plain $derived — NOT a self-incrementing $effect,
-  // which hung the app before). Includes each axis dim's props so honest⇄rank/invert on an axis re-lays-out.
-  const posSig = $derived.by(() => {
-    const sig = (k: string) => { const d = allDims.find((x) => x.key === k); return d ? [k, propsOf(d).norm, propsOf(d).invert] : [k]; };
-    return JSON.stringify([sig(xKey), sig(yKey), sig(zKey)]);
-  });
+
+  // read-only views onto the model, so the markup below reads as plainly as it did when the state was inline
+  const data = $derived(m.data);
+  const selected = $derived(m.selected);
+  const pinned = $derived(m.pinned);
+  const facetPin = $derived(m.facetPin);
+  const allDims = $derived(m.allDims);
+  const queryDims = $derived(m.queryDims);
+  const colorDim = $derived(m.colorDim), xDim = $derived(m.xDim), yDim = $derived(m.yDim), zDim = $derived(m.zDim), sizeDim = $derived(m.sizeDim);
+  const assignment = $derived(m.assignment);
+  const curCount = $derived(m.curCount);
+  const curClusters = $derived(m.curClusters);
+  const nLevels = $derived(m.nLevels);
+  const chips = $derived(m.chips);
+  const filterMask = $derived(m.filterMask);
+  const scrubFields = $derived(m.scrubFields), scrubField = $derived(m.scrubField), scrubRange = $derived(m.scrubRange);
+  const propsOf = m.propsOf, poles = m.poles;
+  const setProp = (d: Dimension, patch: Parameters<typeof m.setProp>[1]) => m.setProp(d, patch);
+
+  // Pin/isolate is a state mutation (model) plus a camera move (App owns the handle) — the model returns the
+  // camera intent rather than reaching for a deck handle it has no business knowing about.
+  function applyCamera(op: CameraOp) { if (op?.kind === "fit") handle?.fitToIndices(op.indices); else if (op?.kind === "reset") handle?.resetView(); }
+  const togglePin = (c: number) => applyCamera(m.togglePin(c));
+  const toggleFacetPin = (v: string) => applyCamera(m.toggleFacetPin(v));
+
   function setTheme(t: "dark" | "light", persist = true) { theme = t; document.documentElement.dataset.theme = t; if (persist) try { localStorage.setItem("eido-theme", t); } catch {} }
   function toggleTheme() { setTheme(theme === "dark" ? "light" : "dark"); }
   const hasCite = $derived(!!data?.cite?.some((e) => e.length));
@@ -102,44 +77,18 @@
     const q = deckQ.trim().toLowerCase();
     if (q) list = list.filter((i) => data!.titles[i].toLowerCase().includes(q) || data!.cores[i].toLowerCase().includes(q));
     if (deckUnread && hasRead) list = list.filter((i) => data!.read![i] !== true);
-    const sd = allDims.find((x) => x.key === deckSort);   // sort by any scalar dimension (influence, length, axis, query…)
+    const sd = allDims.find((x) => x.key === m.channels.sort);   // sort by any scalar dimension (influence, length, axis, query…)
     const sv = sd && sd.kind !== "categorical" ? scores01(sd, propsOf(sd)) : null;
     if (sv) list.sort((a, b) => (sv[b] ?? 0) - (sv[a] ?? 0));
     return list.slice(0, 2000);  // show the whole corpus (was 300 — which hid most cards + masked "unread only")
   });
-  const labelsOn = $derived(showLabels && color === "region");  // 3D now has proper billboarded region labels (isomorphic with 2D)
-  const nLevels = $derived(data?.counts?.length ?? 1);
-  const assignment = $derived(data?.levels?.[grain] ?? data?.cluster ?? []);
-  const curCount = $derived(data?.counts?.[grain] ?? data?.k ?? 0);
-  const curClusters = $derived.by(() => {
-    if (!data) return [] as { c: number; label: string; n: number }[];
-    const a = assignment, k = curCount, labels = data.levelLabels?.[grain];
-    const cnt = new Array(k).fill(0); for (const c of a) if (c >= 0 && c < k) cnt[c]++;
-    return Array.from({ length: k }, (_, c) => ({ c, label: labels?.[c] ?? data!.clusters[c]?.label ?? "region " + c, n: cnt[c] }));
-  });
-  const membersOf = (c: number) => { const out: number[] = []; assignment.forEach((v, i) => { if (v === c) out.push(i); }); return out; };
-  // Region isolate = a hard filter on the cluster at the current grain (keeps `pinned` for legend styling/hover).
-  function togglePin(c: number) {
-    const i = filters.findIndex((f) => f.kind === "region" && f.cluster === c);
-    if (i >= 0) { filters = filters.filter((_, j) => j !== i); pinned = null; handle?.resetView(); }
-    else { filters = [...filters.filter((f) => f.kind !== "region"), { kind: "region", key: "region", label: curClusters.find((x) => x.c === c)?.label ?? "region " + c, cluster: c }]; pinned = c; handle?.fitToIndices(membersOf(c)); }
-  }
-  const facetMembers = (v: string) => { const out: number[] = []; const d = colorDim; if (!d?.cat || !data) return out; for (let i = 0; i < data.ids.length; i++) if (d.cat(i) === v) out.push(i); return out; };
-  // Facet isolate = a hard filter on the colour dimension's value (keeps `facetPin` for legend styling).
-  function toggleFacetPin(v: string) {
-    const key = colorDim?.key; if (!key) return;
-    const i = filters.findIndex((f) => f.kind === "cat" && f.key === key && f.value === v);
-    if (i >= 0) { filters = filters.filter((_, j) => j !== i); facetPin = null; handle?.resetView(); }
-    else { filters = [...filters.filter((f) => !(f.kind === "cat" && f.key === key)), { kind: "cat", key, label: v, value: v }]; facetPin = v; handle?.fitToIndices(facetMembers(v)); }
-  }
-  function removeFilter(f: Filter) { filters = filters.filter((x) => x !== f); if (f.kind === "region") pinned = null; if (f.kind === "cat") facetPin = null; if (f.kind === "text") query = ""; }
-  function clearFilters() { filters = []; pinned = null; facetPin = null; query = ""; resetScrub(); }
+  const labelsOn = $derived(showLabels && m.channels.color === "region");  // 3D now has proper billboarded region labels (isomorphic with 2D)
   // switching the colour lens drops stale facet filters (a folder value means nothing under a different lens)
-  let lastColorForFacet = color;
-  $effect(() => { const c = color; if (c !== lastColorForFacet) { lastColorForFacet = c; const cur = untrack(() => colorDim?.key); untrack(() => { const next = filters.filter((f) => f.kind !== "cat" || f.key === cur); if (next.length !== filters.length) { filters = next; facetPin = null; } }); } });
+  let lastColorForFacet = m.channels.color;
+  $effect(() => { const c = m.channels.color; if (c !== lastColorForFacet) { lastColorForFacet = c; const cur = untrack(() => m.colorDim?.key); untrack(() => m.dropStaleFacets(cur)); } });
 
   const rgb = (c: [number, number, number]) => `rgb(${c[0]},${c[1]},${c[2]})`;
-  const trunc = (s: string, m = 44) => (s && s.length > m ? s.slice(0, m - 1) + "…" : s);
+  const trunc = (s: string, m2 = 44) => (s && s.length > m2 ? s.slice(0, m2 - 1) + "…" : s);
   const regionOf = (i: number) => curClusters[assignment[i]]?.label ?? "";
   const readerLabel = (u?: string) => (u && /readwise\.io/.test(u) ? "Readwise" : "open");
   const sourceLabel = (i: number) => data?.siteNames?.[i] || "original";
@@ -151,62 +100,29 @@
     data ? data.axes.map((a) => ({ n: a.name, s: Math.round(data!.scores[a.key]?.[i] ?? 50) }))
       .sort((x, y) => Math.abs(y.s - 50) - Math.abs(x.s - 50)).slice(0, 3) : [];
 
-  function focusCard(i: number | null) { selected = i; handle?.setFocus(i); }
-  function reset() { focusCard(null); clearFilters(); handle?.setHighlight(null); grain = data?.di ?? 0; handle?.resetView(); }
+  function focusCard(i: number | null) { m.selected = i; handle?.setFocus(i); }
+  function reset() { focusCard(null); m.clearFilters(); handle?.setHighlight(null); m.grain = data?.di ?? 0; handle?.resetView(); }
 
   // deep-linkable view state (eid-yxqu): the URL always mirrors the current view, so any view — or a
   // specific card — is a shareable link and a reload restores it. replaceState (not push) so it doesn't
   // fight the overlay history (fktf); the ?map= param is preserved.
   let urlReady = false;
-  function serializeUrl(): string {
-    const p = new URLSearchParams();
-    const m = new URLSearchParams(location.search).get("map"); if (m) p.set("map", m);
-    if (layout !== "mde") p.set("layout", layout);
-    if (color !== "region") p.set("color", color);
-    if (size !== "hub") p.set("size", size);
-    if (data && grain !== (data.di ?? 0)) p.set("grain", String(grain));
-    if (layout === "axes" || layout === "axes3d") { if (xKey) p.set("x", xKey); if (yKey) p.set("y", yKey); if (layout === "axes3d" && zKey) p.set("z", zKey); }
-    // per-dimension props the user changed (norm/invert): key.<h|r><0|1>, comma-joined
-    const dp = Object.entries(dimProps); if (dp.length) p.set("props", dp.map(([k, v]) => k + "." + (v.norm === "rank" ? "r" : "h") + (v.invert ? "1" : "0")).join(","));
-    // scrubber window (the range filter) — only when actually windowed
-    if (scrubLo !== null || scrubHi !== null) { if (scrubKey) p.set("sk", scrubKey); if (scrubLo !== null) p.set("slo", String(scrubLo)); if (scrubHi !== null) p.set("shi", String(scrubHi)); }
-    // active filters: region (cluster) · facet (categorical value) · find (text). Each is at-most-one by construction.
-    if (pinned !== null) p.set("region", String(pinned));
-    if (facetPin !== null) p.set("facet", facetPin);
-    const tf = filters.find((f) => f.kind === "text") as Extract<Filter, { kind: "text" }> | undefined; if (tf) p.set("find", tf.q);
-    for (const qq of queries) p.append("q", qq.text);   // query dims by text (re-embedded on load, best-effort)
-    if (selected !== null && data) p.set("card", data.ids[selected]);
-    const q = p.toString();
-    return location.pathname + (q ? "?" + q : "");
-  }
+  // Restore: the model decodes + applies the eager half; App owns the DOM-ish half (slider remount, async
+  // query embedding, and the grain-dependent region/facet/find/card, applied once the graph has settled).
   function applyUrlState() {
-    const p = new URLSearchParams(location.search);
-    const L = p.get("layout"); if (L === "mde" || L === "axes" || L === "orbit" || L === "axes3d") layout = L;
-    const c = p.get("color"); if (c) { color = c; lastColorForFacet = c; }  // keep the facet-clear effect from firing on this restore
-    const s = p.get("size"); if (s) size = s;
-    const x = p.get("x"); if (x) xKey = x;
-    const y = p.get("y"); if (y) yKey = y;
-    const z = p.get("z"); if (z) zKey = z;
-    const g = p.get("grain"); if (g && !Number.isNaN(+g)) grain = Math.max(0, Math.min((data?.counts?.length ?? 1) - 1, Math.round(+g)));
-    // per-dimension props (norm/invert)
-    const props = p.get("props"); if (props) { const next: Record<string, DimProps> = {}; for (const e of props.split(",")) { const dot = e.lastIndexOf("."); const k = e.slice(0, dot), code = e.slice(dot + 1); if (k && code.length >= 2 && (code[0] === "r" || code[0] === "h")) next[k] = { norm: code[0] === "r" ? "rank" : "honest", invert: code[1] === "1" }; } dimProps = next; }
-    // scrubber window
-    const sk = p.get("sk"); if (sk) scrubKey = sk;
-    const slo = p.get("slo"), shi = p.get("shi");
-    if (slo !== null && !Number.isNaN(+slo)) scrubLo = +slo;
-    if (shi !== null && !Number.isNaN(+shi)) scrubHi = +shi;
-    if (slo !== null || shi !== null) scrubNonce++;   // remount the slider so its thumbs show the restored window
-    // re-embed query dimensions from their text (best-effort, background; won't block the restore or hang the app)
-    for (const t of p.getAll("q")) embedAndAdd(t);
-    // region + card + facet + find depend on grain-derived state, so apply once the reactive graph has settled
+    const p = parseUrl(location.search);
+    m.applyPatch(p);
+    if (p.color) lastColorForFacet = p.color;   // keep the facet-clear effect from firing on this restore
+    if (p.scrubbed) scrubNonce++;               // remount the slider so its thumbs show the restored window
+    for (const t of p.queries) embedAndAdd(t);  // best-effort, background; won't block the restore or hang the app
     queueMicrotask(() => {
-      const r = p.get("region"); if (r && !Number.isNaN(+r) && +r >= 0 && +r < curCount) togglePin(+r);
-      const fp = p.get("facet"); if (fp && colorDim?.ord?.includes(fp)) toggleFacetPin(fp);
-      const find = p.get("find"); if (find) onFind(find);
-      const card = p.get("card"); if (card && data) { const i = data.ids.indexOf(card); if (i >= 0) focusCard(i); }
+      if (p.region !== undefined && p.region >= 0 && p.region < curCount) togglePin(p.region);
+      if (p.facet !== undefined && colorDim?.ord?.includes(p.facet)) toggleFacetPin(p.facet);
+      if (p.find !== undefined) m.onFind(p.find);
+      if (p.card !== undefined && data) { const i = data.ids.indexOf(p.card); if (i >= 0) focusCard(i); }
     });
   }
-  $effect(() => { void [layout, color, size, grain, xKey, yKey, zKey, pinned, selected, scrubKey, scrubLo, scrubHi, dimProps, filters, queries]; if (urlReady) { try { history.replaceState(history.state, "", serializeUrl()); } catch {} } });
+  $effect(() => { void [m.layout, m.channels.color, m.channels.size, m.grain, m.channels.x, m.channels.y, m.channels.z, m.pinned, m.selected, m.channels.scrub, m.scrubLo, m.scrubHi, m.dimProps, m.filters, m.queries]; if (urlReady) { try { history.replaceState(history.state, "", m.serializeUrl(location.pathname, location.search)); } catch {} } });
 
   // focus-trap action (eid-vxm2): on open, move focus into the modal + keep Tab inside it (so keyboard
   // focus can't wander to the background controls behind the overlay); on close, return focus to the opener.
@@ -232,23 +148,19 @@
   let dragOver = $state(false);
   function mountMap(D: MapContract, opts?: { intro?: boolean }) {
     handle?.destroy();                                   // free the previous deck's GPU context before recreating
-    selected = null; pinned = null; facetPin = null;      // per-corpus state doesn't carry across files
-    xKey = D.axes[0]?.key ?? "";
-    yKey = D.axes[1]?.key ?? D.axes[0]?.key ?? "";
-    zKey = D.axes[2]?.key ?? D.axes[0]?.key ?? "";
-    grain = D.di ?? 0;
-    data = D;
+    m.mount(D);                                          // per-corpus state reset + x/y/z parked on this file's axes
     status = "";
     if (opts?.intro) showIntro = true;                    // a freshly-opened file introduces itself
     const dims0 = buildDimensions(D);   // build the registry ONCE for this mount's accessors
+    const ch = m.channels;
     handle = createMap(canvas, D, {
-      getColor: colorGet(dims0, color, D.levels?.[grain] ?? D.cluster), getRadius: sizeGet(dims0, size), getX: posGet(dims0, xKey), getY: posGet(dims0, yKey), getZ: posGet(dims0, zKey), posSig, layout, showLabels: labelsOn, grain, theme,
+      getColor: m.colorGet(dims0, ch.color, D.levels?.[m.grain] ?? D.cluster), getRadius: m.sizeGet(dims0, ch.size), getX: m.posGet(dims0, ch.x), getY: m.posGet(dims0, ch.y), getZ: m.posGet(dims0, ch.z), posSig: m.posSig, layout: m.layout, showLabels: labelsOn, grain: m.grain, theme,
       onClick: (i) => focusCard(i < 0 ? null : i),
       onHover: (h, x, y) => (hovered = h == null ? null : { ...h, x, y }),
-      onGrainChange: (g) => { grain = g; pinned = null; },
+      onGrainChange: (g) => { m.grain = g; m.pinned = null; },
     });
     // read-only introspection seam for the integration suite (drives the REAL built app, asserts real state)
-    (window as any).__eido = () => { const d = handle?.debug(); return { grain, k: curCount, layout, color, pin: pinned, facetPin, focus: selected, detail: selected !== null, deckOpen, cite: citeOn, ghosts: ghostsOn, theme, hover: hovered ? hovered.kind : null, zoom: d?.zoom ?? 0, labels: d?.labels ?? 0, regions: d?.regions ?? 0, rot: d?.rot ?? null, rotX: d?.rotX ?? null, target: d?.target ?? null, span3: d?.span3 ?? null, filters: chips.map((c) => c.label), visible: filterMask ? filterMask.reduce((a, v) => a + v, 0) : (data?.ids.length ?? 0) }; };
+    (window as any).__eido = () => { const d = handle?.debug(); return { grain: m.grain, k: curCount, layout: m.layout, color: m.channels.color, pin: pinned, facetPin, focus: selected, detail: selected !== null, deckOpen, cite: citeOn, ghosts: ghostsOn, theme, hover: hovered ? hovered.kind : null, zoom: d?.zoom ?? 0, labels: d?.labels ?? 0, regions: d?.regions ?? 0, rot: d?.rot ?? null, rotX: d?.rotX ?? null, target: d?.target ?? null, span3: d?.span3 ?? null, filters: chips.map((c) => c.label), visible: filterMask ? filterMask.reduce((a, v) => a + v, 0) : (data?.ids.length ?? 0) }; };
     (window as any).__eidoProject = (xy: number[]) => handle?.project(xy);
     (window as any).__eidoPick = (x: number, y: number) => handle?.pickAt(x, y);
   }
@@ -272,8 +184,7 @@
         embedQuery(q, (D as any).derivedBy?.embedder?.id, (p) => { queryStatus = p.label; queryPct = p.pct ?? null; armStall(); }),
         stalled,
       ]);
-      const key = "q" + qN++;
-      queries = [...queries, { key, text: q, raw: cosineAll(qv, D.vectors) }];
+      const key = m.addQuery(q, cosineAll(qv, D.vectors));
       queryStatus = "";
       return key;
     } catch (e: any) {
@@ -286,17 +197,6 @@
     } finally { clearTimeout(stallTimer); querying = false; }
   }
   async function runQuery() { const q = semQuery.trim(); if (!q) return; semQuery = ""; await embedAndAdd(q); }
-  // remove a query dimension; reset any channel that was pointing at it back to a default.
-  function removeQuery(key: string) {
-    queries = queries.filter((q) => q.key !== key);
-    if (color === key) color = "region";
-    if (size === key) size = "uniform";
-    if (deckSort === key) deckSort = "hub";
-    if (scrubKey === key) scrubKey = "";
-    if (xKey === key) xKey = data?.axes[0]?.key ?? "";
-    if (yKey === key) yKey = data?.axes[1]?.key ?? "";
-    if (zKey === key) zKey = data?.axes[2]?.key ?? "";
-  }
   async function openFile(file: File) {
     try {
       status = "opening " + file.name + "…"; loadFailed = false;
@@ -331,77 +231,31 @@
   });
 
   $effect(() => {
-    const l = layout, c = color, s = size, xk = xKey, yk = yKey, zk = zKey, sl = labelsOn, g = grain, a = assignment, co = citeOn, go = ghostsOn, th = theme, h = handle, d = data, ad = allDims, dp = dimProps, ps = posSig;
+    const l = m.layout, c = m.channels.color, s = m.channels.size, xk = m.channels.x, yk = m.channels.y, zk = m.channels.z, sl = labelsOn, g = m.grain, a = assignment, co = citeOn, go = ghostsOn, th = theme, h = handle, d = data, ad = allDims, dp = m.dimProps, ps = m.posSig;
     void dp; // dimProps in deps so a norm/invert change re-pushes the accessors
-    if (h && d) h.update({ getColor: colorGet(ad, c, a), getRadius: sizeGet(ad, s), getX: posGet(ad, xk), getY: posGet(ad, yk), getZ: posGet(ad, zk), posSig: ps, layout: l, showLabels: sl, grain: g, citeOn: co, ghostsOn: go, theme: th });
+    if (h && d) h.update({ getColor: m.colorGet(ad, c, a), getRadius: m.sizeGet(ad, s), getX: m.posGet(ad, xk), getY: m.posGet(ad, yk), getZ: m.posGet(ad, zk), posSig: ps, layout: l, showLabels: sl, grain: g, citeOn: co, ghostsOn: go, theme: th });
   });
-  // text search = a filter (hard hide), synced from the find box below via onFind — no separate deck path.
-  function onFind(v: string) { query = v; const q = v.trim(); const others = filters.filter((f) => f.kind !== "text"); filters = q ? [...others, { kind: "text", key: "text", label: "“" + q + "”", q }] : others; }
 
   // SCRUBBER (channel grammar): ONE slider that reveals cards cumulatively along ANY scalar/temporal field —
-  // date, length, influence, citation impact, or a discovered axis — chosen from D.metaFields, via deck's GPU
-  // DataFilterExtension. Falls back to a date scrubber for pre-metaFields (v1) files.
-  let scrubLo = $state<number | null>(null);  // window lower bound; null = field min
-  let scrubHi = $state<number | null>(null);  // window upper bound; null = field max (both null = show everything)
-  let scrubKey = $state("");
+  // date, length, influence, citation impact, or a discovered axis — chosen from the dimension registry, via
+  // deck's GPU DataFilterExtension. The window itself lives in the model; only the remount hack lives here:
   // svelte-range-slider-pips mutates its `values` array in place, which Svelte 5's bind-bridge doesn't write
-  // back — so bind:values can't capture drags. Instead the slider is one-way (values from scrubLo/Hi) with an
+  // back — so bind:values can't capture drags. Instead the slider is one-way (values from m.scrubLo/Hi) with an
   // on:change writer, and this nonce force-REMOUNTS it on any external reset so the thumbs re-read fresh state.
   let scrubNonce = $state(0);
-  function resetScrub() { scrubLo = null; scrubHi = null; scrubNonce++; }
+  m.onScrubReset = () => scrubNonce++;
+  const resetScrub = () => m.resetScrub();
   const fmtDate = (ms: number) => new Date(ms).toISOString().slice(0, 7);
   // adaptive numeric label: more decimals for small-span axes so a cosine/PCA range (~[-0.5,0.5]) doesn't
   // collapse to "0 – 0" while a length axis (~[100,2300]) doesn't show noise decimals.
   const fmtNum = (v: number, span: number) => { const a = Math.abs(span); return v.toFixed(a >= 100 ? 0 : a >= 10 ? 1 : a >= 1 ? 2 : 3); };
-  const scrubFields = $derived(allDims.filter((d) => d.kind === "scalar" || d.kind === "temporal"));  // registry
-  $effect(() => { if (!scrubKey && scrubFields.length) scrubKey = (scrubFields.find((d) => d.kind === "temporal") ?? scrubFields[0]).key; });
-  const scrubField = $derived(scrubFields.find((d) => d.key === scrubKey));
-  const scrubVals = $derived(scrubField?.raw ?? null);  // window on the dimension's raw values (dates/counts/scores)
-  const scrubRange = $derived.by((): [number, number] | null => {
-    if (!scrubVals) return null;
-    let lo = Infinity, hi = -Infinity;
-    for (const v of scrubVals) if (typeof v === "number") { if (v < lo) lo = v; if (v > hi) hi = v; }
-    return hi > lo ? [lo, hi] : null;
-  });
-  // scrubLo/scrubHi stay null = "show everything" until dragged (they READ `?? min/max`, WRITE only on input,
-  // so they never write a default back on mount — the race that emptied the map on load).
-  // The scrubber is a RANGE FILTER on the scrubbed dimension: when windowed, it contributes a test to the same
-  // intersection mask as the discrete (facet/region/text) filters — one filter primitive, one deck path.
-  const scrubTest = $derived.by((): ((i: number) => boolean) | null => {
-    const r = scrubRange, vs = scrubVals, lo = scrubLo, hi = scrubHi;
-    if (!r || !vs) return null;
-    if (!((lo != null && lo > r[0]) || (hi != null && hi < r[1]))) return null; // wide open = no filter
-    const L = lo ?? r[0], H = hi ?? r[1];
-    return (i) => { const v = vs[i]; return typeof v === "number" && v >= L && v <= H; };
-  });
-  // Build a per-filter test from the declarative record (categorical membership / region cluster / substring).
-  function filterTest(f: Filter): (i: number) => boolean {
-    if (!data) return () => true;
-    if (f.kind === "text") { const s = f.q.toLowerCase(), T = data.titles, C = data.cores; return (i) => T[i].toLowerCase().includes(s) || C[i].toLowerCase().includes(s); }
-    if (f.kind === "region") { const a = assignment; return (i) => a[i] === f.cluster; }
-    const d = allDims.find((x) => x.key === f.key); if (!d?.cat) return () => true; return (i) => d.cat!(i) === f.value;
-  }
-  // THE intersection mask: 1 = passes EVERY active filter (discrete + scrubber), 0 = hidden. null = nothing active.
-  const filterMask = $derived.by((): Uint8Array | null => {
-    if (!data) return null;
-    const tests = filters.map(filterTest); const st = scrubTest; if (st) tests.push(st);
-    if (!tests.length) return null;
-    const n = data.ids.length, m = new Uint8Array(n);
-    for (let i = 0; i < n; i++) m[i] = tests.every((t) => t(i)) ? 1 : 0;
-    return m;
-  });
-  $effect(() => { const h = handle, m = filterMask; if (h) h.setFilterMask(m); });  // push the mask (pure derived → no write-loop)
-  // Active filters as removable chips (the scrubber window is one too, so clear/remove works uniformly).
-  const chips = $derived.by((): { label: string; remove: () => void }[] => {
-    const out = filters.map((f) => ({ label: f.label, remove: () => removeFilter(f) }));
-    if (scrubTest && scrubField) out.push({ label: scrubField.name + " window", remove: resetScrub });
-    return out;
-  });
+  $effect(() => { m.ensureScrubKey(); });
+  $effect(() => { const h = handle, mask = filterMask; if (h) h.setFilterMask(mask); });  // push the mask (pure derived → no write-loop)
 
   const prov = $derived(data?.provenance);   // so a passed-around file introduces itself
   const provDate = (g?: number) => (g ? new Date(g).toISOString().slice(0, 10) : "");
   $effect(() => { try { document.title = prov?.title ? `${prov.title} · eidoscope 🔭` : "eidoscope 🔭"; } catch {} });
-  const weakAxes = $derived(layout === "axes" ? (xDim?.weak ? 1 : 0) + (yDim?.weak ? 1 : 0) : 0);
+  const weakAxes = $derived(m.layout === "axes" ? (xDim?.weak ? 1 : 0) + (yDim?.weak ? 1 : 0) : 0);
 </script>
 
 <div class="relative h-screen w-screen overflow-hidden bg-[var(--bg)] text-[var(--ink)] touch-none"
@@ -427,7 +281,7 @@
   {/if}
 
   {#if data}
-    {#if layout === "axes" && xDim && yDim}
+    {#if m.layout === "axes" && xDim && yDim}
       {@const xp = poles(xDim)}{@const yp = poles(yDim)}
       <div class="pointer-events-none absolute inset-0 font-mono text-xs text-[var(--dim)]">
         <div class="absolute left-3 top-1/2 max-w-[42%] -translate-y-1/2" title={xp[0]}>← {trunc(xp[0])}</div>
@@ -466,61 +320,61 @@
       {#if prov?.title}<div class="-mt-1 mb-0.5 truncate text-sm font-bold text-[var(--ink)]" title={prov.source ?? ""}>{prov.title}</div>{/if}
       <div class="mb-2 text-xs text-[var(--dim)]">{data.ids.length} cards · {curCount} regions</div>
       <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">layout</span>
-        <select bind:value={layout} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">
+        <select bind:value={m.layout} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">
           <option value="mde">neighbor map</option><option value="axes">axis scatter</option><option value="orbit">3D space</option><option value="axes3d">3D axis scatter</option>
         </select></label>
-      {#if layout === "axes" || layout === "axes3d"}
+      {#if m.layout === "axes" || m.layout === "axes3d"}
         <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">x-axis</span>
-          <select bind:value={xKey} title={xDim?.name ?? ""} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">{#each allDims.filter((d) => d.kind !== "categorical") as d}<option value={d.key}>{d.name}</option>{/each}</select>{@render propToggle(xDim)}</label>
+          <select bind:value={m.channels.x} title={xDim?.name ?? ""} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">{#each allDims.filter((d) => d.kind !== "categorical") as d}<option value={d.key}>{d.name}</option>{/each}</select>{@render propToggle(xDim)}</label>
         <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">y-axis</span>
-          <select bind:value={yKey} title={yDim?.name ?? ""} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">{#each allDims.filter((d) => d.kind !== "categorical") as d}<option value={d.key}>{d.name}</option>{/each}</select>{@render propToggle(yDim)}</label>
-        {#if layout === "axes3d"}
+          <select bind:value={m.channels.y} title={yDim?.name ?? ""} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">{#each allDims.filter((d) => d.kind !== "categorical") as d}<option value={d.key}>{d.name}</option>{/each}</select>{@render propToggle(yDim)}</label>
+        {#if m.layout === "axes3d"}
           <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">z-axis</span>
-            <select bind:value={zKey} title={zDim?.name ?? ""} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">{#each allDims.filter((d) => d.kind !== "categorical") as d}<option value={d.key}>{d.name}</option>{/each}</select>{@render propToggle(zDim)}</label>
+            <select bind:value={m.channels.z} title={zDim?.name ?? ""} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">{#each allDims.filter((d) => d.kind !== "categorical") as d}<option value={d.key}>{d.name}</option>{/each}</select>{@render propToggle(zDim)}</label>
         {/if}
         {#if weakAxes}<div class="mb-1.5 rounded-md bg-[var(--chip2)] px-2 py-1 text-[10px] leading-snug text-[var(--dim)]">~ {weakAxes > 1 ? "minor axes" : "a minor axis"} (under 2% variance) — position is thin, read it loosely</div>{/if}
       {/if}
       <label class="mb-1.5 flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">color</span>
-        <select bind:value={color} title={colorDim?.name ?? "region"} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">
+        <select bind:value={m.channels.color} title={colorDim?.name ?? "region"} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">
           <option value="region">region</option>{#each allDims.filter((d) => d.kind === "categorical") as d}<option value={d.key}>{d.name}</option>{/each}{#each allDims.filter((d) => d.kind !== "categorical") as d}<option value={d.key}>{d.source === "axis" ? "axis: " + d.name : d.name}</option>{/each}
         </select>{@render propToggle(colorDim)}</label>
       <label class="flex items-center gap-2 text-xs"><span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">size</span>
-        <select bind:value={size} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">
+        <select bind:value={m.channels.size} class="min-w-0 flex-1 rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1.5 py-1 text-xs">
           <option value="uniform">uniform</option>{#each allDims.filter((d) => d.kind === "scalar") as d}<option value={d.key}>{d.name}</option>{/each}
         </select>{@render propToggle(sizeDim)}</label>
       {#if nLevels > 1}
         <label class="mt-2 flex items-center gap-2 text-xs">
           <span class="w-9 flex-none font-mono text-[10px] text-[var(--faint)]">grain</span>
-          <input type="range" min="0" max={nLevels - 1} bind:value={grain} oninput={() => (pinned = null)} class="min-w-0 flex-1 accent-[var(--accent)]" aria-label="grain level: how finely the map is divided into regions" aria-valuetext="{curCount} regions" />
+          <input type="range" min="0" max={nLevels - 1} bind:value={m.grain} oninput={() => (m.pinned = null)} class="min-w-0 flex-1 accent-[var(--accent)]" aria-label="grain level: how finely the map is divided into regions" aria-valuetext="{curCount} regions" />
           <span class="w-6 flex-none text-right font-mono text-[10px] text-[var(--faint)]">{curCount}</span>
         </label>
       {/if}
       {#if scrubFields.length && scrubRange && scrubField}
         <div class="mt-2">
           <div class="mb-1 flex items-center gap-2 text-xs">
-            <select bind:value={scrubKey} onchange={resetScrub} title="which scalar/temporal dimension the scrubber windows" class="w-[72px] flex-none rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1 py-1 font-mono text-[10px] text-[var(--faint)]">{#each scrubFields as f}<option value={f.key}>{f.name}</option>{/each}</select>
-            <span class="min-w-0 flex-1 truncate text-right font-mono text-[9px] text-[var(--faint)]">{scrubField.kind === "temporal" ? fmtDate(scrubLo ?? scrubRange[0]) + " – " + fmtDate(scrubHi ?? scrubRange[1]) : fmtNum(scrubLo ?? scrubRange[0], scrubRange[1] - scrubRange[0]) + " – " + fmtNum(scrubHi ?? scrubRange[1], scrubRange[1] - scrubRange[0])}</span>
+            <select bind:value={m.channels.scrub} onchange={resetScrub} title="which scalar/temporal dimension the scrubber windows" class="w-[72px] flex-none rounded-md border border-[var(--hair2)] bg-[var(--field)] px-1 py-1 font-mono text-[10px] text-[var(--faint)]">{#each scrubFields as f}<option value={f.key}>{f.name}</option>{/each}</select>
+            <span class="min-w-0 flex-1 truncate text-right font-mono text-[9px] text-[var(--faint)]">{scrubField.kind === "temporal" ? fmtDate(m.scrubLo ?? scrubRange[0]) + " – " + fmtDate(m.scrubHi ?? scrubRange[1]) : fmtNum(m.scrubLo ?? scrubRange[0], scrubRange[1] - scrubRange[0]) + " – " + fmtNum(m.scrubHi ?? scrubRange[1], scrubRange[1] - scrubRange[0])}</span>
           </div>
           <div class="scrub">
             {#key scrubNonce}
-              <RangeSlider range id="scrubber" min={scrubRange[0]} max={scrubRange[1]} step={(scrubRange[1] - scrubRange[0]) / 240} values={[scrubLo ?? scrubRange[0], scrubHi ?? scrubRange[1]]}
-                on:change={(e) => { const [lo, hi] = e.detail.values; scrubLo = lo > scrubRange![0] ? lo : null; scrubHi = hi < scrubRange![1] ? hi : null; }} />
+              <RangeSlider range id="scrubber" min={scrubRange[0]} max={scrubRange[1]} step={(scrubRange[1] - scrubRange[0]) / 240} values={[m.scrubLo ?? scrubRange[0], m.scrubHi ?? scrubRange[1]]}
+                on:change={(e) => { const [lo, hi] = e.detail.values; m.scrubLo = lo > scrubRange![0] ? lo : null; m.scrubHi = hi < scrubRange![1] ? hi : null; }} />
             {/key}
           </div>
         </div>
       {/if}
       <div class="mt-2 flex gap-2">
         <button class="flex-1 rounded-md border border-[var(--hair2)] px-2 py-1 font-mono text-[11px] text-[var(--soft)] hover:bg-[var(--chip)]" onclick={() => (deckOpen = true)}>deck</button>
-        <button disabled={color !== "region"} title={color !== "region" ? "region labels show when coloured by region" : ""} class="flex-1 rounded-md border border-[var(--hair2)] px-2 py-1 font-mono text-[11px] disabled:opacity-40 disabled:cursor-not-allowed {showLabels && color === 'region' ? 'bg-[var(--chip)] text-[var(--ink)]' : 'text-[var(--faint)]'}" onclick={() => (showLabels = !showLabels)}>labels</button>
+        <button disabled={m.channels.color !== "region"} title={m.channels.color !== "region" ? "region labels show when coloured by region" : ""} class="flex-1 rounded-md border border-[var(--hair2)] px-2 py-1 font-mono text-[11px] disabled:opacity-40 disabled:cursor-not-allowed {showLabels && m.channels.color === 'region' ? 'bg-[var(--chip)] text-[var(--ink)]' : 'text-[var(--faint)]'}" onclick={() => (showLabels = !showLabels)}>labels</button>
         <button class="flex-1 rounded-md border border-[var(--hair2)] px-2 py-1 font-mono text-[11px] text-[var(--soft)] hover:bg-[var(--chip)]" onclick={reset}>reset</button>
       </div>
-      <input type="search" value={query} oninput={(e) => onFind(e.currentTarget.value)} placeholder="find a card…" class="mt-2 w-full rounded-md border border-[var(--hair2)] bg-[var(--field)] px-2 py-1.5 text-xs" />
+      <input type="search" value={m.query} oninput={(e) => m.onFind(e.currentTarget.value)} placeholder="find a card…" class="mt-2 w-full rounded-md border border-[var(--hair2)] bg-[var(--field)] px-2 py-1.5 text-xs" />
       {#if chips.length}
         <div class="mt-2 flex flex-wrap items-center gap-1">
           {#each chips as chip}
             <button onclick={chip.remove} title="remove filter" class="flex items-center gap-1 rounded-full border border-[var(--hair2)] bg-[var(--chip)] px-2 py-0.5 font-mono text-[10px] text-[var(--soft)] hover:text-[var(--ink)]"><span class="max-w-[9rem] truncate">{chip.label}</span> <span class="text-[var(--faint)]">✕</span></button>
           {/each}
-          {#if chips.length > 1}<button onclick={clearFilters} title="clear all filters" class="rounded-full px-2 py-0.5 font-mono text-[10px] text-[var(--faint)] hover:text-[var(--ink)]">clear all</button>{/if}
+          {#if chips.length > 1}<button onclick={() => m.clearFilters()} title="clear all filters" class="rounded-full px-2 py-0.5 font-mono text-[10px] text-[var(--faint)] hover:text-[var(--ink)]">clear all</button>{/if}
         </div>
       {/if}
       {#if data?.vectors}
@@ -540,8 +394,8 @@
         {#each queryDims as qd}
           <div class="mt-1 flex items-center gap-1 rounded-md bg-[var(--chip2)] px-2 py-1 text-[10px]">
             <span class="min-w-0 flex-1 truncate font-mono text-[var(--dim)]" title={qd.name}>{qd.name}</span>
-            <button onclick={() => (color = qd.key)} title="colour by this query" class="flex-none font-mono text-[var(--faint)] hover:text-[var(--ink)]">●</button>
-            <button onclick={() => removeQuery(qd.key)} title="remove query" class="flex-none font-mono text-[var(--faint)] hover:text-[var(--ink)]">✕</button>
+            <button onclick={() => (m.channels.color = qd.key)} title="colour by this query" class="flex-none font-mono text-[var(--faint)] hover:text-[var(--ink)]">●</button>
+            <button onclick={() => m.removeQuery(qd.key)} title="remove query" class="flex-none font-mono text-[var(--faint)] hover:text-[var(--ink)]">✕</button>
           </div>
         {/each}
       {/if}
@@ -557,11 +411,11 @@
     <div class="absolute bottom-3 right-3 flex max-h-[44vh] w-[min(13rem,62vw)] flex-col overflow-hidden rounded-xl border border-[var(--hair)] bg-[var(--panel)] p-2.5 text-xs backdrop-blur">
       <button class="flex w-full flex-none items-center gap-1 font-mono text-[10px] uppercase text-[var(--faint)] hover:text-[var(--ink)] {legendOpen ? 'mb-1.5' : ''}" onclick={() => (legendOpen = !legendOpen)} aria-expanded={legendOpen} aria-label="{legendOpen ? 'collapse' : 'expand'} legend">
         <span class="text-[9px]">{legendOpen ? "▾" : "▸"}</span>
-        <span class="truncate">{#if color === "region"}{curCount} regions{:else if colorDim?.kind === "categorical"}{colorDim.name} · {colorDim.ord?.length}{:else if colorDim}{colorDim.name}{#if colorDim.variance != null}<span class="normal-case text-[var(--faint)]"> · {Math.round(colorDim.variance * 100)}% variance{colorDim.weak ? " (thin)" : ""}</span>{/if}{:else}legend{/if}</span>
+        <span class="truncate">{#if m.channels.color === "region"}{curCount} regions{:else if colorDim?.kind === "categorical"}{colorDim.name} · {colorDim.ord?.length}{:else if colorDim}{colorDim.name}{#if colorDim.variance != null}<span class="normal-case text-[var(--faint)]"> · {Math.round(colorDim.variance * 100)}% variance{colorDim.weak ? " (thin)" : ""}</span>{/if}{:else}legend{/if}</span>
       </button>
       {#if legendOpen}
         <div class="thin-sb min-h-0 overflow-auto">
-        {#if color === "region"}
+        {#if m.channels.color === "region"}
           {#each curClusters as c}<div class="flex cursor-pointer items-center gap-2 py-1.5 hover:text-[var(--ink)] {pinned === c.c ? 'text-[var(--ink)] font-semibold' : ''}" role="button" tabindex="0" aria-label="isolate region {c.label}" aria-pressed={pinned === c.c} onmouseenter={() => { if (pinned === null) handle?.setHighlight(c.c); }} onmouseleave={() => { if (pinned === null) handle?.setHighlight(null); }} onclick={() => togglePin(c.c)} onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); togglePin(c.c); } }}><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(col(c.c))}"></span><span class="truncate" title={c.label}>{c.label} <span class="text-[var(--faint)]">{c.n}</span></span></div>{/each}
         {:else if colorDim?.kind === "categorical"}
           {#each colorDim.ord!.slice(0, 16) as v}<div class="flex cursor-pointer items-center gap-2 py-1.5 hover:text-[var(--ink)] {facetPin === v ? 'text-[var(--ink)] font-semibold' : ''}" role="button" tabindex="0" aria-label="isolate {colorDim.name} {v}" aria-pressed={facetPin === v} onclick={() => toggleFacetPin(v)} onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleFacetPin(v); } }}><span class="h-2.5 w-2.5 flex-none rounded-sm" style="background:{rgb(col(colorDim.idx![v]))}"></span><span class="truncate" title={v}>{v} <span class="text-[var(--faint)]">{colorDim.cnt![v]}</span></span></div>{/each}
@@ -624,7 +478,7 @@
       <div class="mb-2 flex flex-wrap items-center gap-2">
         <span class="font-mono text-[10px] text-[var(--faint)]">{deckList.length} cards</span>
         <label class="flex items-center gap-1 text-xs"><span class="font-mono text-[10px] text-[var(--faint)]">sort</span>
-          <select bind:value={deckSort} class="rounded-md border border-[var(--hair2)] bg-[var(--card)] px-1.5 py-1 text-xs">
+          <select bind:value={m.channels.sort} class="rounded-md border border-[var(--hair2)] bg-[var(--card)] px-1.5 py-1 text-xs">
             {#each allDims.filter((d) => d.kind !== "categorical") as d}<option value={d.key}>{d.name}</option>{/each}
           </select></label>
         {#if hasRead}<button class="rounded-md border border-[var(--hair2)] px-2 py-1 font-mono text-[11px] {deckUnread ? 'bg-[var(--chip)] text-[var(--ink)]' : 'text-[var(--faint)]'}" onclick={() => (deckUnread = !deckUnread)}>unread only</button>{/if}
