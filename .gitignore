@@ -1,4 +1,7 @@
 node_modules/
+# all pipeline caches now live under one root (src/config.ts cacheRoot)
+.eidoscope-cache/
+# legacy pre-namespacing cache locations (migrated by rename on first run; kept ignored)
 cache-*/
 # run outputs (the deck + map are user artifacts, not source)
 out/

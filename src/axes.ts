@@ -14,14 +14,23 @@ export type Axis = { pc: number; var: number; coherence: number; key: string; na
 const unit = (v: number[]) => { let n = 0; for (const x of v) n += x * x; n = Math.sqrt(n) || 1; return v.map((x) => x / n); };
 const evr = (X: number[][], nc: number) => new PCA(X, { center: true }).getExplainedVariance().slice(0, nc);
 
-function shuffleColumns(X: number[][]): number[][] {
+// Seeded PRNG (mulberry32, no deps). The parallel-analysis shuffle used to draw from Math.random, so the
+// noise floor — and therefore the honest dimension count — wobbled between identical runs. Same corpus +
+// config must yield identical geometry, so the shuffle is seeded like every other stochastic step.
+export function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => { a = (a + 0x6d2b79f5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+export const SEED = 42;
+
+function shuffleColumns(X: number[][], rnd: () => number): number[][] {
   const n = X.length, d = X[0].length, out = X.map((r) => r.slice());
-  for (let j = 0; j < d; j++) for (let i = n - 1; i > 0; i--) { const k = (Math.random() * (i + 1)) | 0; const t = out[i][j]; out[i][j] = out[k][j]; out[k][j] = t; }
+  for (let j = 0; j < d; j++) for (let i = n - 1; i > 0; i--) { const k = (rnd() * (i + 1)) | 0; const t = out[i][j]; out[i][j] = out[k][j]; out[k][j] = t; }
   return out;
 }
 const slug = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 40);
 
-export async function discoverAxes(embeddings: number[][], titles: string[], opts: { topN?: number; minCoherence?: number; llm?: any } = {}) {
+export async function discoverAxes(embeddings: number[][], titles: string[], opts: { topN?: number; minCoherence?: number; llm?: any; seed?: number } = {}) {
   const NC = 60;
   const X = embeddings.map(unit);
   const pca = new PCA(X, { center: true });
@@ -30,7 +39,8 @@ export async function discoverAxes(embeddings: number[][], titles: string[], opt
 
   // parallel analysis -> honest #dims above the 95th-pct noise floor
   const REP = 8, noise: number[][] = [];
-  for (let r = 0; r < REP; r++) noise.push(evr(shuffleColumns(X), NC));
+  const rnd = mulberry32(opts.seed ?? SEED);
+  for (let r = 0; r < REP; r++) noise.push(evr(shuffleColumns(X, rnd), NC));
   const n95 = (k: number) => { const c = noise.map((row) => row[k]).sort((a, b) => a - b); return c[Math.floor(0.95 * (REP - 1))]; };
   let realDims = 0; for (let k = 0; k < NC; k++) { if (variance[k] > n95(k)) realDims++; else break; }
 

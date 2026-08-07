@@ -1,9 +1,9 @@
 import { readFileSync } from "node:fs";
 import { UMAP } from "umap-js";
 import type { Card } from "./card.ts";
-import type { Axis } from "./axes.ts";
+import { mulberry32, SEED, type Axis } from "./axes.ts";
 import type { Doc } from "./corpus.ts";
-import { CFG } from "./config.ts";
+import { CFG, cachePath } from "./config.ts";
 import { getTextEmbeddings, EmbeddingCache } from "./embed.ts";
 import { divisiveLevels } from "./cluster.ts";
 import { HNSW } from "hnsw";
@@ -66,9 +66,12 @@ const textHash = (s: string) => { let h = 5381; for (let i = 0; i < s.length; i+
 // card gets a single truncated pass while full text gets the whole document, an unfair asymmetry
 // that also discards most of a rich card. Chunks are cached content-addressed (hash+len), so identical
 // chunks dedupe and any change to the source text self-invalidates.
-async function poolEmbed(texts: string[], cacheDir: string): Promise<number[][]> {
+// `embed` is injectable so the chunking/subsampling/pooling logic is testable without loading MiniLM.
+export type Embedder = (items: { id: string; text: string }[], opts: { cache?: EmbeddingCache }) => Promise<number[][]>;
+export async function poolEmbed(texts: string[], cacheDir: string, opts: { embed?: Embedder; chunkWords?: number; maxChunks?: number } = {}): Promise<number[][]> {
   const cache = new EmbeddingCache(cacheDir, CFG.embedModel); await cache.load();
-  const { chunkWords, maxChunks } = CFG.params;
+  const embed = opts.embed ?? getTextEmbeddings;
+  const chunkWords = opts.chunkWords ?? CFG.params.chunkWords, maxChunks = opts.maxChunks ?? CFG.params.maxChunks;
   const items: { id: string; text: string }[] = [];
   const spans: number[][] = texts.map(() => []);
   texts.forEach((t, di) => {
@@ -79,7 +82,7 @@ async function poolEmbed(texts: string[], cacheDir: string): Promise<number[][]>
     if (!chunks.length) chunks = [" "];
     chunks.forEach((text) => { spans[di].push(items.length); items.push({ id: textHash(text) + "#" + text.length, text }); });
   });
-  const embs = await getTextEmbeddings(items, { cache });
+  const embs = await embed(items, { cache });
   await cache.save();
   const dim = embs[0]?.length ?? 384;
   return texts.map((_, di) => {
@@ -91,16 +94,40 @@ async function poolEmbed(texts: string[], cacheDir: string): Promise<number[][]>
 
 // The card as the map's coordinates: one chunk-pooled embedding of the whole card text (see cardText).
 export async function embedCards(cards: Card[], axes: Axis[]): Promise<number[][]> {
-  return poolEmbed(cards.map((c) => cardText(c, axes)), "cache-eidoscope-cards");
+  return poolEmbed(cards.map((c) => cardText(c, axes)), cachePath("cache-eidoscope-cards"));
 }
 
 // Full-text embedding for the generic path (when a loader has no precomputed embeddings).
 export async function embedDocs(docs: Doc[]): Promise<number[][]> {
-  return poolEmbed(docs.map((d) => (d.title ? d.title + ". " : "") + d.body), "cache-eidoscope-fulltext");
+  return poolEmbed(docs.map((d) => (d.title ? d.title + ". " : "") + d.body), cachePath("cache-eidoscope-fulltext"));
 }
 
 const unit = (v: number[]) => { let n = 0; for (const x of v) n += x * x; n = Math.sqrt(n) || 1; return v.map((x) => x / n); };
-function normPct(arr: number[][], dims: number): number[][] {
+
+// kNN on unit vectors (cosine = dot). Exact brute force for small n; approximate HNSW past HNSW_MIN,
+// where O(n²) stops being affordable. Both are here as named functions so a test can assert the
+// approximate index agrees with the exact answer on a synthetic set — the swap is a scale optimization,
+// not a change in what a "neighbor" means.
+export const HNSW_MIN = 3000;
+export function knnBrute(X: number[][], K: number): number[][] {
+  const n = X.length, nbr: number[][] = [];
+  for (let i = 0; i < n; i++) {
+    const sims: [number, number][] = [];
+    for (let j = 0; j < n; j++) { if (j === i) continue; let s = 0; const a = X[i], b = X[j]; for (let d = 0; d < a.length; d++) s += a[d] * b[d]; sims.push([j, s]); }
+    sims.sort((a, b) => b[1] - a[1]);
+    nbr.push(sims.slice(0, K).map(([j]) => j));
+  }
+  return nbr;
+}
+export async function knnHNSW(X: number[][], K: number): Promise<number[][]> {
+  const index = new HNSW(16, 200, X[0].length, "cosine");
+  await index.buildIndex(X.map((v, i) => ({ id: i, vector: v })));
+  const nbr: number[][] = [];
+  for (let i = 0; i < X.length; i++) nbr.push((await index.searchKNN(X[i], K + 1)).map((r: any) => r.id as number).filter((j) => j !== i).slice(0, K));
+  return nbr;
+}
+
+export function normPct(arr: number[][], dims: number): number[][] {
   const b = Array.from({ length: dims }, (_, j) => { const c = arr.map((r) => r[j]).sort((a, z) => a - z); const q = (p: number) => c[Math.floor(p * (c.length - 1))]; return [q(0.02), q(0.98)] as [number, number]; });
   return arr.map((r) => r.map((v, j) => +(((v - (b[j][0] + b[j][1]) / 2) / (((b[j][1] - b[j][0]) / 2) || 1))).toFixed(4)));
 }
@@ -114,30 +141,20 @@ export async function projectAndCluster(embs: number[][]) {
     return { xy, xyz: xy.map((p) => [p[0], p[1], 0]), cluster: one, k: 1, di: 0, levels: [one], counts: [1], hub: X.map(() => 0), nbr: X.map(() => [] as number[]) };
   }
   const nn = Math.max(2, Math.min(15, n - 1)); // small corpora have fewer points than neighbors
-  const xy = normPct(new UMAP({ nComponents: 2, nNeighbors: nn, minDist: 0.15 }).fit(X), 2);
-  const xyz = normPct(new UMAP({ nComponents: 3, nNeighbors: nn, minDist: 0.15 }).fit(X), 3);
+  // Seeded: umap-js takes a `random` fn. Unseeded it draws from Math.random for init + negative sampling,
+  // so the same corpus laid out twice gave different coordinates. Each fit gets its OWN generator (from the
+  // same seed) so the 2D layout is unaffected by whether the 3D one ran first.
+  const xy = normPct(new UMAP({ nComponents: 2, nNeighbors: nn, minDist: 0.15, random: mulberry32(SEED) }).fit(X), 2);
+  const xyz = normPct(new UMAP({ nComponents: 3, nNeighbors: nn, minDist: 0.15, random: mulberry32(SEED) }).fit(X), 3);
   // GRAIN LEVELS: a nested tree of clusterings, not one arbitrary k. The viewer slides between them.
   const { levels, counts } = n < 6 ? { levels: [X.map(() => 0)], counts: [1] } : divisiveLevels(X);
   // default view = the level nearest ~18 groups (human-scannable); the slider exposes the rest.
   let di = 0, best = Infinity; counts.forEach((c, i) => { const d = Math.abs(c - 18); if (d < best) { best = d; di = i; } });
   const cluster = levels[di] ?? X.map(() => 0), k = counts[di] ?? 1; // di = default level index; the slider exposes the rest
   // kNN + hubness (cosine on unit vectors = dot). hnsw at scale (O(n log n)); brute for small n.
-  const K = 8, nbr: number[][] = [], hub = new Array(n).fill(0);
-  if (n > 3000) {
-    const index = new HNSW(16, 200, X[0].length, "cosine");
-    await index.buildIndex(X.map((v, i) => ({ id: i, vector: v })));
-    for (let i = 0; i < n; i++) {
-      const top = (await index.searchKNN(X[i], K + 1)).map((r: any) => r.id as number).filter((j) => j !== i).slice(0, K);
-      nbr.push(top); for (const j of top) hub[j]++;
-    }
-  } else {
-    for (let i = 0; i < n; i++) {
-      const sims: [number, number][] = [];
-      for (let j = 0; j < n; j++) { if (j === i) continue; let s = 0; const a = X[i], b = X[j]; for (let d = 0; d < a.length; d++) s += a[d] * b[d]; sims.push([j, s]); }
-      sims.sort((a, b) => b[1] - a[1]);
-      const top = sims.slice(0, K).map(([j]) => j); nbr.push(top); for (const j of top) hub[j]++;
-    }
-  }
+  const K = 8, hub = new Array(n).fill(0);
+  const nbr = n > HNSW_MIN ? await knnHNSW(X, K) : knnBrute(X, K);
+  for (const top of nbr) for (const j of top) hub[j]++;
   return { xy, xyz, cluster, k, di, levels, counts, hub, nbr };
 }
 
