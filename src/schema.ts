@@ -15,6 +15,9 @@
 export const CONTRACT_VERSION = 2;
 
 // One discovered axis: a deterministic PCA direction, LLM-labeled. `weak` = below the variance floor.
+// Row-major flat card-embedding matrix: row i = data.subarray(i * dim, (i + 1) * dim).
+export type CardVectors = { data: Float32Array; dim: number };
+
 export type AxisDef = { key: string; name: string; low: string; high: string; variance?: number; weak?: boolean };
 
 // One named region at one grain level. Positions/counts are derivable from `cluster`+`levels`, so a
@@ -59,7 +62,9 @@ export type MapContract = {
   // v2 OPTIONAL — per-node card embedding (the layout substrate). Carried so a passed-around file is
   // re-interrogable offline (custom semantic axes, new-point placement) with no model. Stored f16 on the
   // wire (measured lossless for cosine ranking, half the bytes). Absent in a "lite" emit.
-  vectors?: number[][];
+  // In memory it stays ONE flat Float32Array (row i = data.subarray(i*dim, (i+1)*dim)) — materializing
+  // n little JS arrays was measured as the single biggest decode-memory cost (see eid-cl83 notes).
+  vectors?: CardVectors;
 
   // v2 OPTIONAL — the typed dimension manifest (see MetaField). Lets the viewer's channel grammar offer
   // each corpus's own fields as encodable channels, type-checked, instead of a hard-coded folder/author set.

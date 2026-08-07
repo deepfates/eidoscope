@@ -218,6 +218,43 @@ test("mapbin: binary codec round-trips the contract losslessly and is much small
   expect(back.rawScores).toBeUndefined();                          // absent when the map carries no raw projections
 });
 
+test("mapbin v2.1: notes ride as lazy gzip blocks — exact across block boundaries, and old files still read", () => {
+  // n chosen to span multiple 512-card blocks WITH a ragged tail, so block-boundary offsets are exercised
+  const n = 1200;
+  const D: MapContract = {
+    ids: Array.from({ length: n }, (_, i) => "d" + i), titles: Array.from({ length: n }, (_, i) => "T" + i),
+    cores: Array.from({ length: n }, (_, i) => "core " + i),
+    notes: Array.from({ length: n }, (_, i): Record<string, string> => (i % 7 === 0 ? {} : { x: "note about card #" + i + " — varied length ".repeat(1 + (i % 5)), y: "n" + i })),
+    axes: [{ key: "x", name: "X", low: "lo", high: "hi" }], scores: { x: Array.from({ length: n }, (_, i) => (i / n) * 100) },
+    xy: Array.from({ length: n }, () => [0, 0]), xyz: Array.from({ length: n }, () => [0, 0, 0]),
+    cluster: Array.from({ length: n }, () => 0), k: 1, clusters: [{ c: 0, n, label: "p" }],
+    hub: Array.from({ length: n }, () => 1), nbr: Array.from({ length: n }, (_, i) => [(i + 1) % n]),
+  };
+  const back = decodeMap(encodeMap(D));
+  expect(back.notes.length).toBe(n);
+  // exact round-trip on EVERY row, including the first/last card of each block and the ragged tail
+  for (let i = 0; i < n; i++) expect(back.notes[i]).toEqual(D.notes[i]);
+  // a pre-v2.1 file (notes still in the JSON meta, no notes_z blocks) must decode exactly as before:
+  // rebuild the container with meta.notes restored — decodeContainer must prefer it over the lazy path.
+  const { gunzipSync: gz, gzipSync: rezip } = require("node:zlib");
+  const raw = gz(encodeMap(D));
+  const dv = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
+  const metaLen = dv.getUint32(8, true);
+  const meta = JSON.parse(new TextDecoder().decode(raw.subarray(12, 12 + metaLen)));
+  expect(meta.notes).toBeUndefined();               // new files carry NO notes in meta …
+  expect(meta.buffers.map((b: any) => b.key)).toContain("notes_z");  // … only the gzip blocks
+  meta.notes = D.notes;                             // now forge the OLD layout (meta-borne notes)
+  const metaBytes = new TextEncoder().encode(JSON.stringify(meta));
+  const pad = (4 - (metaBytes.byteLength % 4)) % 4, oldPad = (4 - (metaLen % 4)) % 4;
+  const body = raw.subarray(12 + metaLen + oldPad);
+  const forged = new Uint8Array(12 + metaBytes.byteLength + pad + body.byteLength);
+  forged.set(raw.subarray(0, 8), 0);
+  new DataView(forged.buffer).setUint32(8, metaBytes.byteLength, true);
+  forged.set(metaBytes, 12); forged.set(body, 12 + metaBytes.byteLength + pad);
+  const old = decodeMap(rezip(forged));
+  for (let i = 0; i < n; i++) expect(old.notes[i]).toEqual(D.notes[i]);
+});
+
 test("mapbin: OPTIONAL rawScores (raw PCA projection) round-trips per axis — the honest-view substrate", () => {
   const base: MapContract = {
     ids: ["a", "b", "c"], titles: ["A", "B", "C"], cores: ["c", "c", "c"], notes: [{}, {}, {}],
@@ -244,19 +281,19 @@ test("mapbin v2: carries f16 card vectors + derivedBy, preserves ranking, and st
     cluster: Array.from({ length: n }, (_, i) => i % 2), k: 2, di: 0, clusters: [{ c: 0, n: 12, label: "p" }, { c: 1, n: 12, label: "q" }],
     hub: Array.from({ length: n }, () => 1), nbr: Array.from({ length: n }, (_, i) => [(i + 1) % n]),
     derivedBy: { cardModel: "test/model", embedder: { id: "Xenova/all-MiniLM-L6-v2", dim, pooling: "mean", normalized: true }, geometryBasis: "card", generated: 7 },
-    vectors: vecs,
+    vectors: { data: Float32Array.from(vecs.flat()), dim },
   };
   const back = decodeMap(encodeMap(D));
   expect(back.version).toBe(2);
   expect(back.derivedBy).toEqual(D.derivedBy);                       // provenance record survives exactly
-  expect(back.vectors!.length).toBe(n);
-  expect(back.vectors![0].length).toBe(dim);
+  expect(back.vectors!.dim).toBe(dim);
+  expect(back.vectors!.data.length).toBe(n * dim);
   // f16 is lossy in the last bits but must preserve the custom-axis RANKING (the thing it's for)
-  let maxErr = 0; for (let i = 0; i < n; i++) for (let j = 0; j < dim; j++) maxErr = Math.max(maxErr, Math.abs(vecs[i][j] - back.vectors![i][j]));
+  let maxErr = 0; for (let i = 0; i < n; i++) for (let j = 0; j < dim; j++) maxErr = Math.max(maxErr, Math.abs(vecs[i][j] - back.vectors!.data[i * dim + j]));
   expect(maxErr).toBeLessThan(1e-3);
-  const q = vecs[5], dot = (a: number[], b: number[]) => a.reduce((s, x, i) => s + x * b[i], 0);
-  const rank = (vs: number[][]) => vs.map((_, i) => i).sort((a, b) => dot(q, vs[b]) - dot(q, vs[a]));
-  expect(rank(back.vectors!)).toEqual(rank(vecs));                   // projection ranking identical after f16 round-trip
+  const q = vecs[5], dot = (a: number[], b: ArrayLike<number>, o = 0) => a.reduce((s, x, i) => s + x * b[o + i], 0);
+  const rank = (row: (i: number) => [ArrayLike<number>, number]) => vecs.map((_, i) => i).sort((a, b) => dot(q, ...row(b)) - dot(q, ...row(a)));
+  expect(rank((i) => [back.vectors!.data, i * dim])).toEqual(rank((i) => [vecs[i], 0]));  // ranking identical after f16 round-trip
 
   // back-compat: a LITE emit (no vectors/derivedBy) decodes with those absent, nothing else lost
   const { vectors, derivedBy, ...lite } = D;

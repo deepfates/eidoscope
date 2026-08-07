@@ -111,7 +111,11 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
   // v2: carry the card vectors (the re-interrogation substrate) + how the map was made. `embs` is exactly
   // what the layout was built on (card vectors by default, raw full-text under --embed raw), aligned to the
   // deck; geometryBasis records which — so the file can't misrepresent whether it went through the bottleneck.
-  if (embs?.length === nNodes) D.vectors = embs;
+  if (embs?.length === nNodes && embs[0]?.length) {
+    const dim = embs[0].length, data = new Float32Array(nNodes * dim);
+    for (let i = 0; i < nNodes; i++) for (let j = 0; j < dim; j++) data[i * dim + j] = embs[i][j];
+    D.vectors = { data, dim };   // flat row-major (schema CardVectors) — never n little JS arrays
+  }
   D.derivedBy = {
     cardModel: CFG.model,
     embedder: { id: CFG.embedModel, dim: embs?.[0]?.length ?? 0, pooling: "mean", normalized: true },

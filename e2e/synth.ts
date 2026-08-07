@@ -49,7 +49,7 @@ export function synthMap(): MapContract {
     // new optional sections (an f16 buffer in the manifest it doesn't read, and the provenance record).
     // …and the vectors carry the BLOB STRUCTURE (a one-hot blob component + per-card jitter), so a derived
     // axis over a circled blob is a real contrast the suite can assert, not noise that happens to score.
-    vectors: ids.map((_, i) => { const b = Math.floor(i / PER); return Array.from({ length: 8 }, (_, j) => (j === b ? 1 : 0) + 0.15 * Math.sin(i * 0.7 + j)); }),
+    vectors: { data: Float32Array.from(ids.flatMap((_, i) => { const b = Math.floor(i / PER); return Array.from({ length: 8 }, (_, j) => (j === b ? 1 : 0) + 0.15 * Math.sin(i * 0.7 + j)); })), dim: 8 },
     provenance: { title: "synth-corpus", source: "e2e/synth.ts", generated: 1, count: N },
     derivedBy: { cardModel: "test/model", embedder: { id: "Xenova/all-MiniLM-L6-v2", dim: 8, pooling: "mean", normalized: true }, geometryBasis: "card" as const, generated: 1 },
   };

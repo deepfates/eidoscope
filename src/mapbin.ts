@@ -1,6 +1,6 @@
 import { gzipSync, gunzipSync } from "node:zlib";
 import { CONTRACT_VERSION, type MapContract } from "./schema.ts";
-import { MAGIC, WIDTH, type BufType, type BufSpec, toF16Buf, decodeContainer } from "./eido-container.ts";
+import { MAGIC, WIDTH, NOTES_BLOCK, type BufType, type BufSpec, toF16Buf, decodeContainer } from "./eido-container.ts";
 
 // The wire format for the viewer data contract (schema.ts). The big NUMERIC arrays — coordinates, the
 // per-axis scores, hub, the grain levels, neighbor lists — become Float32/Int32 buffers (deck.gl reads
@@ -30,7 +30,7 @@ const ragged = (rows: number[][]): { vals: Int32Array; offs: Int32Array } => {
 
 export function encodeMap(D: MapContract): Uint8Array {
   const n = D.ids.length;
-  const bufs: { key: string; arr: Float32Array | Int32Array | Uint16Array; type: BufType }[] = [];
+  const bufs: { key: string; arr: Float32Array | Int32Array | Uint16Array | Uint8Array; type: BufType }[] = [];
   bufs.push({ key: "xy", arr: flat(D.xy, 2), type: "f32" });
   bufs.push({ key: "xyz", arr: flat(D.xyz, 3), type: "f32" });
   bufs.push({ key: "hub", arr: Float32Array.from(D.hub), type: "f32" });
@@ -51,8 +51,28 @@ export function encodeMap(D: MapContract): Uint8Array {
   if (D.cite) { const c = ragged(D.cite); bufs.push({ key: "cite_v", arr: c.vals, type: "i32" }, { key: "cite_o", arr: c.offs, type: "i32" }); }
   // v2 OPTIONAL: per-node card embedding vectors (the re-interrogation substrate — custom semantic axes,
   // new-point placement). Stored f16 (measured lossless for cosine ranking). A "lite" emit omits D.vectors.
-  const vdim = D.vectors?.[0]?.length ?? 0;
-  if (D.vectors && vdim) bufs.push({ key: "vectors", arr: toF16Buf(flat(D.vectors, vdim)), type: "f16" });
+  const vdim = D.vectors?.dim ?? 0;
+  if (D.vectors && vdim) bufs.push({ key: "vectors", arr: toF16Buf(D.vectors.data), type: "f16" });
+  // v2.1: the per-card axis notes move OUT of the JSON meta (they were its single largest section — measured
+  // 31.8MB of a 42.2MB meta on pathfinder, and living there forced an eager JSON.parse of every note on load)
+  // into gzip BLOCKS of NOTES_BLOCK cards: notes_z (concatenated gzipped blocks) + notes_zi (block byte
+  // offsets) + notes_o (each row's offset inside its DECOMPRESSED block). The decoder inflates one block on
+  // first touch and parses one row per card open — notes stay compressed in memory (~5x) until a card needs
+  // them. Old files (notes still in meta) remain readable; see decodeContainer.
+  {
+    const enc = new TextEncoder();
+    const rows = D.notes.map((r) => enc.encode(JSON.stringify(r ?? {})));
+    const offs = new Int32Array(rows.length);                           // offset of row i WITHIN its block
+    const blocks: Uint8Array[] = []; const zi = new Int32Array(Math.ceil(rows.length / NOTES_BLOCK) + 1);
+    for (let b = 0; b * NOTES_BLOCK < rows.length; b++) {
+      const slice = rows.slice(b * NOTES_BLOCK, (b + 1) * NOTES_BLOCK);
+      let len = 0; for (let j = 0; j < slice.length; j++) { offs[b * NOTES_BLOCK + j] = len; len += slice[j].byteLength; }
+      const raw = new Uint8Array(len); { let o = 0; for (const r of slice) { raw.set(r, o); o += r.byteLength; } }
+      const z = gzipSync(raw); blocks.push(z); zi[b + 1] = zi[b] + z.byteLength;
+    }
+    const notes_z = new Uint8Array(zi[blocks.length]); { let o = 0; for (const z of blocks) { notes_z.set(z, o); o += z.byteLength; } }
+    bufs.push({ key: "notes_z", arr: notes_z, type: "u8" }, { key: "notes_zi", arr: zi, type: "i32" }, { key: "notes_o", arr: offs, type: "i32" });
+  }
 
   // lay buffers out 4-byte aligned; build the manifest
   const manifest: BufSpec[] = []; const chunks: Uint8Array[] = []; let offset = 0;
@@ -68,10 +88,10 @@ export function encodeMap(D: MapContract): Uint8Array {
   // meta = the contract MINUS what we moved to buffers (+ the manifest + axis key order)
   const meta = {
     version: CONTRACT_VERSION, n, provenance: D.provenance, derivedBy: D.derivedBy, metaFields: D.metaFields,
-    ids: D.ids, titles: D.titles, cores: D.cores, notes: D.notes,
+    ids: D.ids, titles: D.titles, cores: D.cores,
     axes: D.axes, k: D.k, di: D.di, counts: D.counts, levelLabels: D.levelLabels, levelBlurbs: D.levelBlurbs, clusters: D.clusters,
     urls: D.urls, sources: D.sources, siteNames: D.siteNames, authors: D.authors, tags: D.tags, dates: D.dates, read: D.read, citec: D.citec, ghosts: D.ghosts, folders: D.folders,
-    hasLevels: !!D.levels, hasCite: !!D.cite, hasVectors: !!(D.vectors && vdim), vdim,
+    hasLevels: !!D.levels, hasCite: !!D.cite, hasVectors: !!(D.vectors && vdim), vdim, notesBlock: NOTES_BLOCK,
     buffers: manifest,
   };
   const metaBytes = new TextEncoder().encode(JSON.stringify(meta));

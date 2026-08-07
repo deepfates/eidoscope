@@ -8,6 +8,8 @@
 // — the .eido carries the vectors (the value); the app carries the runtime. The embedder id is pinned to the
 // file's derivedBy.embedder.id so a query lands in the SAME space as the cards.
 
+import type { CardVectors } from "../../src/schema";
+
 const CDN = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1";
 let extractorP: Promise<any> | null = null;
 
@@ -50,13 +52,15 @@ export async function embedQuery(text: string, embedderId = "Xenova/all-MiniLM-L
 
 // Cosine of the query against every card vector (card vectors are mean-pooled, not necessarily unit-norm,
 // so normalize per-card here). Returns raw cosine per card.
-export function cosineAll(query: Float32Array, vectors: number[][]): number[] {
-  const dim = query.length;
-  return vectors.map((v) => {
+export function cosineAll(query: Float32Array, vectors: CardVectors): number[] {
+  const { data, dim } = vectors, n = (data.length / dim) | 0, out = new Array<number>(n);
+  for (let r = 0; r < n; r++) {
+    const base = r * dim;
     let d = 0, nv = 0;
-    for (let i = 0; i < dim; i++) { d += query[i] * v[i]; nv += v[i] * v[i]; }
-    return d / (Math.sqrt(nv) || 1);
-  });
+    for (let i = 0; i < dim; i++) { const v = data[base + i]; d += query[i] * v; nv += v * v; }
+    out[r] = d / (Math.sqrt(nv) || 1);
+  }
+  return out;
 }
 // (scale100/rankNorm100 removed — the registry's scores01 in dimensions.ts owns raw→0..100 for every dimension,
 // query axes included, applying the per-dimension norm/invert props uniformly.)
