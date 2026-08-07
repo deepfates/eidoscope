@@ -400,12 +400,12 @@ const axesLLM = { forward: async (_l: any, _i: any) => ({}) };
 // sign), same coordinates — on the planted-component fixtures, over the components that carry signal.
 const absCos = (a: number[], b: number[]) => { let s = 0, na = 0, nb = 0; for (let i = 0; i < a.length; i++) { s += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; } return Math.abs(s) / Math.sqrt(na * nb); };
 
-test("truncatedPCA: matches the exact full SVD on the top components (variance, direction, coordinates)", () => {
+test.each(["gram", "randomized"] as const)("truncatedPCA (%s): matches the exact full SVD on the top components (variance, direction, coordinates)", (method) => {
   for (const [n, d, planted] of [[120, 40, 3], [200, 80, 12]] as number[][]) {
     const X = plantedMatrix(n, d, planted);
     const full = new PCA(X, { center: true });
     const fv = full.getExplainedVariance(), fc = full.getEigenvectors().to2DArray(), fs = full.predict(X).to2DArray();
-    const t = truncatedPCA(X, Math.min(30, n, d), {});
+    const t = truncatedPCA(X, Math.min(30, n, d), { method });
     const ts = t.project(X);
     for (let c = 0; c < planted; c++) {
       expect(Math.abs(t.explainedVariance[c] - fv[c]) / fv[c]).toBeLessThan(1e-3);   // variance spectrum
@@ -421,12 +421,23 @@ test("truncatedPCA: matches the exact full SVD on the top components (variance, 
   }
 });
 
-test("truncatedPCA: DETERMINISTIC — the random sketch is seeded, so identical input gives identical output", () => {
+test.each(["gram", "randomized"] as const)("truncatedPCA (%s): DETERMINISTIC — identical input gives byte-identical output", (method) => {
   const X = plantedMatrix(90, 25, 4, 3);
-  const a = truncatedPCA(X, 20, { seed: 42 }), b = truncatedPCA(X, 20, { seed: 42 });
+  const a = truncatedPCA(X, 20, { seed: 42, method }), b = truncatedPCA(X, 20, { seed: 42, method });
   expect(b.components).toEqual(a.components);
   expect(b.explainedVariance).toEqual(a.explainedVariance);
   expect(b.project(X)).toEqual(a.project(X));
+});
+
+// The two routes are two implementations of the SAME decomposition — they must agree with each other,
+// not just each with ml-pca, or the d > 2048 fallback would silently ship different geometry.
+test("truncatedPCA: the gram and randomized routes agree on the top components", () => {
+  const X = plantedMatrix(150, 60, 8, 5);
+  const g = truncatedPCA(X, 20, { method: "gram" }), r = truncatedPCA(X, 20, { method: "randomized" });
+  for (let c = 0; c < 8; c++) {
+    expect(Math.abs(g.explainedVariance[c] - r.explainedVariance[c]) / g.explainedVariance[c]).toBeLessThan(1e-3);
+    expect(absCos(g.components[c], r.components[c])).toBeGreaterThan(0.999);
+  }
 });
 
 test("discoverAxes: parallel analysis finds the PLANTED dimensionality, not the ambient one", async () => {

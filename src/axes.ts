@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { Matrix, QR, SVD } from "ml-matrix";
+import { EVD, Matrix, QR, SVD } from "ml-matrix";
 import { labelAxes } from "./signatures.ts";
 import { provider } from "./provider.ts";
 
@@ -22,26 +22,39 @@ export function mulberry32(seed: number): () => number {
 }
 export const SEED = 42;
 
-// RANDOMIZED TRUNCATED PCA (Halko–Martinsson–Tropp range finder).
-// We only ever look at the top ~60 components, but a full thin SVD of an n x 384 matrix computes all
-// 384 of them — and discovery runs NINE of those (1 real + 8 parallel-analysis replicates). Instead:
-// draw a Gaussian test matrix Ω (d x ℓ, ℓ = k + oversample), sketch Y = AΩ (n x ℓ), sharpen it with a
-// couple of power iterations Y <- A(AᵀY) (re-orthonormalizing between so the small singular values
-// don't drown in round-off), take Q = qr(Y).Q as an orthonormal basis for A's dominant range, then
-// SVD the SMALL projected matrix B = QᵀA (ℓ x d) EXACTLY. A ≈ QB, so B's right singular vectors are
-// A's top components and B's singular values are A's. Everything stochastic runs off the same seeded
-// mulberry32 as the rest of the pipeline, so the geometry is still bit-identical run to run.
-// Defaults chosen by MEASUREMENT on the real 1446 x 384 Readwise corpus, not by taste. Embedding
-// spectra decay slowly, so the textbook (p=10, q=2) sketch is only accurate through ~PC17 there
-// (|cos| vs full PCA drops to 0.9976 by PC18). (p=20, q=4) reproduces the full SVD to ~1e-6 relative
-// variance and |cos| = 1.000000 through PC17, ~1e-3 through PC48 — and still runs the nine-PCA
-// discovery step in 4.0s where nine full SVDs take 31s (~7.6x). The honest axes are the product's
-// spine, so we buy the accuracy back; the speedup is what's left over.
-const OVERSAMPLE = 20, POWER_ITERS = 4;
+// TRUNCATED PCA — the top k components only, never the full 384-way decomposition. Axis discovery
+// runs NINE of these per corpus (1 real + 8 parallel-analysis replicates) and reads only the top 60,
+// so a full thin SVD (ml-pca) was doing ~6x more work than anyone looked at. Two routes:
+//
+// 1. GRAM (default whenever d <= 2048 — i.e. every embedding model we ship, d = 384). Accumulate the
+//    d x d covariance C = AᵀA/(n-1) in ONE cache-friendly pass over the rows, centering on the fly
+//    (no n x d copy ever exists), then eigendecompose a 384 x 384 symmetric matrix. Eigenvectors ARE
+//    the components, eigenvalues ARE the variances, trace is the total: EXACT, not an approximation.
+//    Measured against nine full ml-pca SVDs on the real Readwise corpora: 1446 docs 31.3s -> 1.2s
+//    (26x, peak RSS 184MB -> 47MB); 69586 docs 549s -> 27s (20x, 6.5GB -> 1.5GB). Agreement with the
+//    full SVD is machine precision (relative variance error ~1e-14, |cos| = 1.000000 on all 49 kept
+//    components) and the parallel-analysis dimension count is identical.
+//
+// 2. RANDOMIZED range finder (Halko–Martinsson–Tropp), for the wide case where a d x d Gram matrix
+//    and its O(d³) eigendecomposition stop being cheap. Draw a seeded Gaussian Ω (d x ℓ, ℓ = k + p),
+//    sketch Y = AΩ, sharpen with q power iterations Y <- A(AᵀY) (re-orthonormalizing between, or the
+//    small singular values drown in round-off), take Q = qr(Y).Q as a basis for A's dominant range,
+//    and SVD the SMALL B = QᵀA (ℓ x d) exactly; A ≈ QB, so B's right singular vectors are A's top
+//    components. This is an APPROXIMATION: on the 1446-doc corpus the textbook (p=10, q=2) matches
+//    the exact answer only through ~PC17 (|cos| 0.9976 by PC18), which is why the defaults are the
+//    measured (p=20, q=4) — exact to ~1e-6 relative variance through PC17 and ~1e-3 through PC48.
+//    Its flop count (~10·n·d·ℓ) EXCEEDS a thin SVD's (~n·d²) at ℓ=80, d=384, so it is NOT the fast
+//    path for tall-thin embedding data — measured 41s vs 31s for one PCA at n=69586. Force it with
+//    method:"randomized"; the seeded sketch keeps it bit-identical run to run either way.
+const OVERSAMPLE = 20, POWER_ITERS = 4, GRAM_MAX_D = 2048;
+
+// coordinates of any rows on the discovered components (centered with the SAME mean)
+const projector = (components: number[][], mean: number[], d: number) => (Z: number[][]) =>
+  Z.map((row) => components.map((c) => { let s = 0; for (let j = 0; j < d; j++) s += (row[j] - mean[j]) * c[j]; return s; }));
 
 export type TruncPCA = { components: number[][]; explainedVariance: number[]; singularValues: number[]; mean: number[]; project: (X: number[][]) => number[][] };
 
-export function truncatedPCA(X: number[][], k: number, opts: { seed?: number; oversample?: number; powerIters?: number } = {}): TruncPCA {
+export function truncatedPCA(X: number[][], k: number, opts: { seed?: number; oversample?: number; powerIters?: number; method?: "auto" | "gram" | "randomized" } = {}): TruncPCA {
   const n = X.length, d = X[0].length;
   const rnd = mulberry32(opts.seed ?? SEED);
   // standard normal via Box–Muller off the seeded uniform stream
@@ -50,13 +63,41 @@ export function truncatedPCA(X: number[][], k: number, opts: { seed?: number; ov
   const mean = new Array(d).fill(0);
   for (const row of X) for (let j = 0; j < d; j++) mean[j] += row[j];
   for (let j = 0; j < d; j++) mean[j] /= n;
+  const kk = Math.min(k, n, d);
+
+  // FAST EXACT PATH for tall-and-thin data — which is every embedding corpus we ship (d = 384, n in
+  // the thousands to hundreds of thousands). Form the d x d covariance C = AᵀA/(n-1) in ONE cache-
+  // friendly pass (exploiting symmetry, so half the work), then eigendecompose a 384 x 384 matrix.
+  // The eigenvectors ARE the principal components and the eigenvalues ARE the variances — no
+  // approximation, no random sketch, nothing to gate. Measured: 148ms at n=1446 and 2.3s at n=69586,
+  // against 3.4s / 31s for one ml-pca full SVD and 0.45s / 41s for the randomized sketch below. The
+  // sketch's flop count (~10·n·d·ℓ) actually EXCEEDS a thin SVD's (~n·d²) at ℓ=80, d=384; it only won
+  // at small n because ml-pca's constant is large. Once n dominates, the Gram route wins outright.
+  const method = opts.method ?? "auto";
+  if (method === "gram" || (method === "auto" && d <= GRAM_MAX_D)) {
+    // read the ORIGINAL rows and center on the fly: no n x d copy exists on this path at all
+    const cov = new Float64Array(d * d), row = new Float64Array(d);
+    for (let i = 0; i < n; i++) {
+      const src = X[i];
+      for (let j = 0; j < d; j++) row[j] = src[j] - mean[j];
+      for (let a = 0; a < d; a++) { const va = row[a]; if (!va) continue; const off = a * d; for (let b = a; b < d; b++) cov[off + b] += va * row[b]; }
+    }
+    const C = new Matrix(d, d);
+    for (let a = 0; a < d; a++) for (let b = a; b < d; b++) { const v = cov[a * d + b] / (n - 1 || 1); C.set(a, b, v); C.set(b, a, v); }
+    let total = 0; for (let a = 0; a < d; a++) total += C.get(a, a);   // trace = total variance
+    const e = new EVD(C, { assumeSymmetric: true });
+    const order = e.realEigenvalues.map((v, i) => [v, i] as [number, number]).sort((x, y) => y[0] - x[0]).slice(0, kk);
+    const EV = e.eigenvectorMatrix;
+    const components = order.map(([, i]) => Array.from({ length: d }, (_, j) => EV.get(j, i)));
+    const explainedVariance = order.map(([v]) => Math.max(v, 0) / (total || 1));
+    const singularValues = order.map(([v]) => Math.sqrt(Math.max(v, 0) * (n - 1 || 1)));
+    return { components, explainedVariance, singularValues, mean, project: projector(components, mean, d) };
+  }
+
   const A = new Matrix(n, d);
   for (let i = 0; i < n; i++) for (let j = 0; j < d; j++) A.set(i, j, X[i][j] - mean[j]);
-  // total variance = sum of the centered columns' variances (denominator for the explained fractions)
-  let total = 0;
+  let total = 0;                       // total variance = sum of the centered columns' variances
   for (let j = 0; j < d; j++) { let s = 0; for (let i = 0; i < n; i++) { const x = A.get(i, j); s += x * x; } total += s / (n - 1 || 1); }
-
-  const kk = Math.min(k, n, d);
   const ell = Math.min(kk + (opts.oversample ?? OVERSAMPLE), n, d);
   // AᵀM by hand: ml-matrix would need a materialized transpose (a second n x d matrix — 300MB at 100k
   // docs), and its lazy MatrixTransposeView measured ~4x slower through mmul. Same flops, no copy.
@@ -72,8 +113,7 @@ export function truncatedPCA(X: number[][], k: number, opts: { seed?: number; ov
   const sv = svd.diagonal.slice(0, kk);
   const components = Array.from({ length: kk }, (_, c) => Array.from({ length: d }, (_, j) => V.get(j, c)));
   const explainedVariance = sv.map((s) => (s * s) / (n - 1 || 1) / (total || 1));
-  const project = (Z: number[][]) => Z.map((row) => components.map((c) => { let s = 0; for (let j = 0; j < d; j++) s += (row[j] - mean[j]) * c[j]; return s; }));
-  return { components, explainedVariance, singularValues: sv, mean, project };
+  return { components, explainedVariance, singularValues: sv, mean, project: projector(components, mean, d) };
 }
 
 const evr = (X: number[][], nc: number, seed: number) => truncatedPCA(X, nc, { seed }).explainedVariance;
