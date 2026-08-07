@@ -45,26 +45,36 @@ slot), `dimension` (one per-card field), `corpus` (the filter set), `card`, `cam
 | **Interrogating — asking the corpus a question** |
 | 20 | `query.add` | *create* a semantic dimension · view | `+ axis ▾` popover → `add` / Enter | text | a new dimension appears in **every** channel menu; badge count increments. **Nothing on the map moves** (see M-D1) | `?q=` (repeatable) | type + Enter | the ✕ on the query chip |
 | 21 | `query.remove` | *delete* a semantic dimension · view | ✕ on the axis chip | key | every channel holding it falls back to its default | (param drops) | Tab→Enter | re-add |
+| **Holding — a frozen set of cards (SELECT / DERIVE)** |
+| 22 | `select.mode` | *arm* the lasso · view | `select` toolbar button (desktop + phone controls sheet) | — | button lights, hint "drag to circle cards · Escape to leave"; map drag now draws instead of panning. **Nothing else changes** | n | **s** · Escape leaves | same button · Escape · `reset view` |
+| 23 | `select.lasso` | *hold* a circled set · view | drag a closed path in select mode (one-finger on phone; pinch still zooms) | path | selection pane docks right: count, % of corpus, distinctive terms, distinctive axes, members, and the verbs below. A straight line has no area and holds nothing | `?sel=` (card ids, ≤200 — beyond that the pane says the link can't carry it) | — | `clear` · ✕ · Escape · `reset view` |
+| 24 | `select.filter` | *filter* to the held set · corpus | `filter to these` in the selection pane | — | everything else hidden; chip `selection (N)`; the selection is **consumed** by the filter (one state, not two); composes by AND with other filters | (chip drops `sel=`) | Tab→Enter | chip ✕ · `reset view` |
+| 25 | `select.fit` | *frame* the held set · camera | `fit` in the selection pane | — | camera eases to the set's bounds (depth-aware in 3D). Explicit — holding a set never moves the camera by itself | n | Tab→Enter | `reset view` |
+| 26 | `select.export` | *download* the held set · view | `export` in the selection pane | — | JSON file of ids, titles, urls | n | Tab→Enter | — |
+| 27 | `select.clear` | *release* the held set · view | `clear` in the selection pane; ✕ closes the pane | — | selection released; map de-emphasis lifts | (`sel=` drops) | Tab→Enter | re-circle |
+| 28 | `derive.mint` | *mint* a dimension from the held set · view | `derive axis` in the selection pane, then name it | name (defaults to the top distinctive term) | a `≈ name` dimension scoring every card by likeness to the set appears in **every** channel menu, with `place on colour / size / x` shortcuts in the pane. **Nothing on the map moves** until you place it | `?d=name~ids` (≤200 example ids; beyond that the pane says the axis won't come back on reload) | Tab→Enter | `remove this axis` |
+| 29 | `derive.rename` | *rename* a derived dimension · dimension | the name field in the pane | text | the label updates everywhere the dimension is placed | `?d=` label part | type | — |
+| 30 | `derive.remove` | *delete* a derived dimension · view | `remove this axis` in the pane | key | every channel holding it falls back to its default | (`d=` drops) | Tab→Enter | re-derive |
 | **Reading — the cards themselves** |
-| 22 | `card.open` | *open* one card · card | click a point; click a deck row; click a neighbour in the detail pane | index | detail pane docks right (bottom sheet on phones): restatement, axis placements, neighbours, source links | `?card=` | via the deck | ✕ · Escape · Back |
-| 23 | `card.hover` | *preview* one card · card | hover a point | — | tooltip: region, title, first ~140 chars | n | **n** | move away |
-| 24 | `region.drill` | *descend* into a region · view | **double-click a point** | index | grain steps finer (≤3 levels) until the region splits; camera fits the sub-region | (via `?grain=`) | **n** | `reset view` |
-| 25 | `deck.open` | *list* the corpus · view | `deck` button (desktop + phone) | — | modal list of every card — the screen-reader-accessible view of the map | **n** | Tab→Enter | ✕ · Escape · Back |
-| 26 | `deck.sort` | *sort* the list · channel | select inside the deck | dimension key | rows reorder | **n** | Tab→select | pick another |
-| 27 | `deck.filter` | *filter* the list · **deck only** | `find in list…` input inside the deck | text | rows narrow. **Does not touch the map or the chips** (see M-N2) | **n** | type | empty the box |
-| 28 | `deck.unread` | *filter* to unread · **deck only** | `unread only` toggle (only when the corpus carries read state) | — | read rows hidden | **n** | Tab→Enter | same button |
-| 29 | `source.open` | *open* the original · card | links in the detail pane and on deck rows | — | new tab | n | Tab→Enter | — |
+| 31 | `card.open` | *open* one card · card | click a point; click a deck row; click a neighbour in the detail pane | index | detail pane docks right (bottom sheet on phones): restatement, axis placements, neighbours, source links | `?card=` | via the deck | ✕ · Escape · Back |
+| 32 | `card.hover` | *preview* one card · card | hover a point | — | tooltip: region, title, first ~140 chars | n | **n** | move away |
+| 33 | `region.drill` | *descend* into a region · view | **double-click a point** | index | grain steps finer (≤3 levels) until the region splits; camera fits the sub-region | (via `?grain=`) | **n** | `reset view` |
+| 34 | `deck.open` | *list* the corpus · view | `deck` button (desktop + phone) | — | modal list of every card — the screen-reader-accessible view of the map | **n** | Tab→Enter | ✕ · Escape · Back |
+| 35 | `deck.sort` | *sort* the list · channel | select inside the deck | dimension key | rows reorder | **n** | Tab→select | pick another |
+| 36 | `deck.filter` | *filter* the list · **deck only** | `find in list…` input inside the deck | text | rows narrow. **Does not touch the map or the chips** (see M-N2) | **n** | type | empty the box |
+| 37 | `deck.unread` | *filter* to unread · **deck only** | `unread only` toggle (only when the corpus carries read state) | — | read rows hidden | **n** | Tab→Enter | same button |
+| 38 | `source.open` | *open* the original · card | links in the detail pane and on deck rows | — | new tab | n | Tab→Enter | — |
 | **Camera** |
-| 30 | `camera.pan` | *move* the camera · camera | drag | — | view translates | n | **n** | `reset view` |
-| 31 | `camera.zoom` | *scale* the camera · camera | wheel / pinch | — | zoom; more region labels reveal as you go in | n | **n** | `reset view` |
-| 32 | `camera.rotate` | *orbit* the camera · camera | drag in a 3D layout | — | view rotates | n | **n** | `reset view` |
-| 33 | `camera.fit` | *frame* a set · camera | implicit in `region.isolate` / `facet.isolate` / `region.drill` | indices | camera transitions to the set | n | — | `reset view` |
+| 39 | `camera.pan` | *move* the camera · camera | drag | — | view translates | n | **n** | `reset view` |
+| 40 | `camera.zoom` | *scale* the camera · camera | wheel / pinch | — | zoom; more region labels reveal as you go in | n | **n** | `reset view` |
+| 41 | `camera.rotate` | *orbit* the camera · camera | drag in a 3D layout | — | view rotates | n | **n** | `reset view` |
+| 42 | `camera.fit` | *frame* a set · camera | implicit in `region.isolate` / `facet.isolate` / `region.drill` | indices | camera transitions to the set | n | — | `reset view` |
 | **Chrome** |
-| 34 | `theme.flipGround` | *flip* light⇄dark · chrome | `☾ / ☀` button | — | whole app **and the map canvas** re-ink from the theme's tokens | `?theme=` | Tab→Enter | same button |
-| 35 | `theme.set` | *set* the theme · chrome | theme `▾` menu (10 themes, each with a swatch) | theme id | as above | `?theme=` | Tab→Enter | pick another |
-| 36 | `controls.sheet` | *reveal* the controls · chrome | `controls ▴` (phone only — renders the identical `controls()` snippet) | — | bottom sheet with every toolbar command | n | Tab→Enter | Escape · Back |
-| 37 | `view.reset` | *reset* filters + selection + grain + camera · view | `reset view` button | — | every chip clears, card closes, grain returns to the file's default, camera goes home | (params drop) | Tab→Enter | — |
-| 38 | `overlay.close` | *close* the topmost overlay · view | ✕ buttons; **Escape**; browser **Back** | — | intro / deck / sheet / card closes | n | **Escape** | re-open |
+| 43 | `theme.flipGround` | *flip* light⇄dark · chrome | `☾ / ☀` button | — | whole app **and the map canvas** re-ink from the theme's tokens | `?theme=` | Tab→Enter | same button |
+| 44 | `theme.set` | *set* the theme · chrome | theme `▾` menu (10 themes, each with a swatch) | theme id | as above | `?theme=` | Tab→Enter | pick another |
+| 45 | `controls.sheet` | *reveal* the controls · chrome | `controls ▴` (phone only — renders the identical `controls()` snippet) | — | bottom sheet with every toolbar command | n | Tab→Enter | Escape · Back |
+| 46 | `view.reset` | *reset* filters + selection + grain + camera · view | `reset view` button | — | every chip clears, card closes, grain returns to the file's default, camera goes home | (params drop) | Tab→Enter | — |
+| 47 | `overlay.close` | *close* the topmost overlay · view | ✕ buttons; **Escape**; browser **Back** | — | intro / deck / sheet / card closes | n | **Escape** | re-open |
 
 ### Bindings that are not user commands
 
