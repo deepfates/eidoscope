@@ -158,7 +158,7 @@
   // thin one (under the 2% floor the pipeline flags as `weak`) says so — same "thin" word the about pane
   // and the scatter caption already use. No hiding, no reordering: just the number, everywhere.
   const pctOf = (v: number) => { const p = v * 100; return (p >= 2 ? Math.round(p) : +p.toFixed(1)) + "%"; };
-  const dimTag = (d: { variance?: number; weak?: boolean }) => (d.variance == null ? "" : ` · ${pctOf(d.variance)}${d.weak ? " thin" : ""}`);
+  const dimTag = (d: { variance?: number }) => (d.variance == null ? "" : ` · ${pctOf(d.variance)}`);
   const readerLabel = (u?: string) => (u && /readwise\.io/.test(u) ? "Readwise" : "open");
   const sourceLabel = (i: number) => data?.siteNames?.[i] || "original";
   const dateOf = (i: number) => { const d = data?.dates?.[i]; return d ? new Date(d).toISOString().slice(0, 10) : ""; };
@@ -558,7 +558,7 @@
           <div class="mt-3 border-t border-base-300 pt-2">
             <div class="mb-1 font-mono text-[10px] uppercase tracking-widest opacity-60">strength</div>
             <div class="text-[11px] leading-snug opacity-75">
-              The {axStats.n} axes together explain <b class="opacity-100">{Math.round(axStats.variance * 100)}%</b> of the variation between documents{#if axStats.weak}, and <b class="opacity-100">{axStats.weak}</b> of them {axStats.weak > 1 ? "are" : "is"} thin (under 2% each) — read positions on those loosely{/if}. The rest is structure no straight axis captured.
+              {axStats.n} axes · {Math.round(axStats.variance * 100)}% of variance{#if axStats.weak} · {axStats.weak} under 2%{/if}
             </div>
           </div>
 
@@ -640,7 +640,6 @@
               {/if}
             </div>
           {/each}
-          {#if weakAxes}<div class="rounded-field bg-base-200 px-2 py-1 text-[11px] leading-snug opacity-70">~ {weakAxes > 1 ? "minor axes" : "a minor axis"} (under 2% variance) — position is thin, read it loosely</div>{/if}
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>
@@ -683,7 +682,7 @@
             <li class="menu-title text-[10px] tracking-widest uppercase">color by</li>
             <li><button data-opt="{scope}:color:region" aria-pressed={m.channels.color === "region"} title="colour by the region clustering at the current grain" onclick={() => (m.channels.color = "region")}><span class="w-3">{m.channels.color === "region" ? "✓" : ""}</span>region</button></li>
             {#each catDims as d}<li><button data-opt="{scope}:color:{d.key}" aria-pressed={m.channels.color === d.key} title="colour by {d.name} — {d.ord?.length} values" onclick={() => (m.channels.color = d.key)}><span class="w-3">{m.channels.color === d.key ? "✓" : ""}</span><span class="truncate">{d.name}</span></button></li>{/each}
-            {#each scalarDims as d}<li><button data-opt="{scope}:color:{d.key}" aria-pressed={m.channels.color === d.key} title="colour by {d.name} (a gradient low → high)" onclick={() => (m.channels.color = d.key)}><span class="w-3">{m.channels.color === d.key ? "✓" : ""}</span><span class="truncate">{d.source === "axis" ? "axis: " + d.name : d.name}</span>{#if d.variance != null}<span class="ml-auto flex-none font-mono text-[10px] opacity-50">{pctOf(d.variance)}{d.weak ? " thin" : ""}</span>{/if}</button></li>{/each}
+            {#each scalarDims as d}<li><button data-opt="{scope}:color:{d.key}" aria-pressed={m.channels.color === d.key} title="colour by {d.name} (a gradient low → high)" onclick={() => (m.channels.color = d.key)}><span class="w-3">{m.channels.color === d.key ? "✓" : ""}</span><span class="truncate {d.weak ? 'opacity-50' : ''}">{d.source === "axis" ? "axis: " + d.name : d.name}</span>{#if d.variance != null}<span class="ml-auto flex-none font-mono text-[10px] opacity-50">{pctOf(d.variance)}</span>{/if}</button></li>{/each}
             {@render propItems(colorDim)}
           </ul>
         </div>
@@ -714,7 +713,7 @@
           <li class="menu-title text-[10px] tracking-widest uppercase">size by</li>
           <li><button data-opt="{scope}:size:uniform" aria-pressed={m.channels.size === "uniform"} title="every card the same radius" onclick={() => (m.channels.size = "uniform")}><span class="w-3">{m.channels.size === "uniform" ? "✓" : ""}</span>uniform</button></li>
           {#each allDims.filter((d) => d.kind === "scalar") as d}
-            <li><button data-opt="{scope}:size:{d.key}" aria-pressed={m.channels.size === d.key} title="size by {d.name}" onclick={() => (m.channels.size = d.key)}><span class="w-3">{m.channels.size === d.key ? "✓" : ""}</span><span class="truncate">{d.name}</span>{#if d.variance != null}<span class="ml-auto flex-none font-mono text-[10px] opacity-50">{pctOf(d.variance)}{d.weak ? " thin" : ""}</span>{/if}</button></li>
+            <li><button data-opt="{scope}:size:{d.key}" aria-pressed={m.channels.size === d.key} title="size by {d.name}" onclick={() => (m.channels.size = d.key)}><span class="w-3">{m.channels.size === d.key ? "✓" : ""}</span><span class="truncate {d.weak ? 'opacity-50' : ''}">{d.name}</span>{#if d.variance != null}<span class="ml-auto flex-none font-mono text-[10px] opacity-50">{pctOf(d.variance)}</span>{/if}</button></li>
           {/each}
           {@render propItems(sizeDim)}
         </ul>
@@ -940,14 +939,14 @@
 
           <div class="mt-3 mb-1 font-mono text-[10px] uppercase tracking-wide opacity-60">where it sits</div>
           {#each placements(selected) as p}
-            <!-- the placement names its POLE ("▲81 toward dense theory"), and a thin axis says so — an
-                 extreme score on a 1%-variance axis must not read like the card's most prominent fact -->
-            <div class="flex items-center justify-between gap-2 border-b border-base-200 py-1 text-xs" title={(p.s >= 50 ? p.a.high : p.a.low) + " — " + p.note}>
-              <span class="min-w-0">
-                <span class="block truncate opacity-70">{p.a.name}{#if p.a.weak}<span class="opacity-60"> · thin ({pctOf(p.a.variance ?? 0)})</span>{/if}</span>
-                <span class="block truncate font-mono text-[10px] opacity-50">toward {p.s >= 50 ? p.a.high : p.a.low}</span>
-              </span>
-              <span class="flex-none font-mono text-[10px]">{p.s >= 50 ? "▲" : "▼"} <b>{p.s}</b></span>
+            <!-- a placement IS a position on a bipolar axis, so it renders as one: a mark on a track
+                 between the two poles. A weak axis mutes the whole row — the quantity shows, no label. -->
+            <div class="border-b border-base-200 py-1.5 text-xs {p.a.weak ? 'opacity-40' : ''}" title={p.note}>
+              <div class="flex justify-between gap-3 text-[10px] opacity-60"><span class="truncate">{p.a.low}</span><span class="truncate text-right">{p.a.high}</span></div>
+              <div class="relative mt-1 h-[3px]">
+                <div class="absolute inset-0 rounded-full bg-current opacity-10"></div>
+                <span class="absolute top-1/2 h-[7px] w-[7px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" style="left:{p.s}%"></span>
+              </div>
             </div>
           {/each}
 
@@ -971,9 +970,6 @@
               onclick={deriveAxis}>derive axis</button>
             <button data-testid="sel-clear" class="btn btn-ghost btn-xs normal-case" onclick={() => { m.clearSelection(); mintedKey = null; }}>clear</button>
           </div>
-          {#if !m.selShareable}
-            <div class="rounded-field mb-2 bg-base-200 px-2 py-1 text-[11px] leading-snug opacity-70">selection too large to share — these {selection?.length} cards encode to {m.selEnc?.length ?? 0} characters and the link carries up to {ViewModel.SET_PARAM_CAP} (≈1,300 cards)</div>
-          {/if}
 
           <!-- ═══ DERIVE: name the axis before (or after) you mint it. The result appears HERE with one-tap
                placements — minting alone moves nothing on the map. ═══ -->
@@ -999,9 +995,6 @@
                 <button data-testid="derive-place-size" class="btn btn-xs normal-case" onclick={() => (m.channels.size = mintedDim.key)}>size</button>
                 <button data-testid="derive-place-x" class="btn btn-xs normal-case" onclick={() => (m.channels.x = mintedDim.key)}>x</button>
               </div>
-              {#if !m.derivedShareable(mintedDim.key)}
-                <div class="mt-1 leading-snug opacity-70">too many examples to share — they encode past the link's {ViewModel.SET_PARAM_CAP}-character budget (≈1,300 cards), so this axis won't come back on reload</div>
-              {/if}
             </div>
           {/if}
 
@@ -1014,9 +1007,16 @@
             <div class="mb-2 text-[11px] opacity-60">no term stands out against the corpus</div>
           {/if}
           {#each m.selectionAxes as a}
-            <div data-sel-axis class="flex items-center justify-between gap-2 border-b border-base-200 py-1 text-xs" title="{a.name}: mean {a.mean}/100 (corpus mean is 50)">
-              <span class="truncate opacity-70">{a.name}{#if data.axes.find((x) => x.name === a.name)?.weak}<span class="opacity-60"> · thin</span>{/if} <span class="opacity-60">→ {a.pole}</span></span>
-              <span class="flex-none font-mono text-[10px]">{a.mean >= 50 ? "▲" : "▼"} <b>{a.mean}</b></span>
+            {@const ax = data.axes.find((x) => x.name === a.name)}
+            <!-- how far this set's mean sits from the corpus centre, as a diverging bar — direction and
+                 magnitude in one mark -->
+            <div data-sel-axis class="border-b border-base-200 py-1.5 text-xs {ax?.weak ? 'opacity-40' : ''}" title="{a.name}: set mean {a.mean}, corpus 50">
+              <div class="flex justify-between gap-3 text-[10px] opacity-60"><span class="truncate">{ax?.low ?? ""}</span><span class="truncate text-right">{ax?.high ?? a.pole}</span></div>
+              <div class="relative mt-1 h-[3px]">
+                <div class="absolute inset-0 rounded-full bg-current opacity-10"></div>
+                <div class="absolute top-0 h-full rounded-full bg-current opacity-60" style="left:{Math.min(a.mean, 50)}%; width:{Math.max(Math.abs(a.mean - 50), 1)}%"></div>
+                <div class="absolute top-[-2px] h-[7px] w-px bg-current opacity-40" style="left:50%"></div>
+              </div>
             </div>
           {/each}
 
@@ -1089,7 +1089,7 @@
               <div class="my-1 line-clamp-2 text-[11px] opacity-70">{data.cores[i].slice(0, 160)}</div>
               <div class="flex flex-wrap gap-1">
                 <span class="badge badge-xs font-mono">◆ {regionOf(i)}</span>
-                {#each topAxes(i) as t}<span class="badge badge-xs badge-ghost font-mono" title={t.w ? t.n + " — thin axis (under 2% variance)" : t.n}>{t.w ? "~" : ""}{axShort(t.n)} {t.s}</span>{/each}
+                {#each topAxes(i) as t}<span class="badge badge-xs badge-ghost font-mono {t.w ? 'opacity-50' : ''}" title={t.n}>{axShort(t.n)} {t.s}</span>{/each}
               </div>
             </button>
           {/each}
