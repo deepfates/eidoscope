@@ -128,6 +128,11 @@ try {
   const [nx, ny] = await proj([0, 0]);
   await p.touchscreen.tap(nx, ny); await p.waitForTimeout(1200); s = await st();  // generous settle for the headless tab (card-open itself is immediate)
   ok(s.detail === true && s.focus === 0, `tapping a card opens its detail panel — detail=${s.detail} focus=${s.focus}`);
+  // …and its axis placements actually render (guards the lazy-notes path: a sparse-cache proxy that
+  // answers only `get` reads as empty under Svelte's $state, which checks `has` first — found on the
+  // first real new-format corpus, invisible to every assertion that only checked the panel opened)
+  const nPlacements = await p.evaluate(() => document.querySelectorAll('[role="dialog"][aria-label="card detail"] [data-placement]').length);
+  ok(nPlacements > 0, `the open card shows its axis placements — ${nPlacements} tracks`);
 
   // 8. FRONTIER: cite + ghost toggles flip; hovering a ghost reports 'ghost' (not a wrong card); click → arXiv
   await btn(/^reset view$/).click(); await p.waitForTimeout(200);

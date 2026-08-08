@@ -941,7 +941,7 @@
           {#each placements(selected) as p}
             <!-- a placement IS a position on a bipolar axis, so it renders as one: a mark on a track
                  between the two poles. A weak axis mutes the whole row — the quantity shows, no label. -->
-            <div class="border-b border-base-200 py-1.5 text-xs {p.a.weak ? 'opacity-40' : ''}" title={p.note}>
+            <div data-placement class="border-b border-base-200 py-1.5 text-xs {p.a.weak ? 'opacity-40' : ''}" title={p.note}>
               <div class="flex justify-between gap-3 text-[10px] opacity-60"><span class="truncate">{p.a.low}</span><span class="truncate text-right">{p.a.high}</span></div>
               <div class="relative mt-1 h-[3px]">
                 <div class="absolute inset-0 rounded-full bg-current opacity-10"></div>

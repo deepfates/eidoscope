@@ -63,17 +63,30 @@ function lazyNotes(z: Uint8Array | undefined, zi: Int32Array | undefined, offs: 
   if (!z || !zi || !offs) throw new Error("eidoscope: required buffer 'notes_z'/'notes_zi'/'notes_o' missing from .eido");
   const n = offs.length, cache: Record<string, string>[] = new Array(n), td = new TextDecoder();
   const blocks: (Uint8Array | undefined)[] = new Array(zi.length - 1);
+  const idxOf = (p: string | symbol) => { if (typeof p !== "string") return -1; const i = +p; return Number.isInteger(i) && i >= 0 && i < n ? i : -1; };
+  const materialize = (i: number) => {
+    if (cache[i] === undefined) {
+      const b = Math.floor(i / blockSize);
+      const raw = (blocks[b] ??= gunzipSync(z.subarray(zi[b], zi[b + 1])));
+      const end = (i + 1) % blockSize === 0 || i + 1 === n ? raw.length : offs[i + 1];
+      cache[i] = JSON.parse(td.decode(raw.subarray(offs[i], end)));
+    }
+    return cache[i];
+  };
+  // The cache is a SPARSE array, and reactive wrappers (Svelte's $state proxy) consult `has` and
+  // property descriptors before reading — a get-only trap answers "not there" for unparsed holes and
+  // the row silently reads as undefined. So `has` and getOwnPropertyDescriptor must vouch for (and
+  // materialize) every in-range index, not just `get`.
   return new Proxy(cache, {
+    has: (t, p) => idxOf(p) >= 0 || Reflect.has(t, p),
+    getOwnPropertyDescriptor(t, p) {
+      const i = idxOf(p);
+      if (i >= 0) return { value: materialize(i), enumerable: true, configurable: true, writable: true };
+      return Reflect.getOwnPropertyDescriptor(t, p);
+    },
     get(t, p, r) {
-      if (typeof p === "string") {
-        const i = +p;
-        if (Number.isInteger(i) && i >= 0 && i < n && t[i] === undefined) {
-          const b = Math.floor(i / blockSize);
-          const raw = (blocks[b] ??= gunzipSync(z.subarray(zi[b], zi[b + 1])));
-          const end = (i + 1) % blockSize === 0 || i + 1 === n ? raw.length : offs[i + 1];
-          t[i] = JSON.parse(td.decode(raw.subarray(offs[i], end)));
-        }
-      }
+      const i = idxOf(p);
+      if (i >= 0) return materialize(i);
       return Reflect.get(t, p, r);
     },
   });
