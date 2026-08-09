@@ -2,7 +2,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { deriveCard } from "./signatures.ts";
 import { provider } from "./provider.ts";
-import { hash, Store, pool, withRetry } from "./llm.ts";
+import { hash, Store, pool, withRetry, isAuthError, errLine } from "./llm.ts";
 import type { Axis } from "./axes.ts";
 import type { Doc } from "./corpus.ts";
 
@@ -27,12 +27,17 @@ export async function cardCorpus(docs: Doc[], axes: Axis[], opts: { llm?: any; s
   const key = (d: Doc) => hash("card1 " + d.title + " " + d.body + " " + geo);
 
   const need = docs.filter((d) => !cache.has(key(d)));
-  let done = 0, fail = 0;
+  let done = 0, fail = 0, lastErr: any;
   const tick = () => { if (need.length && (++done % 50 === 0 || done === need.length)) process.stderr.write(`  cards ${done}/${need.length}\r`); };
   await pool(need, async (d) => {
-    const r: any = await withRetry(() => sig.forward(llm, { documentTitle: d.title, documentText: d.body, corpusAxes }));
+    const r: any = await withRetry(() => sig.forward(llm, { documentTitle: d.title, documentText: d.body, corpusAxes }), 4, (e) => { lastErr = e; });
     if (r?.restatement) cache.put(key(d), { core: String(r.restatement), placements: (r.axisPlacements ?? []).map(String) });
-    else fail++;
+    else {
+      fail++;
+      // An auth failure means EVERY call will fail identically — abort the run now with the provider's
+      // own words, instead of burning through the corpus and emitting an empty map as a "success".
+      if (lastErr && isAuthError(lastErr)) throw new Error(`the provider rejected the API key — ${errLine(lastErr)} (check OPENROUTER_API_KEY / EIDOSCOPE_API_KEY)`);
+    }
     tick();
   }, conc);
   if (fail) console.error(`  ⚠ ${fail} cards failed after retries (reported, not silently dropped)`);
@@ -44,6 +49,9 @@ export async function cardCorpus(docs: Doc[], axes: Axis[], opts: { llm?: any; s
     axes.forEach((a, i) => { ax[a.key] = { note: String(c.placements?.[i] ?? "") }; });
     out.push({ id: d.id, title: d.title, cat: d.cat, date: d.date, url: d.url, source: d.source, siteName: d.siteName, author: d.author, tags: d.tags, path: d.path, readProgress: d.readProgress, core: c.core, axes: ax });
   }
+  // A run where every card failed has produced nothing to map — that is a failure, and it must never
+  // roll on to emit an empty .eido wearing a ✅. Name the underlying provider error once, plainly.
+  if (docs.length && !out.length) throw new Error(`every card failed (${docs.length} docs, 0 cards)${lastErr ? ` — ${errLine(lastErr)}` : " — the model returned no usable output"}`);
   return out;
 }
 

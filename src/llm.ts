@@ -26,14 +26,26 @@ export async function pool<T>(items: T[], fn: (t: T) => Promise<void>, conc: num
   await Promise.all(Array.from({ length: Math.max(1, conc) }, async () => { while (i < items.length) { const j = i++; await fn(items[j]); } }));
 }
 
+// An auth failure (bad/missing key) is not transient: retrying it burns time and every call will fail
+// the same way. Detected from the status code when the error carries one, else from the message text.
+export const isAuthError = (e: any): boolean => {
+  const s = e?.status ?? e?.response?.status ?? e?.cause?.status;
+  if (s === 401 || s === 403) return true;
+  return /\b401\b|\b403\b|unauthorized|invalid[_ ]?api[_ ]?key|no auth credentials|incorrect api key/i.test(String(e?.message ?? e));
+};
+
+// One readable line from a provider error — first line of the message, bounded, no stack dressing.
+export const errLine = (e: any): string => String(e?.message ?? e).split("\n")[0].trim().slice(0, 300);
+
 // Retry transient LLM failures (rate limits, network) with exponential backoff + jitter, honoring
 // Retry-After when the error exposes it. Returns undefined ONLY after retries are exhausted — the caller
-// counts that as a real, reported failure, never a silent drop.
-export async function withRetry<T>(fn: () => Promise<T>, retries = 4): Promise<T | undefined> {
+// counts that as a real, reported failure, never a silent drop. `onFail` receives the final error so the
+// caller can surface WHY (e.g. the 401 text) instead of just counting; auth errors skip the retries.
+export async function withRetry<T>(fn: () => Promise<T>, retries = 4, onFail?: (e: any) => void): Promise<T | undefined> {
   for (let a = 0; ; a++) {
     try { return await fn(); }
     catch (e: any) {
-      if (a >= retries) return undefined;
+      if (a >= retries || isAuthError(e)) { onFail?.(e); return undefined; }
       const ra = Number(e?.retryAfter ?? e?.response?.headers?.["retry-after"] ?? e?.headers?.["retry-after"]);
       const ms = Number.isFinite(ra) && ra > 0 ? ra * 1000 : Math.min(30000, 400 * 2 ** a) + Math.floor(Math.random() * 300);
       await new Promise((r) => setTimeout(r, ms));

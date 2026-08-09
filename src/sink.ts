@@ -23,6 +23,8 @@ export const slugify = (s: string | undefined, fallback = "corpus") =>
 export const eidoSink: Sink = {
   name: "eido",
   emit(D, outDir, opts = {}) {
+    // an empty map is not a map — refusing here makes "emit 0 cards as success" structurally impossible
+    if (!D.ids.length) throw new Error("refusing to emit an empty map (0 cards)");
     const slug = opts.slug ?? slugify(D.provenance?.title);
     mkdirSync(outDir, { recursive: true });
     const enc = encodeMap(D);
