@@ -36,7 +36,46 @@
   let queryPct = $state<number | null>(null);   // download % when known (drives the thin progress bar)
   let showIntro = $state(false);
   let isoOpen = $state<string | null>(null);   // which categorical dimension's value list is expanded in the colour popover (M-A4)
-  let sheetOpen = $state(false);   // mobile: the toolbar's contents as a bottom sheet
+  let sheetOpen = $state(false);   // the toolbar's contents as a bottom sheet (mobile always; desktop when folded)
+
+  // ═══ PRIORITY COLLAPSE (eid-ef7e) — the desktop strip never clips a control mid-glyph. Below the
+  // measured fit width, lower-priority controls FOLD into the SAME controls sheet mobile uses (one
+  // affordance: "controls ▴" → sheetOpen). Tiers, folding earliest → latest, per the priority ruling
+  // (select · layout · color+grain · deck · reset view stay visible longest):
+  //   1 axes · size · window · find · +axis · labels · theme toggle · theme picker
+  //   2 reset view      3 deck      4 color · grain      0 = never (select, layout)
+  // The threshold is MEASURED, not hand-carved: folded controls stay in the DOM as absolute+invisible
+  // (out of flow but measurable), so needed(f) is the sum of real rendered widths — it adapts to
+  // whatever labels this corpus and layout produce. A ResizeObserver (width) + MutationObserver
+  // (content: the axes menu appearing, a label changing) re-run the same pure comparison.
+  let fold = $state(0);
+  const FOLD_MAX = 4;
+  const FOLDED = "pointer-events-none invisible absolute";
+  const foldCls = (scope: string, tier: number) => (scope === "bar" && tier > 0 && fold >= tier ? FOLDED : "");
+  function measureFold(row: HTMLElement) {
+    const GAP = 4, SLACK = 40;   // the strip's gap-1, + the row's paddings/dividers not itemized below
+    const els = [...row.querySelectorAll<HTMLElement>("[data-fold]")];
+    if (!els.length) return;
+    let fixed = SLACK;
+    for (const el of row.querySelectorAll<HTMLElement>("[data-fold-fixed]")) fixed += el.getBoundingClientRect().width + GAP;
+    const wTrig = (row.querySelector<HTMLElement>("[data-fold-trigger]")?.getBoundingClientRect().width ?? 0) + GAP;
+    const avail = row.clientWidth;
+    let f = 0;
+    for (; f < FOLD_MAX; f++) {
+      let need = fixed + (f > 0 ? wTrig : 0);
+      for (const el of els) { const t = +(el.dataset.fold || 0); if (t === 0 || t > f) need += el.getBoundingClientRect().width + GAP; }
+      if (need <= avail) break;
+    }
+    if (f !== fold) fold = f;
+  }
+  function foldWatch(node: HTMLElement) {
+    const run = () => measureFold(node);
+    const ro = new ResizeObserver(run); ro.observe(node);
+    // childList + characterData only (NOT attributes) — our own class flips don't re-trigger, so no loop
+    const mo = new MutationObserver(run); mo.observe(node, { childList: true, subtree: true, characterData: true });
+    run();
+    return { destroy() { ro.disconnect(); mo.disconnect(); } };
+  }
 
   // ── THEMES ────────────────────────────────────────────────────────────────────────────────────────
   // "Theme your own reader": a curated set of DaisyUI themes, stamped on <html data-theme>. The map now
@@ -671,7 +710,7 @@
 {#snippet controls(scope: string)}
   <!-- SELECT — a mode, not a menu: it changes what a drag on the map MEANS. While it is on, deck's own
        drag is off and the pointer draws a lasso; pinch-zoom keeps working. Keyboard: s / Escape. -->
-  <button data-testid="{scope}:select" aria-pressed={selectMode}
+  <button data-testid="{scope}:select" data-fold="0" aria-pressed={selectMode}
     class="btn btn-sm flex-none gap-1 normal-case {selectMode ? 'btn-active btn-primary' : 'btn-ghost'}"
     onclick={() => m.toggleSelectMode()}>
     <span aria-hidden="true">◌</span><span class="font-medium">select</span>
@@ -680,7 +719,7 @@
 
   <!-- LAYOUT — plus the two map-render overlays, which are layout-ish rather than encoding-ish -->
   <DropdownMenu.Root>
-    <DropdownMenu.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case" data-menu="{scope}:layout" aria-label="layout">
+    <DropdownMenu.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case" data-fold="0" data-menu="{scope}:layout" aria-label="layout">
       <span class="opacity-60">layout</span><span class="max-w-[9rem] truncate font-medium">{LAYOUT_LABELS[m.layout]}</span><span class="text-[9px] opacity-50">▾</span>
     </DropdownMenu.Trigger>
     <DropdownMenu.Portal>
@@ -702,7 +741,7 @@
   <!-- AXES — only meaningful in the scatter layouts; x/y/z with each dimension's own scale controls -->
   {#if m.layout === "axes" || m.layout === "axes3d"}
     <Popover.Root>
-      <Popover.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case" data-menu="{scope}:axes" aria-label="axes">
+      <Popover.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case {foldCls(scope, 1)}" data-fold="1" data-menu="{scope}:axes" aria-label="axes">
         <span class="opacity-60">axes</span><span class="max-w-[10rem] truncate font-medium">{xDim?.name ?? "—"} × {yDim?.name ?? "—"}</span><span class="text-[9px] opacity-50">▾</span>
       </Popover.Trigger>
       <Popover.Portal>
@@ -739,7 +778,7 @@
   <!-- COLOR — the picker AND the legend in one surface: what the colours mean, clickable to isolate,
        above the divider; the other lenses below it; the lens's own scale controls at the bottom. -->
   <Popover.Root>
-    <Popover.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case" data-menu="{scope}:color" aria-label="color">
+    <Popover.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case {foldCls(scope, 4)}" data-fold="4" data-menu="{scope}:color" aria-label="color">
       <span class="opacity-60">color</span>
       <span class="h-2.5 w-2.5 flex-none rounded-xs" style="background:{m.channels.color === 'region' ? rgb(colOf(0)) : colorDim?.kind === 'categorical' ? rgb(colOf(0)) : rgb(axisColor(1))}"></span>
       <span class="max-w-[9rem] truncate font-medium">{colorLabel}</span><span class="text-[9px] opacity-50">▾</span>
@@ -799,7 +838,7 @@
        resolution is a first-class, always-visible control. It briefly lived inside the colour popover —
        that conflated "where regions are displayed" with "what regions are". -->
   {#if nLevels > 1}
-    <label class="flex flex-none items-center gap-1.5 px-1 text-xs">
+    <label class="flex flex-none items-center gap-1.5 px-1 text-xs {foldCls(scope, 4)}" data-fold="4">
       <span class="flex-none font-mono text-[10px] uppercase opacity-60">grain</span>
       <input type="range" data-testid="grain" min="0" max={nLevels - 1} value={m.grain} oninput={(e) => m.setGrain(+(e.currentTarget as HTMLInputElement).value)} class="range range-xs w-20 min-w-0" aria-label="grain level: how finely the map is divided into regions" aria-valuetext="{curCount} regions" />
       <span class="w-6 flex-none text-right font-mono text-[10px] opacity-60">{curCount}</span>
@@ -808,7 +847,7 @@
 
   <!-- SIZE -->
   <Popover.Root>
-    <Popover.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case" data-menu="{scope}:size" aria-label="size">
+    <Popover.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case {foldCls(scope, 1)}" data-fold="1" data-menu="{scope}:size" aria-label="size">
       <span class="opacity-60">size</span><span class="max-w-[8rem] truncate font-medium">{sizeLabel}</span><span class="text-[9px] opacity-50">▾</span>
     </Popover.Trigger>
     <Popover.Portal>
@@ -829,7 +868,7 @@
        temporal one — the label always names it, so the button never claims to be about time when it isn't) -->
   {#if scrubFields.length && scrubRange && scrubField}
     <Popover.Root>
-      <Popover.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case" data-menu="{scope}:window" aria-label="window a dimension — currently {scrubField.name}">
+      <Popover.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case {foldCls(scope, 1)}" data-fold="1" data-menu="{scope}:window" aria-label="window a dimension — currently {scrubField.name}">
         <span class="opacity-60">window</span><span class="max-w-[6rem] truncate">{scrubField.name}</span><span class="max-w-[10rem] truncate font-mono text-xs">{scrubText}</span><span class="text-[9px] opacity-50">▾</span>
       </Popover.Trigger>
       <Popover.Portal>
@@ -857,7 +896,7 @@
   {/if}
 
   <!-- FIND — substring over title/body, mirrored into the filter chips -->
-  <label class="input input-sm w-40 flex-none gap-1">
+  <label class="input input-sm w-40 flex-none gap-1 {foldCls(scope, 1)}" data-fold="1">
     <span class="opacity-50">⌕</span>
     <input type="search" value={m.query} oninput={(e) => m.onFind(e.currentTarget.value)} placeholder="find a card…" aria-label="find a card" class="min-w-0 grow" />
   </label>
@@ -865,7 +904,7 @@
   <!-- + AXIS — embed a question into a first-class dimension (an axis) you can place on any channel -->
   {#if store?.vectors()}
     <Popover.Root>
-      <Popover.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case" data-menu="{scope}:axis" aria-label="add an axis from a question">
+      <Popover.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case {foldCls(scope, 1)}" data-fold="1" data-menu="{scope}:axis" aria-label="add an axis from a question">
         <span class="font-medium">+ axis</span>
         <!-- M-D1: the 23MB cold-start must SHOW even when the popover is closed (a URL-restored query embeds
              in the background) — the trigger itself carries the working signal, in the app's own affordance style -->
@@ -902,11 +941,11 @@
 {/snippet}
 
 {#snippet rightControls(scope: string)}
-  <button class="btn btn-sm btn-ghost flex-none normal-case" onclick={() => (m.deckOpen = true)}>deck</button>
+  <button class="btn btn-sm btn-ghost flex-none normal-case {foldCls(scope, 3)}" data-fold="3" onclick={() => (m.deckOpen = true)}>deck</button>
   <!-- labels are a property of the region lens; off it the button would be meaningless, so it is
        presence-gated (the codebase's pattern for missing preconditions) rather than disabled-with-a-why -->
   {#if m.channels.color === "region"}
-    <button aria-pressed={labelsOn} class="btn btn-sm flex-none normal-case {labelsOn ? 'btn-active' : 'btn-ghost'}" onclick={() => (m.showLabels = !m.showLabels)} aria-label="toggle labels">labels</button>
+    <button aria-pressed={labelsOn} data-fold="1" class="btn btn-sm flex-none normal-case {foldCls(scope, 1)} {labelsOn ? 'btn-active' : 'btn-ghost'}" onclick={() => (m.showLabels = !m.showLabels)} aria-label="toggle labels">labels</button>
   {/if}
   <button class="btn btn-sm btn-ghost btn-square flex-none" onclick={toggleTheme} aria-label="toggle light or dark theme" title="toggle light or dark theme">{theme === "dark" ? "☾" : "☀"}</button>
   <DropdownMenu.Root>
@@ -927,7 +966,7 @@
       </DropdownMenu.Content>
     </DropdownMenu.Portal>
   </DropdownMenu.Root>
-  <button class="btn btn-sm btn-ghost flex-none normal-case" onclick={reset}>reset view</button>
+  <button class="btn btn-sm btn-ghost flex-none normal-case {foldCls(scope, 2)}" data-fold="2" onclick={reset}>reset view</button>
 {/snippet}
 
 <div class="flex h-screen w-screen flex-col overflow-hidden bg-base-100 text-base-content"
@@ -942,18 +981,23 @@
   <!-- ═══ TOP TOOLBAR — docked, always visible, states the whole view ═══ -->
   {#if data}
     <header class="z-30 flex-none border-b border-base-300 bg-base-200">
-      <!-- desktop: one dense row of labelled menus -->
-      <div class="hidden items-center gap-1 px-2 py-1.5 sm:flex">
-        <div class="flex min-w-0 max-w-[16rem] flex-none items-center gap-2 pr-1">
+      <!-- desktop: one dense row of labelled menus. PRIORITY COLLAPSE (eid-ef7e): the row is measured
+           (use:foldWatch) and lower-priority controls fold into the mobile controls sheet rather than
+           ever clipping mid-glyph — the strip shows a whole control or none of it. -->
+      <div use:foldWatch class="relative hidden items-center gap-1 px-2 py-1.5 sm:flex">
+        <div data-fold-fixed class="flex min-w-0 max-w-[16rem] flex-none items-center gap-2 pr-1">
           <span class="flex-none text-base leading-none">🔭</span>
           <div class="min-w-0">{@render about("bar")}</div>
         </div>
-        <div class="divider divider-horizontal mx-0 flex-none"></div>
-        <div class="thin-sb flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+        <div data-fold-fixed class="divider divider-horizontal mx-0 flex-none"></div>
+        <div class="flex min-w-0 flex-1 items-center gap-1">
           {@render controls("bar")}
         </div>
         <div class="flex flex-none items-center gap-1 pl-1">
           {@render rightControls("bar")}
+          <!-- the fold trigger — the SAME affordance mobile uses, opening the SAME sheet -->
+          <button data-fold-trigger data-menu="bar:controls" class="btn btn-sm btn-ghost flex-none normal-case {fold === 0 ? FOLDED : ''}"
+            onclick={() => (sheetOpen = true)} aria-label="open the folded controls" title="more controls — the ones the narrow window folded away">controls ▴</button>
         </div>
       </div>
 
@@ -1162,9 +1206,9 @@
     </div>
   {/if}
 
-  <!-- mobile controls sheet: the toolbar's contents, stacked -->
+  <!-- controls sheet: the toolbar's contents, stacked — mobile always; desktop when the bar has folded -->
   {#if sheetOpen && data}
-    <div class="fixed inset-0 z-50 sm:hidden">
+    <div class="fixed inset-0 z-50">
       <button class="absolute inset-0 h-full w-full bg-black/50" onclick={() => requestClose()} aria-label="close controls"></button>
       <div use:trapFocus tabindex="-1" role="dialog" aria-label="controls" class="thin-sb absolute inset-x-0 bottom-0 max-h-[85vh] overflow-auto rounded-t-2xl border-t border-base-300 bg-base-100 p-3 shadow-2xl">
         <div class="mx-auto mb-3 h-1 w-10 rounded-full bg-base-content/20"></div>

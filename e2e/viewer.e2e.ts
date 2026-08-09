@@ -37,7 +37,10 @@ const fails: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (cond) console.log("  ✓", msg); else { console.log("  ✗", msg); fails.push(msg); } };
 
 const browser = await chromium.launch();
-const p = await browser.newPage({ viewport: { width: 1600, height: 1050 }, deviceScaleFactor: 2, hasTouch: true });
+// 1960 wide: the full desktop toolbar (every tier unfolded, including the scatter layouts' axes menu)
+// measures ~1910px on this corpus — priority collapse (eid-ef7e) folds controls below that, and the
+// desktop tests here drive the UNFOLDED bar. The fold behaviour has its own section (16) below.
+const p = await browser.newPage({ viewport: { width: 1960, height: 1050 }, deviceScaleFactor: 2, hasTouch: true });
 const pageErrs: string[] = []; p.on("pageerror", (e) => pageErrs.push(String(e)));
 const consoleErrs: string[] = []; p.on("console", (m) => { if (m.type() === "error") consoleErrs.push(m.text()); });
 
@@ -753,6 +756,48 @@ try {
   ok(Math.abs(s.zoom - preSave.zoom) < 0.05, `views: …and the camera pose restores — zoom ${preSave.zoom.toFixed(2)}→${s.zoom.toFixed(2)}`);
   const colorName15 = await p.evaluate(() => (document.querySelector('[data-menu="bar:color"]') as HTMLElement)?.textContent?.trim());
   ok(!!colorName15?.includes("≈ blobby"), `views: the axis comes back under its own label — "${colorName15}"`);
+
+  // ── 16. PRIORITY COLLAPSE (eid-ef7e): at narrow desktop widths the toolbar FOLDS lower-priority
+  // controls into the mobile controls sheet instead of clipping them mid-glyph. Assert, at each width:
+  // no visible toolbar control (triggers included) renders partially clipped, the row never scrolls,
+  // and a folded control is still reachable — and WORKS — from the "controls ▴" sheet.
+  console.log("16. priority collapse — the toolbar folds, it never clips");
+  await p.goto(`${base}/index.html`);
+  await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
+  await btn(/explore/i).click().catch(() => {});
+  for (const w of [1960, 1280, 1100, 900]) {
+    await p.setViewportSize({ width: w, height: 1050 });
+    await p.waitForTimeout(250);
+    const r = await p.evaluate(() => {
+      const row = document.querySelector("header > div") as HTMLElement;
+      const clipped: string[] = [];
+      let visible = 0, folded = 0;
+      for (const el of row.querySelectorAll<HTMLElement>("[data-fold],[data-fold-trigger],[data-menu]")) {
+        const cs = getComputedStyle(el);
+        if (cs.visibility === "hidden" || cs.display === "none") { folded++; continue; }
+        visible++;
+        const b = el.getBoundingClientRect();
+        if (b.left < -0.5 || b.right > innerWidth + 0.5) clipped.push((el.dataset.menu || el.dataset.fold || "?") + ` [${Math.round(b.left)},${Math.round(b.right)}]`);
+      }
+      return { clipped, visible, folded, overflow: row.scrollWidth - row.clientWidth, trigger: !!row.querySelector("[data-fold-trigger]") && getComputedStyle(row.querySelector("[data-fold-trigger]")!).visibility === "visible" };
+    });
+    ok(r.clipped.length === 0, `fold @${w}: no visible control clips — ${r.visible} whole controls${r.clipped.length ? " · CLIPPED " + r.clipped.join(", ") : ""}`);
+    ok(r.overflow <= 0, `fold @${w}: the toolbar row does not scroll (overflow ${r.overflow}px)`);
+    if (w < 1960) ok(r.folded > 0 && r.trigger, `fold @${w}: lower-priority controls folded (${r.folded}) behind a visible "controls ▴"`);
+    else ok(!r.trigger, `fold @${w}: nothing folded at full width — the trigger stays hidden`);
+  }
+  // the folded controls still WORK from the sheet: at 1100 `size` is folded off the bar; place a
+  // dimension on size through the sheet and assert the channel actually changed.
+  ok(await p.evaluate(() => getComputedStyle(document.querySelector('[data-menu="bar:size"]')!).visibility === "hidden"), "fold @1100: the bar's size trigger is folded away, whole — not clipped");
+  await p.click('[data-menu="bar:controls"]'); await p.waitForTimeout(300);
+  await p.click('[data-menu="sheet:size"]'); await p.waitForTimeout(250);
+  await p.click('[data-opt="sheet:size:length"]'); await p.waitForTimeout(250);
+  await p.keyboard.press("Escape"); await p.waitForTimeout(150);   // close the popover…
+  await p.keyboard.press("Escape"); await p.waitForTimeout(250);   // …then the sheet
+  ok(await p.evaluate(() => (window as any).__eido().visible >= 0 && !document.querySelector('[data-opt="sheet:size:length"]')), "fold: sheet + its menus dismiss cleanly");
+  const foldedSize = await p.evaluate(() => (document.querySelector('[data-menu="bar:size"]') as HTMLElement)?.textContent?.trim());
+  ok(!!foldedSize && !foldedSize.includes("uniform"), `fold: a folded control still works from the sheet — size channel now "${foldedSize}"`);
+  await p.setViewportSize({ width: 1960, height: 1050 }); await p.waitForTimeout(250);
 
   ok(consoleErrs.length === 0, "no console errors during the run" + (consoleErrs.length ? " — " + consoleErrs[0] : ""));
 } finally {
