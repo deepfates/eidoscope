@@ -555,6 +555,85 @@ try {
   ok(Math.abs(yB - yA) > 0.05 && yMid.size >= 4, `mobile: camera fit EASES, not jumps — ${yMid.size} distinct intermediate camera frames across targetY ${yA?.toFixed(2)}→${yB?.toFixed(2)} (eid-aw7x)`);
   await mp.close();
 
+  // ═══ 15. SECOND BINDINGS (eid-hsy3, M-A) — every critical command gets an expert route ═══════════
+  await p.goto(`${base}/index.html`);
+  await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
+  await btn(/explore/i).click().catch(() => {});
+  await p.waitForTimeout(250);
+
+  // 15a. `l` toggles region labels (M-A3)
+  s = await st();
+  ok(s.labelsOn === true, "region labels start on under the region lens");
+  await p.keyboard.press("l"); await p.waitForTimeout(150);
+  ok((await st()).labelsOn === false, "the `l` key toggles region labels off");
+  await p.keyboard.press("l"); await p.waitForTimeout(150);
+  ok((await st()).labelsOn === true, "…and back on");
+
+  // 15b. `d` opens the deck (M-A3); Escape still closes it
+  await p.keyboard.press("d"); await p.waitForTimeout(250);
+  ok((await st()).deckOpen === true, "the `d` key opens the deck");
+  await p.keyboard.press("Escape"); await p.waitForTimeout(250);
+  ok((await st()).deckOpen === false, "Escape closes it again");
+
+  // 15c. camera keyboard routes (M-A5): arrows pan, =/- zoom — native key repeat gives hold-to-move
+  s = await st(); const kt0 = s.target, kz0 = s.zoom;
+  await p.keyboard.press("ArrowRight"); await p.keyboard.press("ArrowRight"); await p.waitForTimeout(150);
+  s = await st();
+  ok(!!s.target && s.target[0] !== kt0[0], `ArrowRight pans the camera — targetX ${kt0[0].toFixed(3)}→${s.target[0].toFixed(3)}`);
+  await p.keyboard.press("ArrowUp"); await p.waitForTimeout(150);
+  s = await st();
+  ok(s.target[1] !== kt0[1], `ArrowUp pans on the other axis — targetY ${kt0[1].toFixed(3)}→${s.target[1].toFixed(3)}`);
+  await p.keyboard.press("="); await p.waitForTimeout(150);
+  s = await st();
+  ok(s.zoom > kz0, `the + key zooms in — ${kz0.toFixed(2)}→${s.zoom.toFixed(2)}`);
+  await p.keyboard.press("-"); await p.waitForTimeout(150);
+  ok((await st()).zoom < s.zoom, "the - key zooms back out");
+
+  // 15d. `r` resets the view (M-A3): move grain off the default, then one key restores it
+  await setGrain(0); await p.waitForTimeout(150);
+  ok((await st()).grain === 0, "grain moved off the default (setup)");
+  await p.keyboard.press("r"); await p.waitForTimeout(300);
+  ok((await st()).grain === 2, "the `r` key resets the view (grain back to the file's default)");
+
+  // 15e. shift+arrows orbit in 3D (M-A5)
+  await p.goto(`${base}/index.html?layout=orbit`);
+  await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
+  await btn(/explore/i).click().catch(() => {});
+  await p.waitForTimeout(250);
+  s = await st(); const rot0 = s.rot, rotX0 = s.rotX;
+  await p.keyboard.press("Shift+ArrowRight"); await p.waitForTimeout(150);
+  s = await st();
+  ok(s.rot !== rot0, `shift+ArrowRight orbits the 3D camera — rot ${rot0}→${s.rot}`);
+  await p.keyboard.press("Shift+ArrowUp"); await p.waitForTimeout(150);
+  ok((await st()).rotX !== rotX0, `shift+ArrowUp tilts it — rotX ${rotX0}→${(await st()).rotX}`);
+
+  // 15f. region.drill's second binding (M-A1): the `drill in` button in the region pane — same act as
+  // double-clicking a member point, reachable without a pointer gesture.
+  await p.goto(`${base}/index.html`);
+  await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
+  await btn(/explore/i).click().catch(() => {});
+  await p.waitForTimeout(250);
+  const gDrill = (await st()).grain;
+  await menu("color");
+  await p.locator('button[aria-label^="isolate region"]').first().click(); await p.waitForTimeout(200);
+  await closeMenus();
+  await p.locator("[data-testid=region-drill]").first().click(); await p.waitForTimeout(500);
+  s = await st();
+  ok(s.grain > gDrill, `the region pane's 'drill in' button steps grain finer — ${gDrill}→${s.grain}`);
+  ok(s.pin === null, "…and the stale region filter goes with the old grain (same as double-click drill)");
+  await btn(/^reset view$/).click(); await p.waitForTimeout(250);
+
+  // 15g. facet.isolate from the dimension's OWN value list (M-A4): isolate by author while colour stays
+  // on region — isolate is a corpus command, no longer welded to the colour channel.
+  await menu("color");
+  await p.click('[data-iso="bar:author"]'); await p.waitForTimeout(150);
+  await p.locator('button[aria-label^="isolate author"]').first().click(); await p.waitForTimeout(250);
+  await closeMenus();
+  s = await st();
+  ok(s.color === "region", `the colour lens did not move — still ${s.color}`);
+  ok(s.filters.length === 1 && s.visible < 90, `…yet the author facet filters the corpus — filters=${JSON.stringify(s.filters)} visible=${s.visible}/90`);
+  await btn(/^reset view$/).click(); await p.waitForTimeout(250);
+
   ok(consoleErrs.length === 0, "no console errors during the run" + (consoleErrs.length ? " — " + consoleErrs[0] : ""));
 } finally {
   await browser.close();

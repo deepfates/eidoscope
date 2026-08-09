@@ -23,6 +23,13 @@ export type MapHandle = {
   setFilterMask: (mask: ArrayLike<number> | null) => void;  // unified filter: 1 = passes all active filters, 0 = hidden
   fitToIndices: (idx: number[]) => void;
   resetView: () => void;
+  // camera keyboard routes (M-A5): screen-px pan, zoom steps, and (3D only) orbit steps. Hold-to-repeat
+  // comes free from the browser's native key repeat — each call is one small step.
+  panBy: (dxPx: number, dyPx: number) => void;
+  zoomBy: (d: number) => void;
+  orbitBy: (dAz: number, dEl: number) => void;
+  // second binding for region.drill (M-A1): drill from any member index — same code path as double-click.
+  drillIndex: (i: number) => void;
   destroy: () => void;
   debug: () => { zoom: number; labels: number; regions: number; grain: number; rot: number | null; rotX: number | null; target: number[] | null; span3: number };  // read-only seam for integration tests
   project: (world: number[]) => number[];  // world [x,y,z?] → screen px, so tests can click exact nodes/ghosts
@@ -447,6 +454,27 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
       return selectInPolygon({ count: n, positionOf: pos, project: (w) => vp.project(w), path, mask, clipZ: is3d(layout) });
     },
     resetView: () => { viewState = home(layout); deck.setProps({ viewState }); },
+    // keyboard camera: pan in screen px (converted at the live zoom), zoom in deck zoom units (clamped to
+    // the layout's own bounds), orbit in degrees (3D only — a 2D view has no rotation to change).
+    panBy: (dxPx, dyPx) => {
+      const scale = Math.pow(2, viewState?.zoom ?? 0) || 1;
+      const t = viewState?.target ?? [0, 0, 0];
+      viewState = { ...viewState, target: [t[0] + dxPx / scale, t[1] + dyPx / scale, t[2] ?? 0] };
+      deck.setProps({ viewState });
+    },
+    zoomBy: (d) => {
+      const h = home(layout);
+      const z = Math.max(h.minZoom, Math.min(h.maxZoom, (viewState?.zoom ?? h.zoom) + d));
+      viewState = { ...viewState, zoom: z };
+      deck.setProps({ viewState });
+      if (showLabels && !is3d(layout)) paintLabels();   // reveal-on-zoom parity with the wheel path
+    },
+    orbitBy: (dAz, dEl) => {
+      if (!is3d(layout)) return;
+      viewState = { ...viewState, rotationOrbit: (viewState?.rotationOrbit ?? 0) + dAz, rotationX: Math.max(-89, Math.min(89, (viewState?.rotationX ?? 0) + dEl)) };
+      deck.setProps({ viewState });
+    },
+    drillIndex: (i) => { if (i >= 0 && i < n) drill(i); },
     setFilterMask: (mask) => { filterMask = mask; filterVer++; paint(); },
     destroy: () => deck.finalize(),
   };

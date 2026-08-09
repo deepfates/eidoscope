@@ -198,7 +198,8 @@ export class ViewModel {
     return Array.from({ length: k }, (_, c) => ({ c, label: labels?.[c] ?? D.clusters[c]?.label ?? "region " + c, n: cnt[c] }));
   });
   membersOf = (c: number) => { const out: number[] = []; this.assignment.forEach((v, i) => { if (v === c) out.push(i); }); return out; };
-  facetMembers = (v: string) => { const out: number[] = []; const d = this.colorDim; if (!d?.cat || !this.data) return out; for (let i = 0; i < this.data.ids.length; i++) if (d.cat(i) === v) out.push(i); return out; };
+  facetMembers = (v: string) => this.facetMembersOf(this.colorDim?.key ?? "", v);
+  facetMembersOf = (key: string, v: string) => { const out: number[] = []; const d = this.allDims.find((x) => x.key === key); if (!d?.cat || !this.data) return out; for (let i = 0; i < this.data.ids.length; i++) if (d.cat(i) === v) out.push(i); return out; };
 
   // ---- filters ----
   // Region isolate = a hard filter on the cluster at the current grain.
@@ -209,14 +210,18 @@ export class ViewModel {
     this.pinned = c;
     return { kind: "fit", indices: this.membersOf(c) };
   }
-  // Facet isolate = a hard filter on the colour dimension's value.
-  toggleFacetPin(v: string): CameraOp {
-    const key = this.colorDim?.key; if (!key) return null;
+  // Facet isolate = a hard filter on a categorical dimension's value. A corpus command, not a channel one
+  // (M-A4): it works on ANY categorical dimension, not only the one currently on colour.
+  toggleFacet(key: string, v: string): CameraOp {
+    if (!this.allDims.find((d) => d.key === key)?.cat) return null;
     const i = this.filters.findIndex((f) => f.kind === "cat" && f.key === key && f.value === v);
     if (i >= 0) { this.filters = this.filters.filter((_, j) => j !== i); return { kind: "reset" }; }
     this.filters = [...this.filters.filter((f) => !(f.kind === "cat" && f.key === key)), { kind: "cat", key, label: v, value: v }];
-    return { kind: "fit", indices: this.facetMembers(v) };
+    return { kind: "fit", indices: this.facetMembersOf(key, v) };
   }
+  toggleFacetPin(v: string): CameraOp { const key = this.colorDim?.key; return key ? this.toggleFacet(key, v) : null; }
+  // which value (if any) is isolated on a given dimension — the generalized read behind facetPin.
+  facetPinOf = (key: string): string | null => (this.filters.find((x) => x.kind === "cat" && x.key === key) as Extract<Filter, { kind: "cat" }> | undefined)?.value ?? null;
   removeFilter(f: Filter) { this.filters = this.filters.filter((x) => x !== f); if (f.kind === "region") this.pinned = null; if (f.kind === "text") this.query = ""; }
   // "clear all filters" clears FILTERS. A held selection is not a filter (it has no chip, and it only
   // becomes one via filterToSelection) — destroying it here silently ate a lasso the user had just drawn.
@@ -297,11 +302,7 @@ export class ViewModel {
   // dimension colour currently shows". Switching the colour lens therefore cannot delete a filter (it used
   // to — an effect wrote state and ate "author = Alice" when you coloured by folder); the filter lives on
   // its DIMENSION, keeps filtering, keeps its chip, and lights its legend row again when you come back.
-  facetPin = $derived.by((): string | null => {
-    const key = this.colorDim?.key; if (!key) return null;
-    const f = this.filters.find((x) => x.kind === "cat" && x.key === key) as Extract<Filter, { kind: "cat" }> | undefined;
-    return f?.value ?? null;
-  });
+  facetPin = $derived.by((): string | null => { const key = this.colorDim?.key; return key ? this.facetPinOf(key) : null; });
   // text search = a filter (hard hide), synced from the find box — no separate deck path.
   onFind(v: string) {
     this.query = v; const q = v.trim();

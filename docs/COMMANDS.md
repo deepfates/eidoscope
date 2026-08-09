@@ -33,17 +33,17 @@ slot), `dimension` (one per-card field), `corpus` (the filter set), `card`, `cam
 | 9 | `color.set` | *put* a dimension on colour · channel | `color ▾` popover, "color by" list; the ● button on a query chip | dimension key or `region` | every point recolours; the legend above becomes that dimension's legend | `?color=` | Tab→Enter | `color → region` |
 | 10 | `size.set` | *put* a dimension on size · channel | `size ▾` popover | dimension key or `uniform` | point radii change | `?size=` | Tab→Enter | `size → uniform` |
 | 11 | `grain.set` | *set* clustering grain · view | **toolbar slider** (always visible; a parameter of the region dimension, not of any channel) | 0…nLevels-1 | regions merge/split; the count next to the slider and in the toolbar updates | `?grain=` | Tab→arrows | `reset view` |
-| 12 | `labels.toggle` | *toggle* region labels · chrome | `region labels` button (disabled off the region lens, with a tooltip saying why) | — | region names appear/disappear on the map | **n** | Tab→Enter | same button |
+| 12 | `labels.toggle` | *toggle* region labels · chrome | `region labels` button (disabled off the region lens, with a tooltip saying why) | — | region names appear/disappear on the map | **n** | Tab→Enter · **l** | same button |
 | **Selecting — narrowing the corpus** |
 | 13 | `region.isolate` | *isolate* one region · corpus | click a legend row under colour = region (the row shows `isolate` / `release` on hover or focus) | cluster id | non-members hidden, camera flies to the set, chip appears, `N / M cards` updates, region detail pane opens | `?region=` | Tab→Enter | click again · chip ✕ · `reset view` |
-| 14 | `facet.isolate` | *isolate* one categorical value · corpus | click a legend row under a categorical colour lens (same visible `isolate` cue) | value | same as above, for that value | `?facet=` | Tab→Enter | click again · chip ✕ · `reset view` |
+| 14 | `facet.isolate` | *isolate* one categorical value · corpus | click a legend row under a categorical colour lens (same visible `isolate` cue); the ▾ value list every categorical dimension carries in the colour popover (works whatever colour shows) | value | same as above, for that value | `?facet=` | Tab→Enter | click again · chip ✕ · `reset view` |
 | 15 | `find.set` | *filter* by substring · corpus | the `⌕ find a card…` input | text | non-matching cards hidden, chip `"…"`, `N / M cards` updates | `?find=` | type | empty the box · chip ✕ · `reset view` |
 | 16 | `scrub.field` | *choose* which dimension the window applies to · channel | select inside the `window ▾` popover | dimension key | the slider re-ranges; any existing window is cleared | `?sk=` | Tab→select | pick another |
 | 17 | `scrub.window` | *window* a scalar/temporal range · corpus | dual-thumb slider in `window <dim> ▾` | lo, hi | out-of-range cards hidden, chip `<dim> window` | `?slo= ?shi=` | Tab→arrows | `clear` · chip ✕ · `reset view` |
 | 18 | `filter.remove` | *remove* one filter · corpus | click a chip | the filter | that constraint lifts | (its param drops) | Tab→Enter | re-apply |
 | 19 | `filter.clearAll` | *remove* every filter · corpus | `clear all filters` (only shown with ≥2 chips) | — | all constraints lift | (params drop) | Tab→Enter | — |
 | **Interrogating — asking the corpus a question** |
-| 20 | `query.add` | *create* a semantic dimension · view | `+ axis ▾` popover → `add` / Enter | text | a new dimension appears in **every** channel menu; badge count increments. **Nothing on the map moves** (see M-D1) | `?q=` (repeatable) | type + Enter | the ✕ on the query chip |
+| 20 | `query.add` | *create* a semantic dimension · view | `+ axis ▾` popover → `add` / Enter | text | a new dimension appears in **every** channel menu; badge count increments; the fresh chip scrolls into view and takes focus; the 23MB cold-start shows as live progress in the popover AND a spinner on the `+ axis` button itself. **Nothing on the map moves** (by design) | `?q=` (repeatable) | type + Enter | the ✕ on the query chip |
 | 21 | `query.remove` | *delete* a semantic dimension · view | ✕ on the axis chip | key | every channel holding it falls back to its default | (param drops) | Tab→Enter | re-add |
 | **Holding — a frozen set of cards (SELECT / DERIVE)** |
 | 22 | `select.mode` | *arm* the lasso · view | `select` toolbar button (desktop + phone controls sheet) | — | button lights, hint "drag to circle cards · Escape to leave"; map drag now draws instead of panning. **Nothing else changes** | n | **s** · Escape leaves | same button · Escape · `reset view` |
@@ -58,22 +58,22 @@ slot), `dimension` (one per-card field), `corpus` (the filter set), `card`, `cam
 | **Reading — the cards themselves** |
 | 31 | `card.open` | *open* one card · card | click a point; click a deck row; click a neighbour in the detail pane | index | detail pane docks right (bottom sheet on phones): restatement, axis placements, neighbours, source links | `?card=` | via the deck | ✕ · Escape · Back |
 | 32 | `card.hover` | *preview* one card · card | hover a point | — | tooltip: region, title, first ~140 chars | n | **n** | move away |
-| 33 | `region.drill` | *descend* into a region · view | **double-click a point** | index | grain steps finer (≤3 levels) until the region splits; camera fits the sub-region | (via `?grain=`) | **n** | `reset view` |
-| 34 | `deck.open` | *list* the corpus · view | `deck` button (desktop + phone) | — | modal list of every card — the screen-reader-accessible view of the map | **n** | Tab→Enter | ✕ · Escape · Back |
+| 33 | `region.drill` | *descend* into a region · view | **double-click a point**; `drill in` in the region detail pane | index | grain steps finer (≤3 levels) until the region splits; camera fits the sub-region | (via `?grain=`) | Tab→Enter (via the pane) | `reset view` |
+| 34 | `deck.open` | *list* the corpus · view | `deck` button (desktop + phone) | — | modal list of every card — the screen-reader-accessible view of the map | **n** | Tab→Enter · **d** | ✕ · Escape · Back |
 | 35 | `deck.sort` | *sort* the list · channel | select inside the deck | dimension key | rows reorder | **n** | Tab→select | pick another |
 | 36 | `deck.filter` | *filter* the list · **deck only** | `find in list…` input inside the deck | text | rows narrow. **Does not touch the map or the chips** (see M-N2) | **n** | type | empty the box |
 | 37 | `deck.unread` | *filter* to unread · **deck only** | `unread only` toggle (only when the corpus carries read state) | — | read rows hidden | **n** | Tab→Enter | same button |
 | 38 | `source.open` | *open* the original · card | links in the detail pane and on deck rows | — | new tab | n | Tab→Enter | — |
 | **Camera** |
-| 39 | `camera.pan` | *move* the camera · camera | drag | — | view translates | n | **n** | `reset view` |
-| 40 | `camera.zoom` | *scale* the camera · camera | wheel / pinch | — | zoom; more region labels reveal as you go in | n | **n** | `reset view` |
-| 41 | `camera.rotate` | *orbit* the camera · camera | drag in a 3D layout | — | view rotates | n | **n** | `reset view` |
+| 39 | `camera.pan` | *move* the camera · camera | drag; **arrow keys** (hold to repeat) | — | view translates | n | **arrows** | `reset view` |
+| 40 | `camera.zoom` | *scale* the camera · camera | wheel / pinch; **+ / −** keys | — | zoom; more region labels reveal as you go in | n | **+ / −** | `reset view` |
+| 41 | `camera.rotate` | *orbit* the camera · camera | drag in a 3D layout; **shift+arrows** | — | view rotates | n | **shift+arrows** | `reset view` |
 | 42 | `camera.fit` | *frame* a set · camera | implicit in `region.isolate` / `facet.isolate` / `region.drill` | indices | camera transitions to the set | n | — | `reset view` |
 | **Chrome** |
 | 43 | `theme.flipGround` | *flip* light⇄dark · chrome | `☾ / ☀` button | — | whole app **and the map canvas** re-ink from the theme's tokens | `?theme=` | Tab→Enter | same button |
 | 44 | `theme.set` | *set* the theme · chrome | theme `▾` menu (10 themes, each with a swatch) | theme id | as above | `?theme=` | Tab→Enter | pick another |
 | 45 | `controls.sheet` | *reveal* the controls · chrome | `controls ▴` (phone only — renders the identical `controls()` snippet) | — | bottom sheet with every toolbar command | n | Tab→Enter | Escape · Back |
-| 46 | `view.reset` | *reset* filters + selection + grain + camera · view | `reset view` button | — | every chip clears, card closes, grain returns to the file's default, camera goes home | (params drop) | Tab→Enter | — |
+| 46 | `view.reset` | *reset* filters + selection + grain + camera · view | `reset view` button | — | every chip clears, card closes, grain returns to the file's default, camera goes home | (params drop) | Tab→Enter · **r** | — |
 | 47 | `overlay.close` | *close* the topmost overlay · view | ✕ buttons; **Escape**; browser **Back** | — | intro / deck / sheet / card closes | n | **Escape** | re-open |
 
 ### Bindings that are not user commands
@@ -90,22 +90,26 @@ docked rather than modal so the toolbar stays operable while you read.
 
 ### M-A · One binding where a second is cheap
 
-- **M-A1 `region.drill` is double-click and nothing else.** It is one of the four things the intro
-  teaches, it has no keyboard route, no menu item, and no direct URL form (only the `?grain=` it
-  happens to move). Cheap second binding: a "drill in" item in the region detail pane, which is
-  already open and already knows the region.
+- ~~**M-A1 `region.drill` is double-click and nothing else.**~~ **FIXED 2026-08-09** — the region
+  detail pane carries a `drill in` button (the pane already knows the region), driving the exact
+  drill path double-click uses. Double-click stays.
 - ~~**M-A2 `grain.set` is reachable only from inside the colour popover, and only while colour = region.**~~ **FIXED 2026-08-06** — grain is a first-class toolbar control at every lens.
   Grain still governs the regions the hover tooltip names, the region filter, and the drill target
   under *every* lens — but the moment you colour by anything else, the control vanishes. The state is
   still shown ("21 regions" in the toolbar), so the user can see a thing they can no longer touch.
-- **M-A3 `labels.toggle`, `deck.open`, `view.reset` have no expert route.** Every critical command is
-  supposed to get a discoverable route *and* an expert one; these have only the button.
-- **M-A4 `facet.isolate` can only isolate on the dimension currently on the colour channel.** You
-  cannot isolate by folder while colouring by influence. The model even drops your facet filter
-  silently when you switch lens (`dropStaleFacets`). Isolate is a *corpus* command tied to a *channel*.
-- **M-A5 `camera.*` has no keyboard route at all.** Pan/zoom/rotate are pointer-only; there is no
-  keyboard path to move the camera, which makes the whole map keyboard-inoperable except through the
-  deck.
+- ~~**M-A3 `labels.toggle`, `deck.open`, `view.reset` have no expert route.**~~ **FIXED 2026-08-09** —
+  single keys in the style of `s`: **l** toggles region labels, **d** opens the deck, **r** resets the
+  view. Skipped while typing, while a menu is open, or under a modal overlay; the buttons' tooltips
+  name their keys.
+- ~~**M-A4 `facet.isolate` can only isolate on the dimension currently on the colour channel.**~~
+  **FIXED 2026-08-09** — every categorical dimension in the colour popover's "color by" list carries a
+  ▾ disclosure opening its own value list with the same visible `isolate`/`release` rows the legend
+  uses, so you can isolate by folder while colouring by influence (or region). The model's
+  `toggleFacet(key, value)` is dimension-addressed; the colour-lens legend is now just one caller.
+  (The `dropStaleFacets` half of the complaint was already gone — see M-D2.)
+- ~~**M-A5 `camera.*` has no keyboard route at all.**~~ **FIXED 2026-08-09** — arrows pan, **+/−**
+  zoom (clamped to the layout's own bounds, with the same reveal-on-zoom label behaviour as the
+  wheel), **shift+arrows** orbit in 3D. Hold-to-repeat rides the browser's native key repeat.
 
 ### M-B · The URL claims to mirror the view, and doesn't
 
@@ -137,15 +141,20 @@ The ticket's rule is: always expose the current scope, never say "these".
 
 ### M-D · The result is invisible
 
-- **M-D1 `query.add` is the sharpest case.** You type a question, press ⌕, wait through a 23MB model
-  download — and the map does not change. The dimension was created but placed on no channel (a
-  deliberate decision: "making an axis and placing it are separate acts"). The only feedback is a
-  badge counter. The decision is right; the *feedback* is missing — it should say what was made and
-  offer the placement, e.g. "semantic axis added — put it on colour / size / x".
-- **M-D2 `dropStaleFacets` deletes a filter with no explanation.** Switching the colour lens makes an
-  active facet chip vanish. The user did not remove it and is not told why it went.
-- **M-D3 `deck.sort` has no effect until the deck is open**, and there is no sort control outside the
-  deck — so setting a channel from one surface produces a result only visible on another.
+- ~~**M-D1 `query.add` is the sharpest case.**~~ **FIXED 2026-08-09** — the result is now visual at
+  every stage: the 23MB cold start shows live status + a progress bar in the popover *and* a spinner
+  on the `+ axis` toolbar button itself (so a background embed — e.g. a URL-restored query — is
+  visible with the popover closed); on success the new chip scrolls into view and takes focus, plus
+  the badge increments and the ● placement shortcut sits on the chip. The map still moves nothing —
+  making an axis and placing it stay separate acts.
+- ~~**M-D2 `dropStaleFacets` deletes a filter with no explanation.**~~ **FIXED (verified 2026-08-09)** —
+  `dropStaleFacets` no longer exists: the isolated facet value is *derived* ("is there a categorical
+  filter on the dimension colour currently shows"), so switching the lens cannot delete a filter. The
+  filter lives on its dimension, keeps its chip, and lights its legend row again when you come back.
+- ~~**M-D3 `deck.sort` has no effect until the deck is open.**~~ **RESOLVED (verified 2026-08-09)** —
+  the sort control now exists only inside the deck, the one surface where sort has a visible meaning,
+  and rows reorder immediately when it changes; control and result share a surface. (The channel
+  still doesn't serialize — that remains M-B3.)
 - **M-D4 (fixed)** The `labels.toggle` command had no observable result through the `__eido` seam at
   all: the seam reported the number of label *candidates*, which does not move when you toggle
   labels. Found by asserting on it and watching `5 → 5`. Fixed by adding `labelsOn`.
@@ -322,3 +331,17 @@ one genuinely new manifest-only dimension.
   Not serialized (camera never has been). Undo: `reset view`.
 - **`card.open` uses an overlay pane.** The reading pane no longer resizes the map — it overlays the
   right edge — so opening a card cannot shift the layout under a click.
+
+## Amendments — 2026-08-09 (eid-hsy3: second bindings + visible results)
+
+- **Keyboard routes**: `l` region labels · `d` deck · `r` reset view · arrows pan · `+`/`−` zoom ·
+  shift+arrows orbit (3D). All skipped while typing, while a menu is open, or under a modal overlay,
+  matching `s`'s discipline; hold-to-repeat is the browser's native key repeat.
+- **`region.drill` second binding**: `drill in` in the region detail pane (same code path as
+  double-click, via the deck handle's `drillIndex`).
+- **`facet.isolate` generalized**: `toggleFacet(key, value)` in the model is dimension-addressed;
+  every categorical dimension's ▾ value list in the colour popover isolates without touching the
+  colour channel. The legend under a categorical lens is unchanged.
+- **`query.add` shows**: spinner on the `+ axis` trigger during any embed (popover open or not);
+  the fresh chip scrolls into view and takes focus.
+- All of the above driven in the e2e net (`e2e/viewer.e2e.ts` §15) against the real built viewer.
