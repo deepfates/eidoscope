@@ -59,7 +59,7 @@ test("nonexistent corpus folder → one line, exit 1, no stack", async () => {
 test("export with missing args → usage to stderr, exit 1", async () => {
   const r = await cli(["export"]);
   expect(r.code).toBe(1);
-  expect(r.err.trim()).toBe("usage: eidoscope export <map.eido> [--out <dir>]");
+  expect(r.err.trim()).toBe("usage: eidoscope export <map.eido> [--as vault|deck|html] [--out <dir>]");
 });
 
 test("descend with missing args → usage to stderr, exit 1", async () => {

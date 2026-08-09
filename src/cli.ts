@@ -19,7 +19,7 @@ import { folderSource, fixtureSource, splitOversized, type Source } from "./corp
 import { embedDocs } from "./map.ts";
 import { run, relabelMap, descendMap } from "./pipeline.ts";
 import { decodeMap } from "./mapbin.ts";
-import { eidoSink, vaultSink, slugify } from "./sink.ts";
+import { eidoSink, vaultSink, deckSink, slugify } from "./sink.ts";
 import { llmUsageLine } from "./signatures.ts";
 import { CFG } from "./config.ts";
 import type { MapContract } from "./schema.ts";
@@ -27,7 +27,10 @@ import type { MapContract } from "./schema.ts";
 // The truth about what this binary does — every verb and flag here exists in this file, no more, no less.
 const USAGE = `usage: eidoscope <folder> [flags]                 map any folder of .md/.txt files → out/<slug>/
        eidoscope example                          try it on the bundled demo corpus
-       eidoscope export <map.eido> [--out <dir>]  export a map as a markdown vault (itself a valid corpus)
+       eidoscope export <map.eido> [--as vault|deck|html] [--out <dir>]
+                                                  export a map: markdown vault (default; itself a valid
+                                                  corpus), deck JSONL (one card per line), or the
+                                                  self-contained single-file HTML
        eidoscope descend <parent.eido> <selection.json> [--out <dir>] [--name <title>]
                                                   re-map a viewer-exported selection as its own child map
        eidoscope --relabel <dir-with-a-.eido>     re-name regions of an existing map (no re-carding)
@@ -87,15 +90,30 @@ const positional = (from: number, valflags: Set<string>) => {
   return pos;
 };
 
-// export: a decoded map goes OUT through a sink (src/sink.ts). Today: the markdown vault.
+// export: a decoded map goes OUT through a sink (src/sink.ts) — vault (default), deck JSONL, or the
+// single-file HTML. The SAME emits the app's Export menu speaks (src/export.ts), so neither host forks.
 if (args[0] === "export") {
-  const [mapPath] = positional(1, new Set(["--out"]));
-  if (!mapPath) { console.error("usage: eidoscope export <map.eido> [--out <dir>]"); process.exit(1); }
+  const [mapPath] = positional(1, new Set(["--out", "--as"]));
+  if (!mapPath) { console.error("usage: eidoscope export <map.eido> [--as vault|deck|html] [--out <dir>]"); process.exit(1); }
+  const as = val("--as") || "vault";
   const D = readEido(mapPath);
-  const outDir = val("--out") || join("out", slugify(D.provenance?.title, basename(mapPath, ".eido")) + "-vault");
-  const files = vaultSink.emit(D, outDir);
-  console.error(`\n✅ exported ${files.length} cards as a markdown vault  →  ${outDir}/`);
-  console.error(`   (a vault is itself a corpus: \`eidoscope ${outDir}\` re-ingests it)`);
+  const fallback = basename(mapPath, ".eido");
+  if (as === "vault") {
+    const outDir = val("--out") || join("out", slugify(D.provenance?.title, fallback) + "-vault");
+    const files = vaultSink.emit(D, outDir);
+    console.error(`\n✅ exported ${files.length} cards as a markdown vault  →  ${outDir}/`);
+    console.error(`   (a vault is itself a corpus: \`eidoscope ${outDir}\` re-ingests it)`);
+  } else if (as === "deck") {
+    const outDir = val("--out") || join("out", slugify(D.provenance?.title, fallback));
+    const files = deckSink.emit(D, outDir, { slug: slugify(D.provenance?.title, fallback) });
+    console.error(`\n✅ exported ${D.ids.length} cards as deck JSONL  →  ${files[0]}`);
+  } else if (as === "html") {
+    const outDir = val("--out") || join("out", slugify(D.provenance?.title, fallback));
+    const files = eidoSink.emit(D, outDir, { slug: slugify(D.provenance?.title, fallback) });
+    const html = files.find((f) => f.endsWith(".html"));
+    if (!html) die("the viewer isn't built (viewer/dist/index.html missing) — run `cd viewer && bun run build` first");
+    console.error(`\n✅ exported the self-contained HTML  →  ${html}`);
+  } else die(`unknown export format '${as}' (vault | deck | html)`);
   process.exit(0);
 }
 

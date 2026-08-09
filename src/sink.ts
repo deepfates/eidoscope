@@ -7,6 +7,7 @@ import { join } from "node:path";
 import type { MapContract } from "./schema.ts";
 import { encodeMap } from "./mapbin.ts";
 import { singlefileHTML } from "./singlefile.ts";
+import { vaultEntries, deckJSONL } from "./export.ts";
 
 export interface Sink {
   name: string;
@@ -37,50 +38,35 @@ export const eidoSink: Sink = {
   },
 };
 
-const yq = (s: string) => '"' + s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, " ") + '"';
-
-// Markdown-vault sink: one .md file per card, frontmatter carrying the map's judgment about that card
-// (id, per-axis scores, region, url). The point of this sink is the ROUND TRIP: a vault is itself a
-// valid corpus for folderSource, so a map can be exported to plain readable files, edited/culled in any
-// markdown tool (Obsidian et al.), and re-ingested — the curation loop with no proprietary step.
+// Markdown-vault sink: the pure entries live in src/export.ts (shared with the app's Export menu —
+// same emit, zipped client-side there, written to a directory here). The point of this sink is the
+// ROUND TRIP: a vault is itself a valid corpus for folderSource, so a map can be exported to plain
+// readable files, edited/culled in any markdown tool (Obsidian et al.), and re-ingested — the
+// curation loop with no proprietary step.
 export const vaultSink: Sink = {
   name: "vault",
   emit(D, outDir) {
     mkdirSync(outDir, { recursive: true });
+    const { manifest, cards } = vaultEntries(D);
     // The manifest is how the round trip keeps identity: folderSource reads it and names the
     // re-ingested map after the SOURCE map, not the folder the vault happens to sit in.
     // (Not in the returned file list — callers count that list as "cards exported".)
-    writeFileSync(join(outDir, "eidoscope-vault.json"), JSON.stringify({
-      eidoscope: "vault", title: D.provenance?.title, source: D.provenance?.source,
-      exported: Date.now(), count: D.ids.length,
-    }, null, 2) + "\n");
+    writeFileSync(join(outDir, manifest.name), manifest.text);
     const files: string[] = [];
-    const used = new Set<string>();
-    const di = D.di ?? 0;
-    const regionLabel = (i: number) => {
-      const c = D.cluster[i];
-      return D.levelLabels?.[di]?.[c] ?? D.clusters?.[c]?.label;
-    };
-    for (let i = 0; i < D.ids.length; i++) {
-      let base = D.ids[i].replace(/[^A-Za-z0-9._-]+/g, "_") || "card";
-      if (used.has(base)) { let k = 2; while (used.has(base + "-" + k)) k++; base = base + "-" + k; }
-      used.add(base);
-      const lines = ["---", `id: ${yq(D.ids[i])}`, `title: ${yq(D.titles[i] || D.ids[i])}`];
-      const url = D.urls?.[i]; if (url) lines.push(`url: ${yq(url)}`);
-      const region = regionLabel(i); if (region != null) lines.push(`region: ${yq(region)}`);
-      lines.push("axes:");
-      for (const a of D.axes) lines.push(`  ${a.key}: ${D.scores[a.key]?.[i] ?? ""}`);
-      lines.push("---", "", D.cores[i] || "");
-      const notes = D.notes[i] || {};
-      const placed = D.axes.filter((a) => notes[a.key]);
-      if (placed.length) {
-        lines.push("", "## Placements", "");
-        for (const a of placed) lines.push(`- **${a.name}** (${a.low} ⇄ ${a.high}): ${notes[a.key]}`);
-      }
-      const p = join(outDir, base + ".md");
-      writeFileSync(p, lines.join("\n") + "\n");
-      files.push(p);
-    }
+    for (const c of cards) { const p = join(outDir, c.name); writeFileSync(p, c.text); files.push(p); }
     return files;
+  },
+};
+
+// Deck sink: the corpus as card-shaped JSONL rows (src/export.ts deckJSONL) — the same artifact the
+// app's Export → deck JSONL downloads, written to a directory here.
+export const deckSink: Sink = {
+  name: "deck",
+  emit(D, outDir, opts = {}) {
+    mkdirSync(outDir, { recursive: true });
+    const slug = opts.slug ?? slugify(D.provenance?.title);
+    const p = join(outDir, slug + "-deck.jsonl");
+    writeFileSync(p, deckJSONL(D));
+    return [p];
   },
 };

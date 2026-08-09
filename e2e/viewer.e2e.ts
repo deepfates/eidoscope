@@ -37,10 +37,11 @@ const fails: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (cond) console.log("  ✓", msg); else { console.log("  ✗", msg); fails.push(msg); } };
 
 const browser = await chromium.launch();
-// 1960 wide: the full desktop toolbar (every tier unfolded, including the scatter layouts' axes menu)
+// 2200 wide: the full desktop toolbar (every tier unfolded, including the scatter layouts' axes menu
+// and the document verbs open/export/save)
 // measures ~1910px on this corpus — priority collapse (eid-ef7e) folds controls below that, and the
 // desktop tests here drive the UNFOLDED bar. The fold behaviour has its own section (16) below.
-const p = await browser.newPage({ viewport: { width: 1960, height: 1050 }, deviceScaleFactor: 2, hasTouch: true });
+const p = await browser.newPage({ viewport: { width: 2200, height: 1050 }, deviceScaleFactor: 2, hasTouch: true });
 const pageErrs: string[] = []; p.on("pageerror", (e) => pageErrs.push(String(e)));
 const consoleErrs: string[] = []; p.on("console", (m) => { if (m.type() === "error") consoleErrs.push(m.text()); });
 
@@ -711,17 +712,25 @@ try {
   await p.waitForTimeout(300);
   const preSave = await st();
   ok(preSave.color === "d0" && preSave.derived === 1 && preSave.selection === 30 && preSave.grain === 3, `views: the state to be saved is real — color=${preSave.color} derived=${preSave.derived} sel=${preSave.selection} grain=${preSave.grain}`);
-  // save: name it in the about popover; the download IS the save (the browser can't write in place)
+  // save view: name it in the about popover — it appends IN MEMORY and marks the document dirty.
+  // The SAVE verb (eid-cawh) then persists: no FSA handle here (the map came by fetch), so the save is
+  // a download PRESERVING the opened filename — map.eido, not a slug, not a numbered copy.
   await closeMenus();
   await p.click('[data-menu="bar:about"]'); await p.waitForTimeout(250);
+  await p.fill('[data-testid="bar:view-name"]', "beta clump"); await p.click('[data-testid="bar:view-save"]');
+  await p.waitForTimeout(150);
+  ok((await st()).views === 1, "views: save view appends the view to the file IN MEMORY");
+  ok((await st()).dirty === true, "save: unsaved work shows — the document is dirty after a view append");
+  await closeMenus();
   const [dl] = await Promise.all([
     p.waitForEvent("download", { timeout: 15000 }),
-    (async () => { await p.fill('[data-testid="bar:view-name"]', "beta clump"); await p.click('[data-testid="bar:view-save"]'); })(),
+    p.click('[data-testid="bar:save"]'),
   ]);
-  ok((await st()).views === 1, "views: save appends the view to the file IN MEMORY");
+  ok(dl.suggestedFilename() === "map.eido", `save: the download preserves the opened filename — got "${dl.suggestedFilename()}"`);
+  ok((await st()).dirty === false, "save: the dirty mark clears once the file is written");
   const dlPath = await dl.path();
   const savedBytes = readFileSync(dlPath!);
-  ok(savedBytes.length > 1000, `views: the re-emitted .eido downloads — ${savedBytes.length} bytes`);
+  ok(savedBytes.length > 1000, `save: the re-emitted .eido downloads — ${savedBytes.length} bytes`);
   // …and the downloaded file decodes with our own codec, carrying the FULL uncapped state
   const savedD = (await import("../src/mapbin.ts")).decodeMap(savedBytes);
   const sv = savedD.views?.[0];
@@ -756,6 +765,40 @@ try {
   ok(Math.abs(s.zoom - preSave.zoom) < 0.05, `views: …and the camera pose restores — zoom ${preSave.zoom.toFixed(2)}→${s.zoom.toFixed(2)}`);
   const colorName15 = await p.evaluate(() => (document.querySelector('[data-menu="bar:color"]') as HTMLElement)?.textContent?.trim());
   ok(!!colorName15?.includes("≈ blobby"), `views: the axis comes back under its own label — "${colorName15}"`);
+
+  // ═══ 16b. EXPORT MENU (eid-4ii9) — one surface, every outbound artifact, all flowing from the cards.
+  // Still on the dropped saved.eido, so every artifact must inherit ITS name (saved-*) — the document's
+  // identity travels through the whole lifecycle.
+  console.log("16b. export menu — single-file HTML · vault zip · deck JSONL");
+  ok((await st()).file === "saved.eido", `export: the open document knows its filename — ${(await st()).file}`);
+  const { unzipSync, strFromU8 } = await import("fflate");
+  const grab = async (opt: string) => {
+    await closeMenus();
+    await p.click('[data-menu="bar:export"]'); await p.waitForTimeout(200);
+    const [d] = await Promise.all([p.waitForEvent("download", { timeout: 20000 }), p.click(`[data-opt="bar:export:${opt}"]`)]);
+    await p.waitForTimeout(100);
+    return d;
+  };
+  const dHtml = await grab("html");
+  ok(dHtml.suggestedFilename() === "saved.html", `export html: named after the document — "${dHtml.suggestedFilename()}"`);
+  const htmlText = readFileSync((await dHtml.path())!, "utf8");
+  const payloadM = htmlText.match(/window\.__EIDO_DATA__=("(?:[^"\\]|\\.)*")/);
+  ok(!!payloadM, "export html: the single file carries an inlined __EIDO_DATA__ payload");
+  if (payloadM) {
+    const baked = (await import("../src/mapbin.ts")).decodeMap(Buffer.from(JSON.parse(payloadM[1]), "base64"));
+    ok(baked.ids.length === 90 && baked.views?.length === 1, `export html: the baked payload is the CURRENT gem, views included — ${baked.ids.length} cards, ${baked.views?.length} view`);
+  }
+  const dVault = await grab("vault");
+  ok(dVault.suggestedFilename() === "saved-vault.zip", `export vault: named after the document — "${dVault.suggestedFilename()}"`);
+  const zipEntries = unzipSync(readFileSync((await dVault.path())!));
+  const zipNames = Object.keys(zipEntries);
+  ok(zipNames.length === 91 && zipNames.includes("eidoscope-vault.json"), `export vault: one .md per card + the manifest — ${zipNames.length} entries for 90 cards`);
+  ok(strFromU8(zipEntries[zipNames.find((n) => n.endsWith(".md"))!]).startsWith("---"), "export vault: cards carry their frontmatter");
+  const dDeck = await grab("deck");
+  ok(dDeck.suggestedFilename() === "saved-deck.jsonl", `export deck: named after the document — "${dDeck.suggestedFilename()}"`);
+  const deckLines = readFileSync((await dDeck.path())!, "utf8").trim().split("\n");
+  const row0 = JSON.parse(deckLines[0]);
+  ok(deckLines.length === 90 && !!row0.id && !!row0.core && !!row0.axes, `export deck: one card-shaped row per card — ${deckLines.length} lines`);
 
   // ── 16. PRIORITY COLLAPSE (eid-ef7e): at narrow desktop widths the toolbar FOLDS lower-priority
   // controls into the mobile controls sheet instead of clipping them mid-glyph. Assert, at each width:
@@ -797,7 +840,7 @@ try {
   ok(await p.evaluate(() => (window as any).__eido().visible >= 0 && !document.querySelector('[data-opt="sheet:size:length"]')), "fold: sheet + its menus dismiss cleanly");
   const foldedSize = await p.evaluate(() => (document.querySelector('[data-menu="bar:size"]') as HTMLElement)?.textContent?.trim());
   ok(!!foldedSize && !foldedSize.includes("uniform"), `fold: a folded control still works from the sheet — size channel now "${foldedSize}"`);
-  await p.setViewportSize({ width: 1960, height: 1050 }); await p.waitForTimeout(250);
+  await p.setViewportSize({ width: 2200, height: 1050 }); await p.waitForTimeout(250);
 
   ok(consoleErrs.length === 0, "no console errors during the run" + (consoleErrs.length ? " — " + consoleErrs[0] : ""));
 } finally {

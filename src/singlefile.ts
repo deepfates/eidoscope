@@ -1,5 +1,6 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { injectEido } from "./export.ts";
 
 // The ONE place the "inline the built viewer + a .eido into a single offline HTML" logic lives — used by the
 // pipeline (emit a self-contained explorer every run) and bin/build-singlefile.ts. The viewer build
@@ -15,8 +16,7 @@ export function viewerBuilt(): boolean {
 export function singlefileHTML(eido: Uint8Array): string | null {
   const indexPath = join(DIST, "index.html");
   if (!existsSync(indexPath)) return null;
-  const shell = readFileSync(indexPath, "utf8");
-  // a plain <script> in <head> runs during parse, before the app's deferred module script reads the payload
-  const inject = `<script>window.__EIDO_DATA__=${JSON.stringify(Buffer.from(eido).toString("base64"))}</script>`;
-  return shell.includes("</head>") ? shell.replace("</head>", inject + "</head>") : inject + shell;
+  // the injection itself is the shared, host-free emit (src/export.ts) — the app's Export → single file
+  // uses the identical function on its own fetched shell.
+  return injectEido(readFileSync(indexPath, "utf8"), eido);
 }
