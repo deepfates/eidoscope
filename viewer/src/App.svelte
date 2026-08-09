@@ -38,6 +38,7 @@
   let queryPct = $state<number | null>(null);   // download % when known (drives the thin progress bar)
   let showIntro = $state(false);
   let citeOn = $state(false);
+  let isoOpen = $state<string | null>(null);   // which categorical dimension's value list is expanded in the colour popover (M-A4)
   let ghostsOn = $state(false);
   let sheetOpen = $state(false);   // mobile: the toolbar's contents as a bottom sheet
 
@@ -388,6 +389,9 @@
       ]);
       const key = m.addQuery(q, cosineAll(qv, V));
       queryStatus = "";
+      // M-D1: the fresh axis presents ITSELF — its chip scrolls into view and takes focus, the way any new
+      // object announces itself by simply being there (no explanatory sentence).
+      queueMicrotask(() => { const el = document.querySelector<HTMLElement>(`[data-minted="${key}"]`); el?.scrollIntoView({ block: "nearest" }); el?.focus(); });
       return key;
     } catch (e: any) {
       resetEmbedder();   // drop the poisoned/half-loaded model so the next add retries cleanly
@@ -432,8 +436,27 @@
     // Escape, and letting the same key also pop history would yank the view out from under a menu dismissal.
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
-      const typing = !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
-      if (e.key === "s" && !typing && !e.metaKey && !e.ctrlKey && !e.altKey) { m.toggleSelectMode(); return; }
+      const typing = !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
+      // expert keyboard routes (M-A3 / M-A5) — single keys consistent with `s`, skipped while typing, while
+      // a menu is open (its own arrow/letter navigation wins), or under a modal overlay.
+      const plain = !typing && !e.metaKey && !e.ctrlKey && !e.altKey && !document.querySelector('[data-menu][data-state="open"]') && !showIntro && !deckOpen && !sheetOpen;
+      if (plain) {
+        if (e.key === "s") { m.toggleSelectMode(); return; }
+        if (e.key === "l") { if (m.channels.color === "region") showLabels = !showLabels; return; }
+        if (e.key === "d") { deckOpen = true; return; }
+        if (e.key === "r") { reset(); return; }
+        // camera: arrows pan, +/- zoom, shift+arrows orbit in 3D — hold-to-repeat via native key repeat
+        if (e.key.startsWith("Arrow")) {
+          e.preventDefault();
+          const dx = e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0;
+          const dy = e.key === "ArrowUp" ? 1 : e.key === "ArrowDown" ? -1 : 0;
+          if (e.shiftKey) handle?.orbitBy(dx * 5, -dy * 5);
+          else handle?.panBy(dx * 48, dy * 48);
+          return;
+        }
+        if (e.key === "+" || e.key === "=") { handle?.zoomBy(0.25); return; }
+        if (e.key === "-" || e.key === "_") { handle?.zoomBy(-0.25); return; }
+      }
       if (e.key !== "Escape") return;
       if (document.querySelector('[data-menu][data-state="open"]')) return;
       // Escape leaves the lasso before it touches the overlay stack — the mode you're IN is what you meant.
@@ -675,7 +698,20 @@
           <ul class="menu menu-sm w-full p-1">
             <li class="menu-title text-[10px] tracking-widest uppercase">color by</li>
             <li><button data-opt="{scope}:color:region" aria-pressed={m.channels.color === "region"} title="colour by the region clustering at the current grain" onclick={() => (m.channels.color = "region")}><span class="w-3">{m.channels.color === "region" ? "✓" : ""}</span>region</button></li>
-            {#each catDims as d}<li><button data-opt="{scope}:color:{d.key}" aria-pressed={m.channels.color === d.key} title="colour by {d.name} — {d.ord?.length} values" onclick={() => (m.channels.color = d.key)}><span class="w-3">{m.channels.color === d.key ? "✓" : ""}</span><span class="truncate">{d.name}</span></button></li>{/each}
+            <!-- M-A4: isolate is a CORPUS command, so every categorical dimension carries its own value
+                 list here — isolation no longer requires putting the dimension on colour first. -->
+            {#each catDims as d}
+              <li class="flex flex-row items-center gap-0">
+                <button class="min-w-0 flex-1" data-opt="{scope}:color:{d.key}" aria-pressed={m.channels.color === d.key} title="colour by {d.name} — {d.ord?.length} values" onclick={() => (m.channels.color = d.key)}><span class="w-3">{m.channels.color === d.key ? "✓" : ""}</span><span class="truncate">{d.name}</span></button>
+                <button class="flex-none px-2" data-iso="{scope}:{d.key}" aria-expanded={isoOpen === d.key} aria-label="isolate a {d.name} value" title="isolate by {d.name} — works whatever colour shows" onclick={() => (isoOpen = isoOpen === d.key ? null : d.key)}><span class="text-[9px] opacity-60">{isoOpen === d.key ? "▴" : "▾"}</span></button>
+              </li>
+              {#if isoOpen === d.key}
+                {#each d.ord!.slice(0, 16) as v}
+                  {@render legendRow(rgb(colOf(d.idx![v])), v, d.cnt![v], m.facetPinOf(d.key) === v, "isolate " + d.name + " " + v, () => applyCamera(m.toggleFacet(d.key, v)))}
+                {/each}
+                {#if d.ord!.length > 16}<li class="px-3 py-1 text-xs opacity-60">+{d.ord!.length - 16} more</li>{/if}
+              {/if}
+            {/each}
             {#each scalarDims as d}<li><button data-opt="{scope}:color:{d.key}" aria-pressed={m.channels.color === d.key} title="colour by {d.name} (a gradient low → high)" onclick={() => (m.channels.color = d.key)}><span class="w-3">{m.channels.color === d.key ? "✓" : ""}</span><span class="truncate {d.weak ? 'opacity-50' : ''}">{d.name}</span>{#if d.variance != null}<span class="ml-auto flex-none font-mono text-[10px] opacity-50">{pctOf(d.variance)}</span>{/if}</button></li>{/each}
             {@render propItems(colorDim)}
           </ul>
@@ -756,7 +792,11 @@
   {#if store?.vectors()}
     <Popover.Root>
       <Popover.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case" data-menu="{scope}:axis" aria-label="add an axis from a question" title="add an axis from a question you ask the corpus">
-        <span class="font-medium">+ axis</span>{#if mintedDims.length}<span class="badge badge-xs badge-primary">{mintedDims.length}</span>{/if}
+        <span class="font-medium">+ axis</span>
+        <!-- M-D1: the 23MB cold-start must SHOW even when the popover is closed (a URL-restored query embeds
+             in the background) — the trigger itself carries the working signal, in the app's own affordance style -->
+        {#if querying}<span class="loading loading-spinner loading-xs text-primary" aria-label="embedding the question"></span>{/if}
+        {#if mintedDims.length}<span class="badge badge-xs badge-primary">{mintedDims.length}</span>{/if}
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Content class="eido-pop w-80 p-3" sideOffset={6} align="end">
@@ -775,7 +815,7 @@
             <div class="mt-2 text-[11px] leading-snug text-error">{queryErr}</div>
           {/if}
           {#each mintedDims as qd}
-            <div class="rounded-field mt-2 flex items-center gap-1 bg-base-200 px-2 py-1 text-[11px]">
+            <div data-minted={qd.key} tabindex="-1" class="rounded-field mt-2 flex items-center gap-1 bg-base-200 px-2 py-1 text-[11px]">
               <span class="min-w-0 flex-1 truncate font-mono opacity-80" title={qd.name}>{qd.name}</span>
               <button onclick={() => (m.channels.color = qd.key)} title="colour by this axis" aria-label="colour by this axis" class="btn btn-ghost btn-xs">●</button>
               <button onclick={() => { m.removeDimension(qd.key); if (mintedKey === qd.key) mintedKey = null; }} title="remove this axis" aria-label="remove this axis" class="btn btn-ghost btn-xs">✕</button>
@@ -788,8 +828,8 @@
 {/snippet}
 
 {#snippet rightControls(scope: string)}
-  <button class="btn btn-sm btn-ghost flex-none normal-case" title="read the corpus as a sortable, filterable list" onclick={() => (deckOpen = true)}>deck</button>
-  <button disabled={m.channels.color !== "region"} title={m.channels.color !== "region" ? "region labels show when coloured by region" : "show region labels on the map"}
+  <button class="btn btn-sm btn-ghost flex-none normal-case" title="read the corpus as a sortable, filterable list (d)" onclick={() => (deckOpen = true)}>deck</button>
+  <button disabled={m.channels.color !== "region"} title={m.channels.color !== "region" ? "region labels show when coloured by region" : "show region labels on the map (l)"}
     aria-pressed={labelsOn} class="btn btn-sm flex-none normal-case {showLabels && m.channels.color === 'region' ? 'btn-active' : 'btn-ghost'}" onclick={() => (showLabels = !showLabels)} aria-label="toggle labels">labels</button>
   <button class="btn btn-sm btn-ghost btn-square flex-none" onclick={toggleTheme} aria-label="toggle light or dark theme" title="toggle light / dark">{theme === "dark" ? "☾" : "☀"}</button>
   <DropdownMenu.Root>
@@ -810,7 +850,7 @@
       </DropdownMenu.Content>
     </DropdownMenu.Portal>
   </DropdownMenu.Root>
-  <button class="btn btn-sm btn-ghost flex-none normal-case" title="clear every filter, close the open card, and return grain + camera to this map's defaults" onclick={reset}>reset view</button>
+  <button class="btn btn-sm btn-ghost flex-none normal-case" title="clear every filter, close the open card, and return grain + camera to this map's defaults (r)" onclick={reset}>reset view</button>
 {/snippet}
 
 <div class="flex h-screen w-screen flex-col overflow-hidden bg-base-100 text-base-content"
@@ -1020,7 +1060,13 @@
           <div class="mb-1 flex items-center gap-2 pr-8 font-bold"><span class="h-3 w-3 flex-none rounded-xs" style="background:{rgb(colOf(pinnedRegion.c))}"></span><span class="truncate">{pinnedRegion.label}</span></div>
           <div class="mb-2 font-mono text-[10px] opacity-60">region · {pinnedRegion.n} cards · grain {m.grain + 1}/{nLevels}</div>
           {#if pinnedBlurb}<div class="mb-2 text-xs leading-relaxed opacity-80">{pinnedBlurb}</div>{/if}
-          <div class="mb-2"><button data-testid="region-fit" class="btn btn-xs normal-case" title="move the camera to frame this region" onclick={() => fitTo(m.membersOf(pinnedRegion.c))}>fit</button></div>
+          <div class="mb-2 flex flex-wrap gap-1">
+            <button data-testid="region-fit" class="btn btn-xs normal-case" title="move the camera to frame this region" onclick={() => fitTo(m.membersOf(pinnedRegion.c))}>fit</button>
+            <!-- second binding for region.drill (M-A1): the pane already knows the region — same act as double-clicking one of its points -->
+            {#if m.grain < nLevels - 1}
+              <button data-testid="region-drill" class="btn btn-xs normal-case" title="descend: step the grain finer until this region splits, and frame it" onclick={() => handle?.drillIndex(m.membersOf(pinnedRegion.c)[0] ?? -1)}>drill in</button>
+            {/if}
+          </div>
           <div class="mt-3 mb-1 font-mono text-[10px] uppercase tracking-wide opacity-60">members</div>
           {#each m.membersOf(pinnedRegion.c).slice(0, 200) as i}
             <button class="block w-full truncate rounded px-2 py-1.5 text-left text-xs hover:bg-base-200" onclick={() => focusCard(i)}>{data.titles[i]}</button>
