@@ -16,7 +16,7 @@
   import { EmbeddedStore } from "../../src/store";
   import { gzipSync, zipSync, strToU8 } from "fflate";
   import Ingest from "./Ingest.svelte";
-  import { filesFromFileList, filesFromDataTransfer, type IngestFile } from "./ingest";
+  import { filesFromFileList, filesFromDataTransfer, descendInPage, getKey, type IngestFile, type IngestStatus } from "./ingest";
   import type { MapContract } from "../../src/schema";
   import { injectEido, vaultEntries, deckJSONL } from "../../src/export";
   import { setSource, currentFileName, canWriteInPlace, supportsFSA, openViaPicker, openRecent, listRecents, writeEido, download, type RecentFile } from "./file";
@@ -257,9 +257,42 @@
     if (idx.length) { m.setSelection(idx); mintedKey = null; focusCard(null); }
     return idx.length;
   }
+  // Export-menu data-out: the held set as {ids,titles,urls} JSON — cards flowing to other tools
+  // (and the CLI descend verb's input shape). The selection-pane FERRY died with in-page descend;
+  // this outbound export is not it coming back.
   function exportSelection() {
-    const payload = m.selectionExport(); if (!payload) return;
+    if (!selection?.length || !data) return;
+    const payload = { ids: selection.map((i) => data!.ids[i]), titles: selection.map((i) => data!.titles[i]), urls: selection.map((i) => data!.urls?.[i]) };
     download(JSON.stringify(payload, null, 2), exportBase() + "-selection-" + payload.ids.length + ".json", "application/json");
+  }
+
+  // ═══ DESCEND (eid-kep3) — the held set becomes its OWN map, IN PAGE: subset the carried card
+  // vectors, re-discover local axes (PCA + parallel analysis), re-layout, re-name — src/engine.ts
+  // descendMap through the page binding (viewer/src/ingest.ts). The child mounts through the SAME
+  // in-memory path a dropped .eido takes, replacing the working document; the parent is unchanged on
+  // disk and one Open away. No selection JSON, no ferry — the file never leaves the tab.
+  // The key is OPTIONAL here (the cards already exist): without one the child opens honest-but-unnamed
+  // (PC axis names + contrastive-term region labels).
+  let descending = $state<IngestStatus | null>(null);
+  let descendErr = $state("");
+  const descendWhyNot = $derived.by(() => {
+    if (!data) return "no map";
+    if (!store?.vectors()) return "this .eido carries no card vectors — the map was emitted without them, so there is nothing honest to re-discover local axes from";
+    if (!selection?.length) return "nothing held";
+    if (selection.length < 2) return "descend needs at least 2 cards to discover local axes";
+    return "";
+  });
+  async function descendSelection() {
+    const D = store?.map(); const sel = selection;
+    if (!D || !sel?.length || descendWhyNot || descending) return;
+    descendErr = "";
+    descending = { phase: "axes", label: "descending…" };
+    try {
+      const child = await descendInPage(D, sel.map((i) => D.ids[i]), getKey(), (s) => (descending = s));
+      mountMap(new EmbeddedStore(child), { intro: true });   // the child IS the working document now
+    } catch (e: any) {
+      descendErr = String(e?.message ?? e);
+    } finally { descending = null; }
   }
 
   // ═══ DERIVE (eid-8139) — an axis from EXAMPLES. With a set held, mint a scalar dimension scoring every
@@ -1264,11 +1297,26 @@
           <div class="mb-2 flex flex-wrap gap-1">
             <button data-testid="sel-filter" class="btn btn-primary btn-xs normal-case" onclick={() => m.filterToSelection()}>filter to these</button>
             <button data-testid="sel-fit" class="btn btn-xs normal-case" onclick={() => fitTo(selection!)}>fit</button>
-            <button data-testid="sel-export" class="btn btn-xs normal-case" onclick={exportSelection}>export</button>
+            <button data-testid="sel-descend" class="btn btn-xs normal-case" disabled={!!descendWhyNot || !!descending}
+              title={descendWhyNot || "re-map these cards as their own space (local axes, in this tab)"} onclick={descendSelection}>descend</button>
             <button data-testid="sel-derive" class="btn btn-xs normal-case" disabled={!!deriveWhyNot}
               onclick={deriveAxis}>derive axis</button>
             <button data-testid="sel-clear" class="btn btn-ghost btn-xs normal-case" onclick={() => { m.clearSelection(); mintedKey = null; }}>clear</button>
           </div>
+
+          <!-- descend's honest per-stage progress — the same narration ingest shows, in the pane that owns the verb -->
+          {#if descending}
+            <div data-testid="sel-descending" class="mb-2 space-y-1">
+              <div class="flex items-center gap-2 font-mono text-[11px]">
+                <span class="loading loading-spinner loading-xs text-primary"></span>
+                <span class="min-w-0 flex-1 leading-snug">{descending.label}</span>
+              </div>
+              {#if descending.total}
+                <progress class="progress progress-primary h-1 w-full" value={Math.round((100 * (descending.done ?? 0)) / descending.total)} max="100"></progress>
+              {/if}
+            </div>
+          {/if}
+          {#if descendErr}<div data-testid="sel-descend-err" class="mb-2 text-[11px] leading-snug text-error">{descendErr}</div>{/if}
 
           <!-- ═══ DERIVE: name the axis before (or after) you mint it. The result appears HERE with one-tap
                placements — minting alone moves nothing on the map. ═══ -->

@@ -35,8 +35,11 @@ export async function nameLevels(
   scores: Record<string, number[]>, axes: { key: string; name: string; low: string; high: string }[],
   opts: { llm?: any; sig?: any; concurrency?: number; cache?: Store; onProgress?: (done: number, total: number) => void } = {}
 ): Promise<{ labels: string[][]; blurbs: string[][]; regionsByLevel: Region[][] }> {
+  // llm is INJECTED: undefined means the caller forgot (fail loud); an explicit null means "no model by
+  // choice" (descend without a key) — the deterministic contrast still runs and every region wears its
+  // term fallback, so the map is honestly labeled from the math alone until a key names it better.
   const llm = opts.llm;
-  if (llm === undefined) throw new Error("nameLevels: an llm client is required (the caller injects it)");
+  if (llm === undefined) throw new Error("nameLevels: an llm client is required (the caller injects it; pass null for deterministic term labels only)");
   const sig = opts.sig ?? nameCluster;
   const conc = opts.concurrency ?? 12;
   const store = opts.cache ?? new Store();
@@ -65,7 +68,7 @@ export async function nameLevels(
   await pool(todo, async (j) => {
     const ck = hash("name2 " + j.terms.join(",") + " | " + j.axesTxt + " | " + j.samples);
     let v = store.get(ck);
-    if (!v) {
+    if (!v && llm) {
       const r: any = await withRetry(() => sig.forward(llm, { distinctiveTerms: j.terms.join(", ") || "(none stand out)", distinctiveAxes: j.axesTxt || "(none extreme)", memberSamples: j.samples }));
       if (r?.regionLabel) { v = { label: String(r.regionLabel), blurb: String(r.regionBlurb ?? "") }; store.put(ck, v); }
       else fail++;

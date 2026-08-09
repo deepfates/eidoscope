@@ -106,6 +106,94 @@ export async function buildMap(docs: Doc[], embeddings: number[][], opts: BuildO
   return { D, deck, axes, embs, deckProjections };
 }
 
+// DESCEND, host-free (eid-kep3) — re-map a held Selection as its OWN L-space, from a parent map alone.
+// The map does NOT carry full text; the honest source it DOES carry is the per-card embedding vectors
+// the parent's geometry was built on (card vectors by default, raw full-text under --embed raw —
+// `derivedBy.geometryBasis` says which). So descend re-runs discovery (truncated PCA + parallel
+// analysis) over the SUBSET of those carried vectors → NEW local axes, re-projects and re-clusters the
+// subset, and re-names its regions. The cards themselves (titles/cores + metadata) are REUSED verbatim
+// — no re-carding, no embedder, no full text needed. Two honest losses, stated here and in the child's
+// provenance: (1) axes are discovered from the carried vectors, not from fresh full-text embeddings;
+// (2) the per-axis placement notes were written against the PARENT's axes, so the child's cards carry
+// no notes (positions on the new axes are exact projections).
+//
+// The LLM is OPTIONAL here — the one place in the grammar where that's honest, because the cards
+// already exist (docs/ARCHITECTURE.md). Without one, axes wear PC names and regions wear their
+// deterministic contrastive-term labels: the child opens unnamed-but-honest; naming can come later.
+// Both faces run THIS function: the CLI through src/pipeline.ts descendMap (provider(), file-backed
+// cache, stderr narration), the page through viewer/src/ingest.ts descendInPage (user-held key,
+// session cache, the selection pane's progress line).
+export type DescendOpts = {
+  llm?: any;                 // absent → PC axis names + term region labels (no call is attempted)
+  sig?: any;                 // test seam (mock region-naming signature)
+  regionCache?: Store;       // content-addressed region-label cache (file-backed or session-memory)
+  name?: string; parentFile?: string; concurrency?: number;
+  onProgress?: (p: EngineProgress) => void;
+};
+
+export async function descendMap(P: MapContract, selIds: string[], opts: DescendOpts = {}): Promise<MapContract> {
+  const on = opts.onProgress ?? (() => {});
+  if (!P.vectors?.data?.length) throw new Error("descend: this .eido carries no card vectors (a lite emit) — nothing honest to re-discover from");
+  const at = new Map(P.ids.map((id, i) => [id, i]));
+  const missing = selIds.filter((id) => !at.has(id));
+  if (missing.length) throw new Error(`descend: ${missing.length} selection id(s) not in the parent map (e.g. ${missing[0]})`);
+  const idx = selIds.map((id) => at.get(id)!);
+  if (idx.length < 2) throw new Error("descend: need at least 2 selected cards to discover local axes");
+  const sub = <T>(a: T[] | undefined): T[] | undefined => (a ? idx.map((i) => a[i]) : undefined);
+  // subset the flat CardVectors once: one Float32Array copy (the child's own substrate), with plain-array
+  // row VIEWS over it for PCA/UMAP — no second per-row materialization of the parent's buffer
+  const vdim = P.vectors.dim;
+  const flat = new Float32Array(idx.length * vdim);
+  idx.forEach((pi, ci) => flat.set(P.vectors!.data.subarray(pi * vdim, (pi + 1) * vdim), ci * vdim));
+  const vectors = Array.from({ length: idx.length }, (_, ci) => Array.from(flat.subarray(ci * vdim, (ci + 1) * vdim)));
+  const titles = idx.map((i) => P.titles[i]), cores = idx.map((i) => P.cores[i]);
+  const conc = opts.concurrency ?? 12;
+
+  on({ stage: "axes", docs: idx.length });
+  const { axes, realDims, projections } = await discoverAxes(vectors, titles.map((t) => t.slice(0, 64)), { llm: opts.llm });
+  on({ stage: "axes-done", axes: axes.length, realDims });
+  const scores = projectionScores(projections, axes);
+  const rawScores = rawProjectionScores(projections, axes);
+
+  on({ stage: "layout", cards: idx.length });
+  const { xy, xyz, xyzAgree, cluster, k, di, levels, counts, hub, nbr } = await projectAndCluster(vectors);
+
+  const axLite = axes.map((a) => ({ key: a.key, name: a.name, low: a.pole_low, high: a.pole_high }));
+  // llm absent → nameLevels(null): the deterministic contrastive layer still runs, the phrasing call is
+  // skipped, and every region wears its term fallback — labeled from the math, never from a guess.
+  const { labels: levelLabels, blurbs: levelBlurbs, regionsByLevel } = await nameLevels(
+    levels, counts, titles, cores, scores, axLite,
+    { llm: opts.llm ?? null, sig: opts.sig, concurrency: conc, cache: opts.regionCache, onProgress: (done, total) => on({ stage: "regions", done, total }) });
+  const clusters = regionCentroids(regionsByLevel[di], cluster, k, xy);
+
+  // intra-corpus citation edges survive descent when both ends are in the subset (indices remapped)
+  const remap = new Map(idx.map((pi, ci) => [pi, ci]));
+  const cite = P.cite ? idx.map((pi) => P.cite![pi].map((j) => remap.get(j)).filter((j): j is number => j != null)) : undefined;
+
+  const parentTitle = P.provenance?.title ?? "parent map";
+  const D: MapContract = {
+    ids: selIds.slice(), titles, cores,
+    notes: idx.map(() => ({})),   // parent notes are placements on the PARENT's axes — honest is empty, not misfiled
+    axes: axes.map((a) => ({ key: a.key, name: a.name, low: a.pole_low, high: a.pole_high, variance: a.var, weak: a.var < 0.02 })),
+    scores, rawScores, xy, xyz, xyzAgree, cluster, k, di, levels, counts, levelLabels, levelBlurbs, clusters, hub, nbr,
+    cite, citec: sub(P.citec ?? undefined),
+    urls: sub(P.urls), sources: sub(P.sources), siteNames: sub(P.siteNames), authors: sub(P.authors),
+    tags: sub(P.tags), dates: sub(P.dates), read: sub(P.read), folders: sub(P.folders),
+    vectors: { data: flat, dim: vdim },
+  };
+  // provenance — the child introduces itself AS a descent: parent map, selection size, date (about pane)
+  D.provenance = {
+    title: opts.name || `${parentTitle} ▸ descent (${idx.length})`,
+    source: `descend of "${parentTitle}" — ${idx.length} of ${P.ids.length} cards${opts.parentFile ? ` · ${opts.parentFile}` : ""}`,
+    generated: Date.now(), count: idx.length,
+  };
+  D.derivedBy = { ...P.derivedBy, generated: Date.now() };   // same basis/embedder as the parent — descend adds no new model
+  D.metaFields = buildMetaFields(D);
+  const nNodes = D.ids.length;
+  for (const key of Object.keys(D.scores)) if (D.scores[key].length !== nNodes) throw new Error(`descend invariant violated: scores.${key}.length=${D.scores[key].length} != ids.length=${nNodes}`);
+  return D;
+}
+
 // Assemble the finished MapContract from the stages' outputs — invariants checked, provenance recorded.
 // One implementation for both hosts, so a page-built map and a CLI-built map cannot drift in shape.
 export function assembleContract(a: {

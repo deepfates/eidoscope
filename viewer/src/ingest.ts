@@ -6,7 +6,7 @@
 // 2026-08-09), and session-memory caches (which make a partial run RESUMABLE: retry re-runs failures only).
 import { ai } from "@ax-llm/ax";
 import { docsFromFiles, splitOversized, parseVaultManifest, SOURCE_EXT, type Doc } from "../../src/corpus-core";
-import { buildMap, type EngineProgress } from "../../src/engine";
+import { buildMap, descendMap, type EngineProgress } from "../../src/engine";
 import { poolEmbedWith } from "../../src/geometry";
 import { discoverAxes, type Axis } from "../../src/axes";
 import { Store } from "../../src/llm";
@@ -72,6 +72,24 @@ export type IngestStatus = {
 };
 
 export class EnvelopeError extends Error {}
+
+// ── DESCEND as a gesture (eid-kep3): the page FACE of src/engine.ts descendMap ──────────────────────
+// The selection pane calls this with the held ids; the child map comes back as a plain MapContract the
+// app mounts through the SAME in-memory path a dropped .eido takes. No file is ferried anywhere.
+// The key is OPTIONAL — the cards already exist, so without one the child opens honest-but-unnamed:
+// PC axis names + deterministic contrastive-term region labels (naming can be applied later with a key).
+export async function descendInPage(P: MapContract, selIds: string[], key: string, onStatus: (s: IngestStatus) => void): Promise<MapContract> {
+  const llm = key ? pageLLM(key) : undefined;
+  return descendMap(P, selIds, {
+    llm, regionCache: new Store(),
+    onProgress: (p: EngineProgress) => {
+      if (p.stage === "axes") onStatus({ phase: "axes", label: `discovering local axes over ${p.docs} cards…` });
+      else if (p.stage === "axes-done") onStatus({ phase: "axes", label: `${p.axes} local axes (${p.realDims} above the noise floor)` });
+      else if (p.stage === "layout") onStatus({ phase: "layout", label: `laying out ${p.cards} cards (UMAP + clustering)…` });
+      else if (p.stage === "regions") onStatus({ phase: "regions", label: `${llm ? "naming" : "labeling"} regions ${p.done}/${p.total}`, done: p.done, total: p.total });
+    },
+  });
+}
 
 // One ingest of one folder. `start(key)` runs as far as it honestly can — with no key it stops after
 // the axes stage (the card is the bottleneck AND the point: without a key there are no cards, so no

@@ -260,11 +260,6 @@ export class ViewModel {
     this.filters = [...this.filters.filter((f) => f.kind !== "set"), { kind: "set", key: "set", label: "selection", idx: [...sel] }];
     this.clearSelection();
   }
-  // EXPORT: the curation loop's first sink — a plain JSON of what you circled.
-  selectionExport(): { ids: string[]; titles: string[]; urls: (string | undefined)[] } | null {
-    const D = this.data, sel = this.selection; if (!D || !sel?.length) return null;
-    return { ids: sel.map((i) => D.ids[i]), titles: sel.map((i) => D.titles[i]), urls: sel.map((i) => D.urls?.[i]) };
-  }
   // THE EXPLAIN STEP — a circled clump has to say what it IS, in the corpus's own variables. Same two
   // functions the pipeline uses to name a region (src/distinct.ts), pointed at the held set instead.
   selectionTerms = $derived.by((): string[] => {

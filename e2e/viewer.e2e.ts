@@ -393,7 +393,7 @@ try {
   ok(selPane?.count === "30 cards", `the reading pane shows the selection count — "${selPane?.count}"`);
   ok(!!selPane && selPane.terms.includes("beta"), `the pane EXPLAINS the set: blob 1's distinctive term surfaces — terms=[${selPane?.terms.join(", ")}]`);
   ok((selPane?.axes ?? 0) === 2, `the pane names the set's most-distinctive axes — got ${selPane?.axes}`);
-  ok(JSON.stringify(selPane?.verbs) === JSON.stringify(["sel-filter", "sel-fit", "sel-export", "sel-derive", "sel-clear"]), `the verbs appear on a held set — ${JSON.stringify(selPane?.verbs)}`);
+  ok(JSON.stringify(selPane?.verbs) === JSON.stringify(["sel-filter", "sel-fit", "sel-descend", "sel-derive", "sel-clear"]), `the verbs appear on a held set — ${JSON.stringify(selPane?.verbs)}`);
   ok(selPane?.derivDisabled === false, "the `derive axis` verb is LIVE on a held set");
 
   // 14c-bis. DERIVE: mint an axis from the examples, then place it. Minting alone must move nothing.
