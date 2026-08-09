@@ -31,7 +31,7 @@ export async function pool<T>(items: T[], fn: (t: T) => Promise<void>, conc: num
 export const isAuthError = (e: any): boolean => {
   const s = e?.status ?? e?.response?.status ?? e?.cause?.status;
   if (s === 401 || s === 403) return true;
-  return /\b401\b|\b403\b|unauthorized|invalid[_ ]?api[_ ]?key|no auth credentials|incorrect api key/i.test(String(e?.message ?? e));
+  return /\b401\b|\b403\b|unauthorized|authentication failed|invalid[_ ]?api[_ ]?key|no auth credentials|incorrect api key/i.test(String(e?.message ?? e));
 };
 
 // One readable line from a provider error — first line of the message, bounded, no stack dressing.

@@ -42,7 +42,7 @@ const stripMd = (raw: string) => raw.replace(/```[\s\S]*?```/g, " ").replace(/!\
 // Load any folder of .md/.markdown/.txt files (recursively). Frontmatter-aware: uses id/title if
 // present, else derives them. This is the generic path — no precomputed embeddings, no fixture.
 export function loadFolder(dir: string, opts: { limit?: number; minChars?: number } = {}): Doc[] {
-  const min = opts.minChars ?? 200, docs: Doc[] = [];
+  const min = opts.minChars ?? 200, userFloor = opts.minChars !== undefined, docs: Doc[] = [];
   let skipped = 0, vaultKept = 0;
   const walk = (d: string) => {
     for (const f of readdirSync(d)) {
@@ -64,7 +64,9 @@ export function loadFolder(dir: string, opts: { limit?: number; minChars?: numbe
       // carries an id AND an axes block) is never junk, however short its restatement: dropping it would
       // break the export→re-ingest round trip the vault exists for. Exempt it, and say so.
       const isVaultCard = /^id:/m.test(front) && /^axes:/m.test(front);
-      if (body.length < min) { if (isVaultCard) vaultKept++; else { skipped++; continue; } }
+      // the vault exemption defends the tool's OWN exports from the junk floor's DEFAULT — an
+      // explicitly-asked floor is the user's call and wins over the exemption.
+      if (body.length < min) { if (isVaultCard && !userFloor) vaultKept++; else { skipped++; continue; } }
       const id = (front.match(/^id:\s*"?([^"\n]+)/m) || [])[1]?.trim() || hash(p);
       const title = (front.match(/^title:\s*"?([^"\n]+)/m) || [])[1]?.trim()
         || (rest.match(/^#\s+(.+)$/m) || [])[1]?.trim()

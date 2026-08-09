@@ -8,7 +8,7 @@ same thing and be called the same thing.
 
 Everything here was read out of the source and then **driven in real Chromium** on the Readwise map
 (now `markdown-export.eido`, 1386 docs, v2 file — regenerated 2026-08-07; the log below was recorded
-against its earlier 1446-doc build) and `tldr.eido` (6261 CLI pages, v1 file) — see the verification
+against its earlier 1446-doc build) and `tldr.eido` (regenerated 2026-08-07: 6255 CLI pages, 18 regions; the log below was measured on the earlier 6261-card v1 file) — see the verification
 log at the end.
 
 Notation: **scope** is what the command acts on — `view` (the whole viewer), `channel` (one visual
@@ -309,7 +309,7 @@ Selected results:
   ✓ facet-isolate on a MANIFEST-derived categorical — facetPin="not read", 1446 → 1012
 
 ── tldr.eido (v1, no metaFields manifest → LEGACY_FIELDS fallback) ──
-  ✓ tldr loads — 6261 cards, 21 regions
+  ✓ tldr loads — 6261 cards, 21 regions   [historical: current file is 6255 cards, 18 regions]
   ✓ about degrades honestly on a pre-v2 file: "provenance not recorded (pre-v2 file)"
   ✓ about still names the corpus + its source on a v1 file
   ✓ tldr fallback yields the legacy scalar set (influence, length + the 16 discovered axes)

@@ -73,6 +73,9 @@ const attempt = async (fn: () => Promise<void>) => {
 const args = process.argv.slice(2);
 if (args.includes("--help") || args.includes("-h")) { console.log(USAGE); process.exit(0); }
 if (!args.length) { console.error(USAGE); process.exit(1); }
+// a typo'd flag must not silently run with defaults and burn tokens — reject anything unknown
+const KNOWN_FLAGS = new Set(["--limit", "--min-chars", "--frontier", "--embed", "--out", "--name", "--debug-json", "--fixture", "--relabel", "--help", "-h"]);
+for (const a of args) if (a.startsWith("--") || a === "-h") { const flag = a.split("=")[0]; if (!KNOWN_FLAGS.has(flag)) { console.error(`unknown flag: ${a} (see --help)`); process.exit(1); } }
 const val = (f: string) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : undefined; };
 const dir = args.find((a) => !a.startsWith("--"));
 const limit = val("--limit") ? Number(val("--limit")) : undefined;

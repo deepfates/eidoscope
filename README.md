@@ -61,7 +61,7 @@ bun run src/cli.ts <folder> --min-chars 100  # include short entries (default: s
 bun run src/cli.ts <folder> --frontier   # also pull the citation frontier (arxiv corpora)
 bun run src/cli.ts <folder> --embed raw   # A/B: build the map from raw full-text instead of the cards (to see what the bottleneck buys)
 bun run src/cli.ts <folder> --debug-json  # also dump map-data.json (see below) — off by default: it OOMs on big corpora
-bun run src/cli.ts --relabel out/<name>  # re-name axes + regions of an existing map (geometry is cached; no re-carding)
+bun run src/cli.ts --relabel out/<name>  # re-name regions of an existing map (axes keep their names) (geometry is cached; no re-carding)
 bun run src/cli.ts descend <map.eido> <selection.json> [--out <dir>] [--name <title>]
                                      # re-map a Selection exported from the viewer as its OWN child map:
                                      # new local axes discovered over just those cards (reused; no re-carding)
