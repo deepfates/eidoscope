@@ -715,8 +715,12 @@
               {#if ax.d && !ax.d.fixedNorm}
                 {@const p = propsOf(ax.d)}
                 <div class="ml-6 flex gap-1">
-                  <button class="btn btn-xs {p.norm === 'honest' ? 'btn-active' : 'btn-ghost'}" aria-pressed={p.norm === "honest"} aria-label="{ax.ch} axis: honest magnitudes" title="true magnitudes — the skew shows" onclick={() => setProp(ax.d!, { norm: "honest" })}>honest</button>
-                  <button class="btn btn-xs {p.norm === 'rank' ? 'btn-active' : 'btn-ghost'}" aria-pressed={p.norm === "rank"} aria-label="{ax.ch} axis: rank-normalized" title="even spread by rank order" onclick={() => setProp(ax.d!, { norm: "rank" })}>rank</button>
+                  <!-- honest⇄rank as a fixed-width symbol toggle (eid-kzv2 item 6) — like ☾/☀: the glyph shows the
+                       current state, clicking flips it, and the button never changes width. -->
+                  <button class="btn btn-xs btn-ghost btn-square font-mono" aria-pressed={p.norm === "rank"}
+                    aria-label="{ax.ch} axis: {p.norm === 'honest' ? 'honest magnitudes' : 'rank-normalized'} — click to switch"
+                    title={p.norm === "honest" ? "honest magnitudes — the skew shows" : "rank-normalized — even spread"}
+                    onclick={() => setProp(ax.d!, { norm: p.norm === "honest" ? "rank" : "honest" })}>{p.norm === "honest" ? "▁▁█" : "▃▅▇"}</button>
                   <button class="btn btn-xs {p.invert ? 'btn-active' : 'btn-ghost'}" aria-pressed={p.invert} aria-label="{ax.ch} axis: invert direction" title="flip the axis: high ↔ low" onclick={() => setProp(ax.d!, { invert: !p.invert })}>invert</button>
                 </div>
               {:else if ax.d}
@@ -1009,8 +1013,8 @@
           style="left:{Math.min(hovered.x + 14, (mapBox?.clientWidth ?? 800) - 280)}px; top:{Math.min(hovered.y + 14, (mapBox?.clientHeight ?? 600) - 120)}px">
           {#if hovered.kind === "point"}
             <div class="mb-1 flex items-center gap-1.5 font-mono text-[10px] opacity-60"><span class="h-2 w-2 flex-none rounded-xs" style="background:{rgb(colOf(assignment[hovered.i]))}"></span><span class="truncate">{regionOf(hovered.i)}</span></div>
-            <div class="mb-1 font-bold leading-snug">{data.titles[hovered.i]}</div>
-            <div class="line-clamp-2 opacity-70">{data.cores[hovered.i].slice(0, 140)}</div>
+            <!-- title only (eid-kzv2 item 4: "card hovers are noisy") — the card text belongs to the detail pane, not the hover -->
+            <div class="font-bold leading-snug">{data.titles[hovered.i]}</div>
           {:else}
             <div class="mb-1 font-bold">{hovered.g.title}</div>
             <div class="font-mono text-[10px] opacity-60">frontier paper · cited {hovered.g.n}× in this corpus{hovered.g.arxiv ? " · arXiv:" + hovered.g.arxiv : ""}</div>

@@ -153,6 +153,9 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   // fine grain overlapped and clipped off-screen). On-map labels are truncated so a wide name near the
   // edge can't run past the viewport — the full name lives in the legend + detail panel.
   const dispLabel = (s: string) => (s.length > 26 ? s.slice(0, 25) + "…" : s);
+  // hovering a region label reveals its FULL name in place (eid-kzv2 item 3) — the label itself expands;
+  // no tooltip, no extra chrome. Cleared when the pointer leaves the label.
+  let hoverLabel: number | null = null;
   // Zoom-aware greedy declutter, in PIXEL space: biggest regions first, keep a label only if its pixel box
   // clears every already-placed one. The overlap test uses the CURRENT zoom (pixels = world · 2^zoom), so
   // zooming into a dense area spreads centroids apart and progressively reveals finer labels — the map-like
@@ -160,7 +163,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   // revealed nothing and fine grain dropped most labels even when the screen had room.
   const decluttered = () => {
     const scale = Math.pow(2, viewState?.zoom ?? 0);          // deck ortho: pixels per world unit at this zoom
-    const cand = members.map((idx, c) => ({ c, label: dispLabel(labelOf(c)), n: idx.length, p: centroid(idx) })).filter((d) => d.n > 0 && d.label).sort((a, b) => b.n - a.n);
+    const cand = members.map((idx, c) => ({ c, label: dispLabel(labelOf(c)), full: labelOf(c), n: idx.length, p: centroid(idx) })).filter((d) => d.n > 0 && d.label).sort((a, b) => b.n - a.n);
     const charPx = 8;                                             // ~monospace advance at 13px bold
     const hw = (len: number) => (len * charPx) / 2 + charPx * 1.0; // half-width + ~1-char gap between neighbours
     const lineH = 30;                                             // vertical clearance in px (row spacing; long region names stack otherwise)
@@ -257,12 +260,12 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   const labelLayer = () => new TextLayer({
     id: "labels",
     data: decluttered(),
-    getPosition: (d: any) => d.p, getText: (d: any) => d.label,
+    getPosition: (d: any) => d.p, getText: (d: any) => (d.c === hoverLabel ? d.full : d.label),
     getColor: (d: any) => [...col(d.c), highlight != null && d.c !== highlight ? 40 : 240] as any, getSize: 13, sizeUnits: "pixels",  // dim other regions' labels when one is isolated
     fontFamily: "ui-monospace, monospace", fontWeight: 700, getTextAnchor: "middle", getAlignmentBaseline: "center",
     getPixelOffset: (d: any) => [d.dx || 0, 0],  // keep edge labels on-screen
-    getBackgroundColor: labelBg(), background: true, backgroundPadding: [4, 2],
-    updateTriggers: { getPosition: [posVer], data: [posVer], getColor: [highlight, themeVer], getPixelOffset: [posVer], getBackgroundColor: themeVer },
+    getBackgroundColor: labelBg(), background: true, backgroundPadding: [4, 2], pickable: true,
+    updateTriggers: { getPosition: [posVer], data: [posVer], getColor: [highlight, themeVer], getText: [hoverLabel], getPixelOffset: [posVer], getBackgroundColor: themeVer },
   });
   // 3D region labels: billboarded at each region's 3D centroid, so the fly-through stays isomorphic with the
   // 2D map (same regions, colours, names — one mental map at a different angle). No screen-space declutter in
@@ -271,12 +274,12 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   const centroid3 = (idx: number[]): number[] => { let x = 0, y = 0, z = 0; for (const i of idx) { const p = pos(i); x += p[0]; y += p[1]; z += p[2] || 0; } const k = idx.length || 1; return [x / k, y / k, z / k]; };
   const label3dLayer = () => new TextLayer({
     id: "labels",
-    data: members.map((idx, c) => ({ c, label: dispLabel(labelOf(c)), n: idx.length, p: centroid3(idx) })).filter((d) => d.n > 0 && d.label).sort((a, b) => b.n - a.n),
-    getPosition: (d: any) => d.p, getText: (d: any) => d.label,
+    data: members.map((idx, c) => ({ c, label: dispLabel(labelOf(c)), full: labelOf(c), n: idx.length, p: centroid3(idx) })).filter((d) => d.n > 0 && d.label).sort((a, b) => b.n - a.n),
+    getPosition: (d: any) => d.p, getText: (d: any) => (d.c === hoverLabel ? d.full : d.label),
     getColor: (d: any) => [...col(d.c), highlight != null && d.c !== highlight ? 70 : 245] as any, getSize: 14, sizeUnits: "pixels", sizeMaxPixels: 22, billboard: true,
     fontFamily: "ui-monospace, monospace", fontWeight: 700, getTextAnchor: "middle", getAlignmentBaseline: "center", characterSet: "auto",
-    getBackgroundColor: labelBg(), background: true, backgroundPadding: [4, 2],
-    updateTriggers: { getPosition: [posVer, grain], data: [posVer, grain], getColor: [highlight, themeVer], getBackgroundColor: themeVer },
+    getBackgroundColor: labelBg(), background: true, backgroundPadding: [4, 2], pickable: true,
+    updateTriggers: { getPosition: [posVer, grain], data: [posVer, grain], getColor: [highlight, themeVer], getText: [hoverLabel], getBackgroundColor: themeVer },
   });
   // frontier telescope (only for --frontier arxiv corpora; absent otherwise): intra-corpus citation edges
   // + "ghost" papers cited-but-not-in-corpus, placed near the work that cites them, sized by citation count.
@@ -315,7 +318,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   // (measured, e2e/perf.ts). Reusing the other layer INSTANCES lets deck diff them as unchanged (no re-upload).
   let cur: any[] = layers();
   const paint = () => { cur = layers(); deck.setProps({ layers: cur }); };                                   // full rebuild (color/focus/layout change) — keeps `cur` fresh
-  const paintLabels = () => { cur = cur.map((l: any) => (l && l.id === "labels" ? labelLayer() : l)); deck.setProps({ layers: cur }); };
+  const paintLabels = () => { cur = cur.map((l: any) => (l && l.id === "labels" ? (is3d(layout) ? label3dLayer() : labelLayer()) : l)); deck.setProps({ layers: cur }); };
   const deck = new Deck({
     canvas, views: [view()], viewState,
     controller: controllerFor(layout), pickingRadius: 8,
@@ -327,6 +330,9 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     layers: cur,
     onClick: (info: any) => {
       if (Date.now() < suppressClickUntil) return;  // ignore the click deck fires right after a double-click
+      // labels are hover-pickable (full-name reveal) but must be click-TRANSPARENT: a label floating over
+      // the cloud must not eat the card click under it — re-pick with the label layer excluded.
+      if (info?.layer?.id === "labels") info = (deck as any).pickObject({ x: info.x, y: info.y, radius: 8, layerIds: ["points", "ghosts"] }) ?? info;
       if (info?.layer?.id === "ghosts" && info.object?.url) { window.open(info.object.url, "_blank"); return; }  // ghosts open immediately
       const idx = info?.layer?.id === "points" && info.index >= 0 ? info.index : -1;
       // OPTIMISTIC card-open (eid-54lx): fire immediately — no debounce taxing every click. If a dblclick
@@ -334,6 +340,9 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
       init.onClick?.(idx);
     },
     onHover: (info: any) => {
+      // region label under the pointer? swell it to its full name in place (and shrink the last one back)
+      const overLabel = info?.layer?.id === "labels" && info.object ? (info.object.c as number) : null;
+      if (overLabel !== hoverLabel) { hoverLabel = overLabel; if (showLabels) paintLabels(); }
       if (!init.onHover) return;
       if (info?.layer?.id === "ghosts" && info.object) init.onHover({ kind: "ghost", g: info.object }, info.x ?? 0, info.y ?? 0);
       else if (info?.layer?.id === "points" && info.index >= 0) init.onHover({ kind: "point", i: info.index }, info.x ?? 0, info.y ?? 0);
@@ -373,7 +382,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   canvas.addEventListener("dblclick", (e) => {
     if (selectMode) return;   // in select mode the pointer draws; it does not drill
     suppressClickUntil = Date.now() + 350;  // swallow the trailing onClick deck fires right after a dblclick
-    const info = (deck as any).pickObject({ x: (e as MouseEvent).offsetX, y: (e as MouseEvent).offsetY, radius: 8 });
+    const info = (deck as any).pickObject({ x: (e as MouseEvent).offsetX, y: (e as MouseEvent).offsetY, radius: 8, layerIds: ["points"] });  // labels/ghosts never drill
     if (info && info.layer?.id === "points" && info.index >= 0) { init.onClick?.(-1); drill(info.index); }  // undo the optimistic card-open, then drill
   });
   return {
