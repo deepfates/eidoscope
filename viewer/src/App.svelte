@@ -682,7 +682,7 @@
             <li class="menu-title text-[10px] tracking-widest uppercase">color by</li>
             <li><button data-opt="{scope}:color:region" aria-pressed={m.channels.color === "region"} title="colour by the region clustering at the current grain" onclick={() => (m.channels.color = "region")}><span class="w-3">{m.channels.color === "region" ? "✓" : ""}</span>region</button></li>
             {#each catDims as d}<li><button data-opt="{scope}:color:{d.key}" aria-pressed={m.channels.color === d.key} title="colour by {d.name} — {d.ord?.length} values" onclick={() => (m.channels.color = d.key)}><span class="w-3">{m.channels.color === d.key ? "✓" : ""}</span><span class="truncate">{d.name}</span></button></li>{/each}
-            {#each scalarDims as d}<li><button data-opt="{scope}:color:{d.key}" aria-pressed={m.channels.color === d.key} title="colour by {d.name} (a gradient low → high)" onclick={() => (m.channels.color = d.key)}><span class="w-3">{m.channels.color === d.key ? "✓" : ""}</span><span class="truncate {d.weak ? 'opacity-50' : ''}">{d.source === "axis" ? "axis: " + d.name : d.name}</span>{#if d.variance != null}<span class="ml-auto flex-none font-mono text-[10px] opacity-50">{pctOf(d.variance)}</span>{/if}</button></li>{/each}
+            {#each scalarDims as d}<li><button data-opt="{scope}:color:{d.key}" aria-pressed={m.channels.color === d.key} title="colour by {d.name} (a gradient low → high)" onclick={() => (m.channels.color = d.key)}><span class="w-3">{m.channels.color === d.key ? "✓" : ""}</span><span class="truncate {d.weak ? 'opacity-50' : ''}">{d.name}</span>{#if d.variance != null}<span class="ml-auto flex-none font-mono text-[10px] opacity-50">{pctOf(d.variance)}</span>{/if}</button></li>{/each}
             {@render propItems(colorDim)}
           </ul>
         </div>
@@ -796,7 +796,7 @@
 {#snippet rightControls(scope: string)}
   <button class="btn btn-sm btn-ghost flex-none normal-case" title="read the corpus as a sortable, filterable list" onclick={() => (deckOpen = true)}>deck</button>
   <button disabled={m.channels.color !== "region"} title={m.channels.color !== "region" ? "region labels show when coloured by region" : "show region labels on the map"}
-    aria-pressed={labelsOn} class="btn btn-sm flex-none normal-case {showLabels && m.channels.color === 'region' ? 'btn-active' : 'btn-ghost'}" onclick={() => (showLabels = !showLabels)} aria-label="toggle region labels">region labels</button>
+    aria-pressed={labelsOn} class="btn btn-sm flex-none normal-case {showLabels && m.channels.color === 'region' ? 'btn-active' : 'btn-ghost'}" onclick={() => (showLabels = !showLabels)} aria-label="toggle labels">labels</button>
   <button class="btn btn-sm btn-ghost btn-square flex-none" onclick={toggleTheme} aria-label="toggle light or dark theme" title="toggle light / dark">{theme === "dark" ? "☾" : "☀"}</button>
   <DropdownMenu.Root>
     <DropdownMenu.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case" data-menu="{scope}:theme" aria-label="pick a colour theme" title="theme">

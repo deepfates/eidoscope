@@ -33,7 +33,7 @@ slot), `dimension` (one per-card field), `corpus` (the filter set), `card`, `cam
 | 9 | `color.set` | *put* a dimension on colour · channel | `color ▾` popover, "color by" list; the ● button on a query chip | dimension key or `region` | every point recolours; the legend above becomes that dimension's legend | `?color=` | Tab→Enter | `color → region` |
 | 10 | `size.set` | *put* a dimension on size · channel | `size ▾` popover | dimension key or `uniform` | point radii change | `?size=` | Tab→Enter | `size → uniform` |
 | 11 | `grain.set` | *set* clustering grain · view | **toolbar slider** (always visible; a parameter of the region dimension, not of any channel) | 0…nLevels-1 | regions merge/split; the count next to the slider and in the toolbar updates | `?grain=` | Tab→arrows | `reset view` |
-| 12 | `labels.toggle` | *toggle* region labels · chrome | `region labels` button (disabled off the region lens, with a tooltip saying why) | — | region names appear/disappear on the map | **n** | Tab→Enter | same button |
+| 12 | `labels.toggle` | *toggle* labels · chrome | `labels` button (disabled off the region lens, with a tooltip saying why) | — | region names appear/disappear on the map | **n** | Tab→Enter | same button |
 | **Selecting — narrowing the corpus** |
 | 13 | `region.isolate` | *isolate* one region · corpus | click a legend row under colour = region (the row shows `isolate` / `release` on hover or focus) | cluster id | non-members hidden, camera flies to the set, chip appears, `N / M cards` updates, region detail pane opens | `?region=` | Tab→Enter | click again · chip ✕ · `reset view` |
 | 14 | `facet.isolate` | *isolate* one categorical value · corpus | click a legend row under a categorical colour lens (same visible `isolate` cue) | value | same as above, for that value | `?facet=` | Tab→Enter | click again · chip ✕ · `reset view` |
@@ -185,7 +185,7 @@ The rulings are labels only — no URL parameter, no wire field and no state key
 | deck `filter…` | deck `find in list…` (toolbar stays `find`) |
 | author dimension `source` · provenance `from <path>` | `author` · `corpus source <path>` |
 | layout `3D space` | `3D neighbor map` |
-| `labels` toggle | `region labels` |
+| `region labels` toggle | `labels` |
 | scrubber `clear window` · chips `clear all` · toolbar `reset` | `clear` · `clear all filters` · `reset view` |
 | legend row: isolate visible only to a screen reader | the row shows `isolate` (or `release`, when active) on hover / focus |
 | pipeline manifest labels `author / source`, `tags` | `author`, `tag` — and `NAME_OVERRIDE` in `viewer/src/dimensions.ts` is **gone**, so a file's own manifest labels now flow straight through. One two-entry migration remains, keyed on the retired label *strings*, so `.eido` files written before the rulings don't display a name we retired. |
@@ -213,7 +213,7 @@ UI over `ghosts` in the code.
 | **`grain`** | **`grain`** (keep) | It is a real word for a real thing and the intro teaches it ("continents to towns"). Keeping it, noted so the ruling is explicit. |
 | **`3D space`** (layout) | **`3D neighbor map`** | The other three layouts name their geometry — `neighbor map`, `axis scatter`, `3D axis scatter`. `3D space` is the orbit view *of the neighbor map*, so the one name that breaks the parallel is the one that hides the relationship. |
 | **`deck`** | **`deck`** (keep) | Load-bearing project vocabulary (`deck.jsonl`, `cardCorpus`), and the modal's aria-label already says "deck reader". |
-| **`labels`** | **`region labels`** | It only ever labels regions, and it is disabled off the region lens — the button's name should say what it labels. |
+| **`region labels`** | **`labels`** | REVERSED by deepfates 2026-08-08: they are the only labels the map has; the shorter word says what the button does. (The earlier ruling went the other way — his call supersedes.) |
 | **`clear window`** (scrubber) · **`clear all`** (chips) · **`reset`** (toolbar) | **`clear`** at the local scope, **`clear all filters`** at the chip row, **`reset view`** at the toolbar | Three verbs for three nested scopes is right; three *different* verbs for them is not. Making the scope explicit in each label makes the nesting legible. |
 
 ### N-3 · The word "region"
