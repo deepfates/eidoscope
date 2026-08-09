@@ -359,3 +359,21 @@ one genuinely new manifest-only dimension.
 - **`query.add` shows**: spinner on the `+ axis` trigger during any embed (popover open or not);
   the fresh chip scrolls into view and takes focus.
 - All of the above driven in the e2e net (`e2e/viewer.e2e.ts` §15) against the real built viewer.
+
+## Amendments — 2026-08-09 (eid-bacg: in-page ingest — the app's first organ)
+
+New commands, driven in real Chromium by `e2e/ingest.e2e.ts` (hermetic: real embedder from local
+files, the LLM mocked at the network edge, all other network aborted):
+
+| Command | Verb · object · scope | Binding(s) | Visible result |
+|---|---|---|---|
+| `corpus.ingest` | *build* a map from a folder · view | empty-state "open a folder" picker (`webkitdirectory`) · drag a folder anywhere onto the page | the ingest panel: corpus name + file count, then honest per-stage progress (model load %, embedding i/n chunks, axes, cards i/n with failures counted, layout, regions i/n); on completion the map mounts as the working document — the same in-memory path a dropped `.eido` takes, so `view.save` produces the `.eido` |
+| `ingest.key` | *hold* the LLM key · chrome | password field in the ingest panel | stored in `localStorage` only, never written into any file; the page calls OpenRouter directly (CORS `allow-origin:*`, measured 2026-08-09) |
+| `ingest.resume` | *continue* a stopped run · view | the same start button ("continue with this key" / "resume") | with no key the run STOPS after the axes stage and says plainly that cards need a key (the card is the bottleneck and the point — no cardless map); entering the key resumes: embeddings + geometry are kept, axes are re-named, only carding spends |
+| `ingest.retry` | *re-run* failed cards · view | "retry N failed" in the partial panel | a pass with failed cards is never auto-mounted: retry re-spends only the failures (session caches hold every written card), or "open without them" mounts the partial map explicitly |
+
+Envelope: past ~5,000 docs (`INPAGE_ENVELOPE_DOCS`, src/defaults.ts) the panel refuses honestly and
+points at the CLI twin — same engine (src/engine.ts is the ONE implementation both hosts run; parity
+proven numerically in test/ingest.test.ts on the 24-doc example corpus), same file. `corpus.open`
+gains an empty-state binding: with no bundled map, the app shows the open-a-corpus panel (open a
+`.eido` / open a folder / drag either) instead of a failure screen.

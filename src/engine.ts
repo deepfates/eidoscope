@@ -51,6 +51,9 @@ export type BuildOpts = {
   name?: string; source?: string;
   cardModel?: string; embedderId?: string;             // provenance (derivedBy)
   onProgress?: (p: EngineProgress) => void;
+  // a host that already ran discovery (e.g. the page's keyless axes-preview) hands it in — the same
+  // deterministic result, not re-spent
+  discovered?: { axes: Axis[]; realDims: number; projections: number[][] };
 };
 
 export type BuildResult = { D: MapContract; deck: Card[]; axes: Axis[]; embs: number[][]; deckProjections: number[][] };
@@ -62,7 +65,7 @@ export async function buildMap(docs: Doc[], embeddings: number[][], opts: BuildO
   const conc = opts.concurrency ?? 12;
 
   on({ stage: "axes", docs: docs.length });
-  const { axes, realDims, projections } = await discoverAxes(embeddings, docs.map((d) => d.title.slice(0, 64)), { llm: opts.llm });
+  const { axes, realDims, projections } = opts.discovered ?? await discoverAxes(embeddings, docs.map((d) => d.title.slice(0, 64)), { llm: opts.llm });
   on({ stage: "axes-done", axes: axes.length, realDims });
 
   const deck = await cardCorpus(docs, axes, {

@@ -10,7 +10,9 @@
 
 import type { CardVectors } from "../../src/schema";
 
-const CDN = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1";
+// Test seam (same spirit as window.__eido): the integration suite serves the runtime + weights from
+// localhost so an ingest e2e is hermetic — production never sets these and uses the CDN + HF hub.
+const CDN = (globalThis as any).__EIDO_TF_CDN ?? "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1";
 let extractorP: Promise<any> | null = null;
 
 // Progress the caller can surface while the (one-time) model download runs — so the first query isn't a
@@ -26,6 +28,8 @@ async function extractor(id: string, onProgress?: (p: EmbedProgress) => void): P
       const t: any = await import(/* @vite-ignore */ CDN);
       // let onnxruntime-web fetch its wasm from the same CDN (no local asset wiring needed)
       if (t.env?.backends?.onnx?.wasm) t.env.backends.onnx.wasm.wasmPaths = CDN + "/dist/";
+      const host = (globalThis as any).__EIDO_TF_HOST;
+      if (host && t.env) { t.env.remoteHost = host; t.env.allowLocalModels = false; }
       return t.pipeline("feature-extraction", id, {
         // transformers.js streams {status, file, progress 0..100, loaded, total} while it pulls the ~23MB weights.
         progress_callback: (e: any) => {
@@ -64,3 +68,33 @@ export function cosineAll(query: Float32Array, vectors: CardVectors): number[] {
 }
 // (scale100/rankNorm100 removed — the registry's scores01 in dimensions.ts owns raw→0..100 for every dimension,
 // query axes included, applying the per-dimension norm/invert props uniformly.)
+
+// ── BATCH EMBEDDING for the in-page ingest (eid-bacg) ────────────────────────────────────────────────
+// The SAME extractor/model as queries, batched — chunk texts arrive from geometry.poolEmbedWith, so the
+// chunking/pooling discipline is the shared implementation, and only the raw "strings → vectors" step
+// lives here. A session-memory cache by content id makes a retried pass (failed cards, resumed run)
+// re-embed nothing it already embedded.
+const embCache = new Map<string, number[]>();
+export async function embedItems(
+  items: { id: string; text: string }[],
+  embedderId = "Xenova/all-MiniLM-L6-v2",
+  onProgress?: (done: number, total: number) => void,
+  batch = 16,
+  onModel?: (p: EmbedProgress) => void,
+): Promise<number[][]> {
+  const ex = await extractor(embedderId, onModel);
+  const out: (number[] | null)[] = items.map((it) => embCache.get(it.id) ?? null);
+  const misses = items.map((it, i) => ({ it, i })).filter((x) => out[x.i] === null);
+  let done = items.length - misses.length;
+  onProgress?.(done, items.length);
+  for (let b = 0; b < misses.length; b += batch) {
+    const chunk = misses.slice(b, b + batch);
+    const res: any = await ex(chunk.map((m) => m.it.text || " "), { pooling: "mean", normalize: true });
+    const arr: number[][] = res.tolist();
+    chunk.forEach((m, j) => { out[m.i] = arr[j]; embCache.set(m.it.id, arr[j]); });
+    done += chunk.length;
+    onProgress?.(done, items.length);
+    await new Promise((r) => setTimeout(r, 0));   // yield so the progress UI actually paints
+  }
+  return out as number[][];
+}

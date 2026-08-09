@@ -175,9 +175,10 @@ export async function discoverAxes(embeddings: number[][], titles: string[], opt
 }
 
 // verify against the fixture
-if (import.meta.main) {
-  const { readFileSync } = await import("node:fs");
-  const { provider } = await import("./provider.ts");
+if ((import.meta as any).main) {
+  const dyn = (m: string) => import(/* @vite-ignore */ m);   // node-only path, invisible to the browser bundler
+  const { readFileSync } = await dyn("node:fs");
+  const { provider } = await dyn("./provider.ts");
   const FIX = process.env.EIDOSCOPE_FIXTURE ?? "";
   const C = JSON.parse(readFileSync(`${FIX}/corpus-fulltext.json`, "utf8"));
   const keep = new Set(JSON.parse(readFileSync(`${FIX}/clean-ids.json`, "utf8")).keep);

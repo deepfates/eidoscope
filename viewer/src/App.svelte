@@ -13,7 +13,11 @@
   import { resolveIdSet, type UrlIdSet } from "./idset";
   import { GRAIN_MIN_REGION, GRAIN_RATIO, GRAIN_PALETTE_N, type SavedView, type ViewState } from "../../src/schema";
   import { encodeContainer } from "../../src/eido-container";
+  import { EmbeddedStore } from "../../src/store";
   import { gzipSync } from "fflate";
+  import Ingest from "./Ingest.svelte";
+  import { filesFromFileList, filesFromDataTransfer, type IngestFile } from "./ingest";
+  import type { MapContract } from "../../src/schema";
 
   // THE MODEL — channels, filters, scrubber, the dimension registry, URL (de)serialization. App keeps the DOM,
   // the deck handle, the camera and the browser APIs; it reads the model and hands it user intent.
@@ -496,9 +500,45 @@
     try {
       status = "opening " + file.name + "…"; loadFailed = false;
       mountMap(await decodeEido(new Uint8Array(await file.arrayBuffer())), { intro: true });
+      noMap = false;
     } catch (e: any) { loadFailed = true; status = "couldn't open " + file.name + " — " + (e?.message ?? e); }
   }
-  function onDrop(e: DragEvent) { e.preventDefault(); dragOver = false; const f = e.dataTransfer?.files?.[0]; if (f && /\.eido$/i.test(f.name)) openFile(f); }
+
+  // ═══ INGEST (eid-bacg) — folder → map, in the tab. The app is a general corpus opener: a dropped or
+  // picked FOLDER of .md/.txt runs the same engine the CLI runs (src/engine.ts), in-page; a dropped
+  // .eido opens as before. `noMap` is the EMPTY STATE: no bundled map answered — the open panel is the
+  // app's front door, not an error.
+  let noMap = $state(false);           // true → show the open-a-corpus panel (empty state)
+  let noMapHint = $state("");          // why there is no map yet (a fetch error, subdued — not a failure)
+  let ingest = $state<{ files: IngestFile[]; name: string } | null>(null);
+  function startIngest(files: IngestFile[], name: string) {
+    if (!files.length) { noMapHint = "no .md/.txt files in that folder"; return; }
+    ingest = { files, name };
+  }
+  async function pickFolder(e: Event) {
+    const input = e.currentTarget as HTMLInputElement;
+    const list = input.files; if (!list?.length) return;
+    const name = ((list[0] as any).webkitRelativePath || "").split("/")[0] || "folder";
+    startIngest(await filesFromFileList(list), name);
+    input.value = "";
+  }
+  function ingestDone(D: MapContract) {
+    ingest = null; noMap = false; status = "";
+    // the SAME in-memory path a dropped .eido takes — the map opens as the working document; Save
+    // (view.save in the about pane) produces the .eido through the shared codec.
+    mountMap(new EmbeddedStore(D), { intro: true });
+  }
+  async function onDrop(e: DragEvent) {
+    e.preventDefault(); dragOver = false;
+    const dt = e.dataTransfer; if (!dt) return;
+    const f = dt.files?.[0];
+    if (f && /\.eido$/i.test(f.name) && dt.files.length === 1) { openFile(f); return; }
+    // a folder (or a handful of .md/.txt) dropped → ingest it
+    const first = (dt.items?.[0] as any)?.webkitGetAsEntry?.();
+    const name = first?.isDirectory ? first.name : "dropped files";
+    const files = await filesFromDataTransfer(dt);
+    if (files.length) startIngest(files, name);
+  }
 
   onMount(() => {
     try {
@@ -517,8 +557,9 @@
         mountMap(S);
         applyUrlState(); urlReady = true;  // restore any deep-linked view/card, then start mirroring state → URL
       } catch (e: any) {
-        loadFailed = true;
-        status = "couldn't load the map — " + (e?.message ?? e);
+        // no bundled/hosted map answered → the EMPTY STATE: the app opens corpora, it doesn't apologize
+        status = ""; noMap = true; urlReady = true;
+        noMapHint = String(e?.message ?? e);
       }
     })();
     // Escape closes the topmost OVERLAY — but a toolbar menu is not an overlay: Bits UI already closes it on
@@ -1195,6 +1236,32 @@
       </div>
     {/if}
   </main>
+
+  <!-- ═══ EMPTY STATE — the app's front door: open a .eido, or point it at a folder (eid-bacg) ═══ -->
+  {#if noMap && !data && !ingest}
+    <div class="fixed inset-0 z-50 grid place-items-center bg-base-100 px-6">
+      <div class="w-full max-w-md" data-testid="open-panel">
+        <div class="text-xl font-bold">eidoscope 🔭</div>
+        <div class="mt-1 text-sm opacity-70">turn any folder of documents into an honest, holdable map — entirely in this tab.</div>
+        <div class="mt-5 flex flex-col gap-2">
+          <label class="btn btn-primary justify-start gap-2 normal-case">
+            <span>open a folder of .md / .txt</span>
+            <input type="file" webkitdirectory multiple class="hidden" data-testid="open-folder" onchange={pickFolder} aria-label="open a folder of markdown or text files" />
+          </label>
+          <label class="btn justify-start gap-2 normal-case">
+            <span>open a .eido map</span>
+            <input type="file" accept=".eido" class="hidden" data-testid="open-eido" onchange={(e) => { const f = (e.currentTarget as HTMLInputElement).files?.[0]; if (f) { noMap = false; openFile(f); } }} aria-label="open a .eido map file" />
+          </label>
+        </div>
+        <div class="mt-3 font-mono text-[11px] opacity-50">…or drag a folder or a .eido anywhere onto this page</div>
+        {#if noMapHint}<div class="mt-4 font-mono text-[10px] leading-snug opacity-40">no bundled map: {noMapHint}</div>{/if}
+      </div>
+    </div>
+  {/if}
+
+  {#if ingest}
+    <Ingest files={ingest.files} name={ingest.name} onDone={ingestDone} onCancel={() => (ingest = null)} />
+  {/if}
 
   {#if status}
     <div class="fixed inset-0 z-50 grid place-items-center bg-base-100 px-6">

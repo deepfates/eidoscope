@@ -62,13 +62,14 @@ export async function cardCorpus(docs: Doc[], axes: Axis[], opts: { llm?: any; s
 export const deckToJSONL = (cards: Card[]) => cards.map((c) => JSON.stringify(c)).join("\n") + "\n";
 
 // verify: card a small sample against the fixture axes, check the deck shape
-if (import.meta.main) {
-  const { writeFileSync } = await import("node:fs");
-  const { provider } = await import("./provider.ts");
-  const { loadFixture, fixtureAxes } = await import("./corpus.ts");
+if ((import.meta as any).main) {
+  const dyn = (m: string) => import(/* @vite-ignore */ m);   // node-only path, invisible to the browser bundler
+  const { writeFileSync } = await dyn("node:fs");
+  const { provider } = await dyn("./provider.ts");
+  const { loadFixture, fixtureAxes } = await dyn("./corpus.ts");
   const { docs } = loadFixture();
   const axes = fixtureAxes();
-  const sample = docs.filter((d) => d.body.length > 2000).slice(0, 15);
+  const sample = docs.filter((d: any) => d.body.length > 2000).slice(0, 15);
   console.error(`carding ${sample.length} sample docs over ${axes.length} axes...`);
   const deck = await cardCorpus(sample, axes, { llm: provider(), concurrency: 8 });
   writeFileSync("deck-sample.jsonl", deckToJSONL(deck));
