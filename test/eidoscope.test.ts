@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { loadFolder, splitOversized, type Doc } from "../src/corpus.ts";
 import { trajectory } from "../src/trajectory.ts";
 import { deckToJSONL, cardCorpus, type Card } from "../src/card.ts";
+import { fileStore } from "../src/config.ts";
 import { cardText, projectionScores, buildMetaFields } from "../src/map.ts";
 import { scoreRedundancy } from "../src/redundancy.ts";
 import { docArxiv, fetchFrontier } from "../src/frontier.ts";
@@ -390,19 +391,20 @@ test("cardCorpus: cards cache by content + axis GEOMETRY; relabeling axes hits (
   const docs = (n: number) => Array.from({ length: n }, (_, i) => ({ id: `d${i}`, title: `T${i}`, body: "word ".repeat(50) }));
   let calls = 0;
   const sig = { forward: async () => { calls++; return { restatement: "r", axisPlacements: ["n"] }; } };
-  const opts = { sig, cache: dir, concurrency: 1, llm: {} };
+  const cacheAt = () => fileStore(join(dir, "card-cache.jsonl"));   // re-read the file each pass (simulates a restart)
+  const opts = () => ({ sig, cache: cacheAt(), concurrency: 1, llm: {} });
 
-  const r1 = await cardCorpus(docs(3), axesA, opts);
+  const r1 = await cardCorpus(docs(3), axesA, opts());
   expect(r1.length).toBe(3); expect(calls).toBe(3); // all fresh — one call per doc
 
-  await cardCorpus(docs(3), axesA, opts); // same corpus + axes → all cached, survived a "restart"
+  await cardCorpus(docs(3), axesA, opts()); // same corpus + axes → all cached, survived a "restart"
   expect(calls).toBe(3);
 
-  const r3 = await cardCorpus(docs(3), axesRelabeled, opts); // axes RELABELED, geometry identical → HIT
+  const r3 = await cardCorpus(docs(3), axesRelabeled, opts()); // axes RELABELED, geometry identical → HIT
   expect(r3.length).toBe(3);
   expect(calls).toBe(3); // the re-card fix: nondeterministic label drift does NOT re-card
 
-  const r4 = await cardCorpus(docs(3), axesNewGeom, opts); // geometry ACTUALLY changed → re-card (correct)
+  const r4 = await cardCorpus(docs(3), axesNewGeom, opts()); // geometry ACTUALLY changed → re-card (correct)
   expect(r4.length).toBe(3);
   expect(calls).toBe(6);
 

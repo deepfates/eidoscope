@@ -1,34 +1,38 @@
-import { writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { deriveCard } from "./signatures.ts";
-import { provider } from "./provider.ts";
 import { hash, Store, pool, withRetry, isAuthError, errLine } from "./llm.ts";
 import type { Axis } from "./axes.ts";
-import type { Doc } from "./corpus.ts";
+import type { Doc } from "./corpus-core.ts";
 
 // The gorm layer applied at scale -> the DECK. One full-text deriveCard call per document, cached by
 // document content + the DETERMINISTIC axis geometry (PC index + variance). PCA is deterministic, so the
 // same corpus yields the same axes every run; the LLM only relabels them, and those names are cosmetic
 // and never touch the key — so re-running the same corpus reloads every card instead of re-carding.
+//
+// HOST-FREE (eid-bacg): the llm is always injected (CLI: provider(); page: an ax client from the
+// user-held key), the cache is an injected Store (file-backed in node via config.fileStore, session
+// memory in the page — which is what makes an in-page pass RESUMABLE: retrying re-runs only failures),
+// and progress is a callback (node default: the stderr ticker).
 export type Card = { id: string; title: string; cat?: string; date?: number; url?: string; source?: string; siteName?: string; author?: string; tags?: string[]; path?: string; readProgress?: number; core: string; axes: Record<string, { note: string }> };
 
 export const axesPrompt = (axes: Axis[]) =>
   axes.map((a, i) => `${i + 1}. ${a.name}: low="${a.pole_low}" high="${a.pole_high}"`).join("\n");
 
-export async function cardCorpus(docs: Doc[], axes: Axis[], opts: { llm?: any; sig?: any; concurrency?: number; cache?: string } = {}): Promise<Card[]> {
-  const llm = opts.llm ?? provider();
+export type CardProgress = (done: number, total: number, failed: number) => void;
+
+export async function cardCorpus(docs: Doc[], axes: Axis[], opts: { llm?: any; sig?: any; concurrency?: number; cache?: Store; onProgress?: CardProgress } = {}): Promise<Card[]> {
+  const llm = opts.llm;
+  if (llm === undefined) throw new Error("cardCorpus: an llm client is required (the caller injects it)");
   const sig = opts.sig ?? deriveCard;
   const conc = opts.concurrency ?? 12;
   const corpusAxes = axesPrompt(axes);
-  const cacheDir = typeof opts.cache === "string" ? opts.cache : undefined;
-  const cache = new Store(cacheDir ? join(cacheDir, "card-cache.jsonl") : undefined);
+  const cache = opts.cache ?? new Store();
   // key = document content + DETERMINISTIC axis geometry (PC index + variance). NOT the LLM labels.
   const geo = axes.map((a) => a.pc + ":" + (a.var ?? 0).toFixed(6)).join("|");
   const key = (d: Doc) => hash("card1 " + d.title + " " + d.body + " " + geo);
 
   const need = docs.filter((d) => !cache.has(key(d)));
   let done = 0, fail = 0, lastErr: any;
-  const tick = () => { if (need.length && (++done % 50 === 0 || done === need.length)) process.stderr.write(`  cards ${done}/${need.length}\r`); };
+  const progress: CardProgress = opts.onProgress ?? ((dn, total) => { if (total && (dn % 50 === 0 || dn === total)) (globalThis as any).process?.stderr?.write?.(`  cards ${dn}/${total}\r`); });
   await pool(need, async (d) => {
     const r: any = await withRetry(() => sig.forward(llm, { documentTitle: d.title, documentText: d.body, corpusAxes }), 4, (e) => { lastErr = e; });
     if (r?.restatement) cache.put(key(d), { core: String(r.restatement), placements: (r.axisPlacements ?? []).map(String) });
@@ -38,7 +42,7 @@ export async function cardCorpus(docs: Doc[], axes: Axis[], opts: { llm?: any; s
       // own words, instead of burning through the corpus and emitting an empty map as a "success".
       if (lastErr && isAuthError(lastErr)) throw new Error(`the provider rejected the API key — ${errLine(lastErr)} (check OPENROUTER_API_KEY / EIDOSCOPE_API_KEY)`);
     }
-    tick();
+    progress(++done, need.length, fail);
   }, conc);
   if (fail) console.error(`  ⚠ ${fail} cards failed after retries (reported, not silently dropped)`);
 
@@ -59,12 +63,14 @@ export const deckToJSONL = (cards: Card[]) => cards.map((c) => JSON.stringify(c)
 
 // verify: card a small sample against the fixture axes, check the deck shape
 if (import.meta.main) {
+  const { writeFileSync } = await import("node:fs");
+  const { provider } = await import("./provider.ts");
   const { loadFixture, fixtureAxes } = await import("./corpus.ts");
   const { docs } = loadFixture();
   const axes = fixtureAxes();
   const sample = docs.filter((d) => d.body.length > 2000).slice(0, 15);
   console.error(`carding ${sample.length} sample docs over ${axes.length} axes...`);
-  const deck = await cardCorpus(sample, axes, { concurrency: 8 });
+  const deck = await cardCorpus(sample, axes, { llm: provider(), concurrency: 8 });
   writeFileSync("deck-sample.jsonl", deckToJSONL(deck));
   const keys = axes.map((a: Axis) => a.key);
   const wellFormed = deck.filter((c) => c.core && keys.every((k: string) => c.axes[k]?.note !== undefined));

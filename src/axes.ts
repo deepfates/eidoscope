@@ -1,7 +1,9 @@
-import { readFileSync } from "node:fs";
 import { EVD, Matrix, QR, SVD } from "ml-matrix";
 import { labelAxes } from "./signatures.ts";
-import { provider } from "./provider.ts";
+
+// HOST-FREE (eid-bacg): no node imports — this module runs identically in Bun and in the browser page.
+// The LLM is always injected by the caller (the CLI passes provider(); the page passes its own ax
+// client built from the user-held key); absent, axes fall back to PC names — same as a failed call.
 
 // THE SOLID LAYER. Deterministic math discovers the axes; the model only labels them.
 //  1. PCA on the (unit-normalized, centered) embeddings -> orthogonal axes of variation.
@@ -151,18 +153,18 @@ export async function discoverAxes(embeddings: number[][], titles: string[], opt
   // DISTINCT contrast — instead of 16 isolated calls each rediscovering the dominant one. (Verified:
   // this cuts cross-axis score redundancy ~0.39->0.25 on the fixture; isolated labeling collapsed
   // ~9/16 axes onto "technical vs theoretical" even though the PCA directions are orthogonal.)
-  const llm = opts.llm ?? provider();
+  const llm = opts.llm;
   const poleBlock = Array.from({ length: topN }, (_, k) => {
     const order = titles.map((_, i) => [scores[i][k], i] as [number, number]).sort((a, b) => a[0] - b[0]);
     const low = order.slice(0, 14).map(([, i]) => titles[i]).join("; ");
     const high = order.slice(-14).map(([, i]) => titles[i]).join("; ");
     return `AXIS ${k + 1}\n HIGH: ${high}\n LOW: ${low}`;
   }).join("\n\n");
-  const r: any = await labelAxes.forward(llm, { axesPoles: poleBlock }).catch(() => ({}));
+  const r: any = llm ? await Promise.resolve().then(() => labelAxes.forward(llm, { axesPoles: poleBlock })).catch(() => ({})) : {};
   const all: Axis[] = Array.from({ length: topN }, (_, k) => {
     const name = r.axisNames?.[k] || `PC${k + 1}`;
     const coh = Number(r.coherenceScores?.[k]) || 3;
-    process.stderr.write(`  PC${k + 1} var${(variance[k] * 100).toFixed(1)}% coh${coh}  ${name}\n`);
+    (globalThis as any).process?.stderr?.write?.(`  PC${k + 1} var${(variance[k] * 100).toFixed(1)}% coh${coh}  ${name}\n`);
     return { pc: k + 1, var: +variance[k].toFixed(4), coherence: +coh.toFixed(1), key: slug(name) || `pc${k + 1}`, name, pole_low: r.lowPoleLabels?.[k] || "", pole_high: r.highPoleLabels?.[k] || "" };
   });
   // The axis COUNT is grug's call, not gorm's: it's min(topN, realDims), fixed deterministically
@@ -174,6 +176,8 @@ export async function discoverAxes(embeddings: number[][], titles: string[], opt
 
 // verify against the fixture
 if (import.meta.main) {
+  const { readFileSync } = await import("node:fs");
+  const { provider } = await import("./provider.ts");
   const FIX = process.env.EIDOSCOPE_FIXTURE ?? "";
   const C = JSON.parse(readFileSync(`${FIX}/corpus-fulltext.json`, "utf8"));
   const keep = new Set(JSON.parse(readFileSync(`${FIX}/clean-ids.json`, "utf8")).keep);
@@ -181,7 +185,7 @@ if (import.meta.main) {
   const embeddings = rows.map((r: any) => C.embs[r.i]);
   const titles = rows.map((r: any) => (r.m.title || "").slice(0, 64));
   console.error(`fixture: ${embeddings.length} clean docs\n`);
-  const { axes, all, realDims } = await discoverAxes(embeddings, titles);
+  const { axes, all, realDims } = await discoverAxes(embeddings, titles, { llm: provider() });
   const fix = JSON.parse(readFileSync(`${FIX}/axes-schema.json`, "utf8")).axes;
   console.log(`\nreal dims above noise floor: ${realDims}   (fixture/python: ~41)`);
   console.log(`crisp axes: ${axes.length}/${all.length}   (fixture/python: ${fix.length})`);

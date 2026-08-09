@@ -1,13 +1,14 @@
 import { nameCluster } from "./signatures.ts";
-import { provider } from "./provider.ts";
 import { hash, Store, pool, withRetry } from "./llm.ts";
-import { join } from "node:path";
 
 // Naming regions the GRUG way: the model does not guess what a region is "about" from a pile of its
 // members — the deterministic layer first COMPUTES what makes the region distinct (terms it over-uses
 // vs the rest of the corpus; axes it sits at an extreme on), and the model only phrases that contrast.
 // This is what kills the "everything is Hazards" collision: a token frequent everywhere has a low
 // distinctiveness ratio, so it never surfaces as the headline. Math finds the contrast; the LLM labels it.
+//
+// HOST-FREE (eid-bacg): llm injected by the caller, cache an injected Store (file-backed in node,
+// session memory in the page), progress a callback — same seams as cardCorpus.
 
 export type Region = { c: number; n: number; label: string; blurb: string; terms: string[] };
 
@@ -32,12 +33,13 @@ const sampleText = (idx: number[], titles: string[], cores: string[], n = 12) =>
 export async function nameLevels(
   levels: number[][], counts: number[], titles: string[], cores: string[],
   scores: Record<string, number[]>, axes: { key: string; name: string; low: string; high: string }[],
-  opts: { llm?: any; sig?: any; concurrency?: number; cache?: string } = {}
+  opts: { llm?: any; sig?: any; concurrency?: number; cache?: Store; onProgress?: (done: number, total: number) => void } = {}
 ): Promise<{ labels: string[][]; blurbs: string[][]; regionsByLevel: Region[][] }> {
-  const llm = opts.llm ?? provider();
+  const llm = opts.llm;
+  if (llm === undefined) throw new Error("nameLevels: an llm client is required (the caller injects it)");
   const sig = opts.sig ?? nameCluster;
   const conc = opts.concurrency ?? 12;
-  const store = new Store(typeof opts.cache === "string" ? join(opts.cache, "region-cache.jsonl") : undefined);
+  const store = opts.cache ?? new Store();
 
   // gather every UNIQUE cluster across all levels, with its computed distinctiveness
   type Job = { key: string; idx: number[]; terms: string[]; axesTxt: string; samples: string };
@@ -59,7 +61,7 @@ export async function nameLevels(
   const named = new Map<string, { label: string; blurb: string }>();
   const todo = [...jobs.values()];
   let done = 0, fail = 0;
-  const tick = () => { if (todo.length && (++done % 25 === 0 || done === todo.length)) process.stderr.write(`  regions ${done}/${todo.length}\r`); };
+  const progress = opts.onProgress ?? ((dn: number, total: number) => { if (total && (dn % 25 === 0 || dn === total)) (globalThis as any).process?.stderr?.write?.(`  regions ${dn}/${total}\r`); });
   await pool(todo, async (j) => {
     const ck = hash("name2 " + j.terms.join(",") + " | " + j.axesTxt + " | " + j.samples);
     let v = store.get(ck);
@@ -69,7 +71,7 @@ export async function nameLevels(
       else fail++;
     }
     if (v) named.set(j.key, v);
-    tick();
+    progress(++done, todo.length);
   }, conc);
   if (fail) console.error(`  ⚠ ${fail} regions failed after retries (reported, not silently dropped)`);
 

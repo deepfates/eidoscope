@@ -1,133 +1,48 @@
-import { readFileSync } from "node:fs";
-import { UMAP } from "umap-js";
+// The NODE FACE of the geometry stages. The stage logic itself is host-free in src/geometry.ts (shared
+// verbatim with the in-page ingest); this file binds it to the node host: the on-disk embedding cache,
+// the local MiniLM (src/embed.ts), and hnswlib's approximate kNN past HNSW_MIN. Existing callers keep
+// importing everything from here — the re-exports below ARE the node API.
 import type { Card } from "./card.ts";
-import { mulberry32, SEED, type Axis } from "./axes.ts";
-import type { Doc } from "./corpus.ts";
+import { SEED, type Axis } from "./axes.ts";
+import type { Doc } from "./corpus-core.ts";
 import { CFG, cachePath } from "./config.ts";
 import { getTextEmbeddings, EmbeddingCache } from "./embed.ts";
-import { divisiveLevels } from "./cluster.ts";
 import { HierarchicalNSW } from "hnswlib-node";
-import { GRAIN_PALETTE_N, type MapContract, type MetaField } from "./schema.ts";
+import {
+  cardText, projectionScores, rawProjectionScores, buildMetaFields, poolEmbedWith, knnBrute, layoutKnn as layoutKnnCore,
+  xyzOverlap as xyzOverlapCore, normPct, projectAndCluster as projectAndClusterCore, HNSW_MIN, type ApproxKnn,
+} from "./geometry.ts";
 
-// Declare each corpus field as a TYPED encodable dimension (the channel-grammar substrate). Presence-based:
-// only emit what this corpus actually carries. The viewer resolves `source` to values; we just declare types.
-export function buildMetaFields(D: Partial<MapContract> & { axes: MapContract["axes"] }): MetaField[] {
-  const has = (a?: unknown[]) => Array.isArray(a) && a.some((x) => x != null && x !== "");
-  const f: MetaField[] = [];
-  if (has(D.authors)) f.push({ key: "author", label: "author", type: "categorical", source: "col:authors" });
-  if (has(D.siteNames)) f.push({ key: "site", label: "source site", type: "categorical", source: "col:siteNames" });
-  // prefer the carried folders column; the url-derived fallback only works for file:// urls (old files)
-  if (has(D.folders)) f.push({ key: "folder", label: "folder", type: "categorical", source: "col:folders" });
-  else if (Array.isArray(D.urls) && D.urls.some((u) => typeof u === "string" && u.startsWith("file://"))) f.push({ key: "folder", label: "folder", type: "categorical", source: "derived:folder" });
-  if (has(D.tags)) f.push({ key: "tags", label: "tag", type: "categorical", multi: true, source: "col:tags" });
-  if (has(D.dates)) f.push({ key: "date", label: "date", type: "temporal", source: "col:dates" });
-  if (has(D.read)) f.push({ key: "read", label: "read", type: "boolean", source: "col:read" });
-  f.push({ key: "hub", label: "connections", type: "scalar", source: "col:hub" });
-  if (has(D.citec)) f.push({ key: "citec", label: "citation impact", type: "scalar", source: "col:citec" });
-  f.push({ key: "length", label: "length", type: "scalar", source: "derived:length" });
-  for (const a of D.axes) f.push({ key: "axis:" + a.key, label: a.name, type: "scalar", source: "axis:" + a.key });
-  return f;
-}
+export { cardText, projectionScores, rawProjectionScores, buildMetaFields, knnBrute, normPct, HNSW_MIN };
 
-// Embed the DECK (local MiniLM) and lay it out (umap-js) — the readers' coordinates.
-// Embeds the cleaned, structured card text, not the raw document: that's what de-noises the map.
-
-// The human-readable full card: title + restatement + every axis placement, concatenated into ONE
-// string. This is also exactly what the map geometry embeds (embedCards, below) — we briefly split it
-// into two weighted vectors to keep the placements from drowning the restatement, but building the maps
-// three ways and LOOKING settled it: the combined card stays cleanly structured, so the split was
-// unnecessary machinery. Both parts are the LLM card — no full-text, no PCA in the geometry.
-export const cardText = (c: Card, axes: Axis[]) => (c.title ? c.title + ". " : "") + (c.core || "") + " " + axes.map((a) => c.axes[a.key]?.note || "").filter(Boolean).join(". ");
-
-// Calibrated axis positions straight from the deterministic PCA projection (grug), rank-normalized to
-// 0-100. REPLACES the LLM's absolute scores for positioning: the projection is continuous and
-// comparative by construction, where the model saturates and buckets. The LLM's notes still feed the map.
-export function projectionScores(projections: number[][], axes: { key: string; pc: number }[]): Record<string, number[]> {
-  const n = projections.length;
-  const rank = (col: number[]) => {
-    const order = col.map((_, i) => i).sort((i, j) => col[i] - col[j]);
-    const out = new Array<number>(n);
-    order.forEach((oi, r) => { out[oi] = n > 1 ? Math.round((100 * r) / (n - 1)) : 50; });
-    return out;
-  };
-  return Object.fromEntries(axes.map((a) => [a.key, rank(projections.map((row) => row[a.pc - 1]))]));
-}
-
-// The SAME PCA projections without the rank step — the raw, true-magnitude coordinate on each axis. Rank
-// (above) gives the readable even-spread default; raw lets the viewer show the honest skew (where docs pile
-// vs. spread). Carried alongside `scores` so "honest ⇄ rank" on an axis is a real toggle, not a stub.
-export function rawProjectionScores(projections: number[][], axes: { key: string; pc: number }[]): Record<string, number[]> {
-  return Object.fromEntries(axes.map((a) => [a.key, projections.map((row) => row[a.pc - 1])]));
-}
-
-const textHash = (s: string) => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0; return h.toString(36); };
-
-// Embed a batch of texts by CHUNK-POOLING: split each into word chunks (so nothing beyond the
-// embedder's context window is silently dropped), embed every chunk in one batched pass, mean-pool
-// back per text. The card path and the full-text path MUST use this identically — otherwise the
-// card gets a single truncated pass while full text gets the whole document, an unfair asymmetry
-// that also discards most of a rich card. Chunks are cached content-addressed (hash+len), so identical
-// chunks dedupe and any change to the source text self-invalidates.
-// `embed` is injectable so the chunking/subsampling/pooling logic is testable without loading MiniLM.
+// Embed a batch of texts by chunk-pooling (geometry.poolEmbedWith), with the node host's content-
+// addressed on-disk cache. `embed` is injectable so the chunking/pooling logic is testable without MiniLM.
 export type Embedder = (items: { id: string; text: string }[], opts: { cache?: EmbeddingCache }) => Promise<number[][]>;
 export async function poolEmbed(texts: string[], cacheDir: string, opts: { embed?: Embedder; chunkWords?: number; maxChunks?: number } = {}): Promise<number[][]> {
   const cache = new EmbeddingCache(cacheDir, CFG.embedModel); await cache.load();
   const embed = opts.embed ?? getTextEmbeddings;
-  const chunkWords = opts.chunkWords ?? CFG.params.chunkWords, maxChunks = opts.maxChunks ?? CFG.params.maxChunks;
-  const items: { id: string; text: string }[] = [];
-  const spans: number[][] = texts.map(() => []);
-  texts.forEach((t, di) => {
-    const words = (t || " ").split(/\s+/).filter(Boolean);
-    let chunks: string[] = [];
-    for (let i = 0; i < words.length; i += chunkWords) chunks.push(words.slice(i, i + chunkWords).join(" "));
-    if (chunks.length > maxChunks) { const step = chunks.length / maxChunks, s: string[] = []; for (let i = 0; i < maxChunks; i++) s.push(chunks[Math.floor(i * step)]); chunks = s; }
-    if (!chunks.length) chunks = [" "];
-    chunks.forEach((text) => { spans[di].push(items.length); items.push({ id: textHash(text) + "#" + text.length, text }); });
-  });
-  const embs = await embed(items, { cache });
+  const out = await poolEmbedWith(texts, (items) => embed(items, { cache }), { chunkWords: opts.chunkWords ?? CFG.params.chunkWords, maxChunks: opts.maxChunks ?? CFG.params.maxChunks });
   await cache.save();
-  const dim = embs[0]?.length ?? 384;
-  return texts.map((_, di) => {
-    const idx = spans[di], acc = new Array(dim).fill(0);
-    for (const i of idx) for (let j = 0; j < dim; j++) acc[j] += embs[i][j];
-    return acc.map((x) => x / (idx.length || 1));
-  });
+  return out;
 }
 
 // The card as the map's coordinates: one chunk-pooled embedding of the whole card text (see cardText).
-export async function embedCards(cards: Card[], axes: Axis[]): Promise<number[][]> {
-  return poolEmbed(cards.map((c) => cardText(c, axes)), cachePath("cache-eidoscope-cards"));
+export async function embedCards(cards: Card[], axes: Axis[], opts: { embed?: Embedder } = {}): Promise<number[][]> {
+  return poolEmbed(cards.map((c) => cardText(c, axes)), cachePath("cache-eidoscope-cards"), opts);
 }
 
 // Full-text embedding for the generic path (when a loader has no precomputed embeddings).
-export async function embedDocs(docs: Doc[]): Promise<number[][]> {
-  return poolEmbed(docs.map((d) => (d.title ? d.title + ". " : "") + d.body), cachePath("cache-eidoscope-fulltext"));
+export async function embedDocs(docs: Doc[], opts: { embed?: Embedder } = {}): Promise<number[][]> {
+  return poolEmbed(docs.map((d) => (d.title ? d.title + ". " : "") + d.body), cachePath("cache-eidoscope-fulltext"), opts);
 }
 
-const unit = (v: number[]) => { let n = 0; for (const x of v) n += x * x; n = Math.sqrt(n) || 1; return v.map((x) => x / n); };
-
-// kNN on unit vectors (cosine = dot). Exact brute force for small n; approximate HNSW past HNSW_MIN,
-// where O(n²) stops being affordable. Both are here as named functions so a test can assert the
-// approximate index agrees with the exact answer on a synthetic set — the swap is a scale optimization,
-// not a change in what a "neighbor" means.
-export const HNSW_MIN = 3000;
-export function knnBrute(X: number[][], K: number): number[][] {
-  const n = X.length, nbr: number[][] = [];
-  for (let i = 0; i < n; i++) {
-    const sims: [number, number][] = [];
-    for (let j = 0; j < n; j++) { if (j === i) continue; let s = 0; const a = X[i], b = X[j]; for (let d = 0; d < a.length; d++) s += a[d] * b[d]; sims.push([j, s]); }
-    sims.sort((a, b) => b[1] - a[1]);
-    nbr.push(sims.slice(0, K).map(([j]) => j));
-  }
-  return nbr;
-}
 // One approximate index answers BOTH consumers: rows are SELF-INCLUSIVE ([i, ...K neighbors]) with
 // matching distances converted to euclidean-on-the-unit-sphere (sqrt(2·cosineDist)) — exactly the
 // (indices, distances) shape umap-js's setPrecomputedKNN expects (python UMAP convention: self counts
 // as one of nNeighbors, distance 0). Callers that want plain neighbor lists slice the self column off.
 // Deterministic: hnswlib's level RNG is seeded, points are inserted sequentially in corpus order, and
 // search is exact given the built graph — same vectors in, same graph and neighbors out, every run.
-export function knnIndex(X: number[][], K: number): { idx: number[][]; dst: number[][] } {
+export const knnIndex: ApproxKnn = (X, K) => {
   const index = new HierarchicalNSW("cosine", X[0].length);
   index.initIndex(X.length, 16, 200, SEED);
   index.setEf(Math.max(64, K + 1));
@@ -140,25 +55,15 @@ export function knnIndex(X: number[][], K: number): { idx: number[][]; dst: numb
     dst.push([0, ...pairs.map(([, d]) => Math.sqrt(Math.max(0, 2 * d)))]);
   }
   return { idx, dst };
-}
+};
 export async function knnHNSW(X: number[][], K: number): Promise<number[][]> {
   return knnIndex(X, K).idx.map((row) => row.slice(1));
 }
 
-// kNN in LAYOUT space (euclidean over 2–3 dims): brute for small n, hnsw l2 past HNSW_MIN — same
-// scale threshold, same determinism argument as knnIndex above.
-export function layoutKnn(P: number[][], K: number): number[][] {
-  const n = P.length, d = P[0]?.length ?? 0, Kc = Math.min(K, n - 1);
-  if (n <= HNSW_MIN) {
-    const out: number[][] = [];
-    for (let i = 0; i < n; i++) {
-      const sims: [number, number][] = [];
-      for (let j = 0; j < n; j++) { if (j === i) continue; let s = 0; for (let t = 0; t < d; t++) { const dd = P[i][t] - P[j][t]; s += dd * dd; } sims.push([j, s]); }
-      sims.sort((a, b) => a[1] - b[1]);
-      out.push(sims.slice(0, Kc).map(([j]) => j));
-    }
-    return out;
-  }
+// hnswlib l2 in LAYOUT space (euclidean over 2–3 dims), injected past HNSW_MIN — same scale threshold,
+// same determinism argument as knnIndex above.
+const layoutApprox = (P: number[][], Kc: number): number[][] => {
+  const n = P.length, d = P[0]?.length ?? 0;
   const index = new HierarchicalNSW("l2", d);
   index.initIndex(n, 16, 200, SEED);
   index.setEf(Math.max(64, Kc + 1));
@@ -166,72 +71,25 @@ export function layoutKnn(P: number[][], K: number): number[][] {
   const out: number[][] = [];
   for (let i = 0; i < n; i++) out.push(index.searchKnn(P[i], Math.min(n, Kc + 1)).neighbors.filter((j) => j !== i).slice(0, Kc));
   return out;
-}
+};
+export const layoutKnn = (P: number[][], K: number): number[][] => layoutKnnCore(P, K, layoutApprox);
+export const xyzOverlap = (xy: number[][], xyz: number[][], K = 8): number => xyzOverlapCore(xy, xyz, K, layoutApprox);
 
-// THE HONESTY NUMBER for the 3D cloud (eid-ovo7): the 2D map and the 3D cloud are two INDEPENDENT UMAP
-// fits of the same card vectors (same seed, same precomputed kNN graph — still different embeddings;
-// measured: seeding the 3D fit from the 2D layout moved this by only ~+0.1/8, and taking the top-2 dims
-// of a 3D fit made the 2D map strictly worse, so the fits stay separate and the difference gets STATED).
-// This is the mean count of a card's K nearest 2D-layout neighbors that are still among its K nearest in
-// the 3D layout — computed per corpus at emit time and surfaced in the about pane, so the claim
-// "different arrangement" is a measured number, not vibes.
-export function xyzOverlap(xy: number[][], xyz: number[][], K = 8): number {
-  const A = layoutKnn(xy, K), B = layoutKnn(xyz, K);
-  let s = 0;
-  for (let i = 0; i < A.length; i++) { const set = new Set(B[i]); for (const j of A[i]) if (set.has(j)) s++; }
-  return A.length ? s / A.length : 0;
-}
-
-export function normPct(arr: number[][], dims: number): number[][] {
-  const b = Array.from({ length: dims }, (_, j) => { const c = arr.map((r) => r[j]).sort((a, z) => a - z); const q = (p: number) => c[Math.floor(p * (c.length - 1))]; return [q(0.02), q(0.98)] as [number, number]; });
-  return arr.map((r) => r.map((v, j) => +(((v - (b[j][0] + b[j][1]) / 2) / (((b[j][1] - b[j][0]) / 2) || 1))).toFixed(4)));
-}
-
+// Project + cluster with the node host's approximate indexes wired in (geometry.ts holds the logic).
 export async function projectAndCluster(embs: number[][]) {
-  const X = embs.map(unit);
-  const n = X.length;
-  if (n < 5) { // too few points for UMAP/clustering — lay them on a ring so the tool still runs
-    const xy = X.map((_, i) => [Math.cos((2 * Math.PI * i) / n) * 0.6, Math.sin((2 * Math.PI * i) / n) * 0.6] as number[]);
-    const one = X.map(() => 0);
-    return { xy, xyz: xy.map((p) => [p[0], p[1], 0]), xyzAgree: n > 1 ? Math.min(8, n - 1) : 0, cluster: one, k: 1, di: 0, levels: [one], counts: [1], hub: X.map(() => 0), nbr: X.map(() => [] as number[]) };
-  }
-  const nn = Math.max(2, Math.min(15, n - 1)); // small corpora have fewer points than neighbors
-  // Past HNSW_MIN, the kNN graph is computed ONCE with hnswlib and handed to umap-js as a precomputed
-  // graph — umap-js's internal nn-descent (rp-forest + heaps) was both the time and the memory wall at
-  // scale (measured: 14.7GB RSS at n=100k). Small corpora keep umap-js's exact internal path.
-  // Seeded: umap-js takes a `random` fn. Unseeded it draws from Math.random for init + negative sampling,
-  // so the same corpus laid out twice gave different coordinates. Each fit gets its OWN generator (from the
-  // same seed) so the 2D layout is unaffected by whether the 3D one ran first.
-  const pre = n > HNSW_MIN ? knnIndex(X, nn - 1) : undefined; // self-inclusive rows of length nn
-  const fitUMAP = (nComponents: number) => {
-    const u = new UMAP({ nComponents, nNeighbors: nn, minDist: 0.15, random: mulberry32(SEED) });
-    if (pre) u.setPrecomputedKNN(pre.idx, pre.dst);
-    return u.fit(X);
-  };
-  const xy = normPct(fitUMAP(2), 2);
-  const xyz = normPct(fitUMAP(3), 3);
-  // GRAIN LEVELS: a nested tree of clusterings, not one arbitrary k. The viewer slides between them.
-  const { levels, counts } = n < 6 ? { levels: [X.map(() => 0)], counts: [1] } : divisiveLevels(X);
-  // default view = the FINEST level whose regions still fit the viewer's categorical palette without
-  // recycling colours (GRAIN_PALETTE_N, shared via schema.ts) — a UI-anchored default, since the data
-  // itself prefers no scale (see cluster.ts). The slider exposes the rest.
-  let di = 0; counts.forEach((c, i) => { if (c <= GRAIN_PALETTE_N) di = i; });
-  const cluster = levels[di] ?? X.map(() => 0), k = counts[di] ?? 1; // di = default level index; the slider exposes the rest
-  // kNN + hubness (cosine on unit vectors = dot). hnsw at scale (O(n log n)); brute for small n.
-  const K = 8, hub = new Array(n).fill(0);
-  const nbr = pre ? pre.idx.map((row) => row.slice(1, K + 1)) : knnBrute(X, K); // reuse the UMAP graph's index (nn-1 ≥ K past HNSW_MIN)
-  for (const top of nbr) for (const j of top) hub[j]++;
-  return { xy, xyz, xyzAgree: xyzOverlap(xy, xyz, K), cluster, k, di, levels, counts, hub, nbr };
+  return projectAndClusterCore(embs, { approxKnn: knnIndex, layoutApprox });
 }
 
 // verify: (1) MiniLM embeds card text, (2) umap-js + curare-cluster lay out real card embeddings
 if (import.meta.main) {
+  const { readFileSync } = await import("node:fs");
+  const { provider } = await import("./provider.ts");
   const { loadFixture, fixtureAxes } = await import("./corpus.ts");
   const { cardCorpus } = await import("./card.ts");
   const axes = fixtureAxes();
   const { docs } = loadFixture();
   const sample = docs.filter((d) => d.body.length > 2000).slice(0, 12);
-  const deck = await cardCorpus(sample, axes, { concurrency: 8 });
+  const deck = await cardCorpus(sample, axes, { llm: provider(), concurrency: 8 });
   const cardEmbs = await embedCards(deck, axes);
   console.log(`(1) embedded ${cardEmbs.length} cards -> ${cardEmbs[0].length}-dim`);
 

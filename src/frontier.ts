@@ -1,9 +1,9 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
-import type { Doc } from "./corpus.ts";
+import type { Doc } from "./corpus-core.ts";
 import type { Axis } from "./axes.ts";
 import { cardCorpus } from "./card.ts";
 import { getTextEmbeddings } from "./embed.ts";
-import { cardText } from "./map.ts";
+import { cardText } from "./geometry.ts";
 
 // THE TELESCOPE: reach outside the corpus. Via Semantic Scholar (by arxiv id) we get (1) intra-corpus
 // citation EDGES, (2) real citation-count impact, and (3) the external FRONTIER — papers the library
@@ -72,14 +72,15 @@ export async function fetchFrontier(docs: Doc[], opts: { cacheFile?: string } = 
 export type Ghost = { title: string; arxiv: string; url: string; n: number; core: string; xy: [number, number]; sim: number };
 
 // place the top-N frontier papers as ghost points: card into the same axes, embed, NN-place on the map
-export async function buildGhosts(ranked: FrontierPaper[], axes: Axis[], mapXY: number[][], cardEmbs: number[][], opts: { topN?: number; cacheFile?: string } = {}): Promise<Ghost[]> {
+export async function buildGhosts(ranked: FrontierPaper[], axes: Axis[], mapXY: number[][], cardEmbs: number[][], opts: { topN?: number; cacheFile?: string; llm?: any } = {}): Promise<Ghost[]> {
   const cands = ranked.filter((f) => f.arxiv).slice(0, opts.topN ?? 60);
   if (!cands.length || !cardEmbs.length) return [];
   const absC = await s2fetch(cands.map((c) => c.arxiv!), "title,abstract", opts.cacheFile);
   const withAbs = cands.filter((c) => absC[c.arxiv!]?.abstract);
   if (!withAbs.length) return [];
   const asDocs: Doc[] = withAbs.map((c) => ({ id: c.arxiv!, title: c.title, body: `TITLE: ${c.title}\nABSTRACT: ${absC[c.arxiv!].abstract}` }));
-  const deck = await cardCorpus(asDocs, axes, { concurrency: 8 });
+  const { provider } = await import("./provider.ts");
+  const deck = await cardCorpus(asDocs, axes, { llm: opts.llm ?? provider(), concurrency: 8 });
   const embs = await getTextEmbeddings(deck.map((c) => ({ id: c.id, text: cardText(c, axes).slice(0, 1200) })));
   const unit = (v: number[]) => { const n = Math.hypot(...v) || 1; return v.map((x) => x / n); };
   const CX = cardEmbs.map(unit);
