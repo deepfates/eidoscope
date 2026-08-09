@@ -314,6 +314,10 @@
     });
   }
   $effect(() => { void [m.layout, m.channels.color, m.channels.size, m.grain, m.channels.x, m.channels.y, m.channels.z, m.pinned, m.selected, m.channels.scrub, m.scrubLo, m.scrubHi, m.dimProps, m.filters, m.queries, m.derived, m.selection, m.channels.sort, m.citeOn, m.ghostsOn, m.showLabels, m.deckOpen, m.deckQ, m.deckUnread, themeName]; if (urlReady) { try { history.replaceState(history.state, "", currentUrl()); } catch {} } });
+  // a hover tooltip describes a thing at the CURRENT grain — when grain shifts under the pointer,
+  // the described thing is gone, and the tooltip goes with it (stale state must not linger)
+  $effect(() => { void m.grain; hovered = null; });
+
   function applyUrlState() { applyState(parseUrl(location.search)); }
 
   // ═══ SAVED VIEWS (eid-thbs) — the file carries its own ways of being looked at ═══════════════════

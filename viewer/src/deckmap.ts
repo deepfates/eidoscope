@@ -262,7 +262,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     data: decluttered(),
     getPosition: (d: any) => d.p, getText: (d: any) => (d.c === hoverLabel ? d.full : d.label),
     getColor: (d: any) => [...col(d.c), highlight != null && d.c !== highlight ? 40 : 240] as any, getSize: 13, sizeUnits: "pixels",  // dim other regions' labels when one is isolated
-    fontFamily: "ui-monospace, monospace", fontWeight: 700, getTextAnchor: "middle", getAlignmentBaseline: "center",
+    fontFamily: "ui-monospace, monospace", fontWeight: 700, getTextAnchor: "middle", getAlignmentBaseline: "center", characterSet: "auto",   // default set is ASCII-only and silently DROPS the truncation ellipsis
     getPixelOffset: (d: any) => [d.dx || 0, 0],  // keep edge labels on-screen
     getBackgroundColor: labelBg(), background: true, backgroundPadding: [4, 2], pickable: true,
     updateTriggers: { getPosition: [posVer], data: [posVer], getColor: [highlight, themeVer], getText: [hoverLabel], getPixelOffset: [posVer], getBackgroundColor: themeVer },
