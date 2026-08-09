@@ -55,6 +55,33 @@ export type MetaField = {
   source: string;
 };
 
+// ── SAVED VIEWS (eid-thbs) ───────────────────────────────────────────────────────────────────────────
+// A named view IS the file's own state object — the same shape the viewer's URL (de)serializes, carried
+// in the .eido so a configured way of looking travels WITH the corpus. Deliberately id-based and complete:
+// the file has no length problem, so selections and derived-axis examples are FULL card-id lists here —
+// no cap, no reference to URL capacity anywhere. The URL string form is just one (lossy, capped) encoding
+// of this same object; this is the uncapped one.
+export type ViewChannelKey = "color" | "size" | "x" | "y" | "z" | "scrub" | "sort";
+export type ViewState = {
+  layout?: "mde" | "axes" | "orbit" | "axes3d";
+  channels?: Partial<Record<ViewChannelKey, string>>;   // channel → dimension key (or sentinel)
+  grain?: number;
+  dimProps?: Record<string, { norm: "honest" | "rank"; invert: boolean }>;
+  window?: { lo?: number; hi?: number };                // the scrub window, on channels.scrub
+  region?: number;                                       // isolated region (cluster id at `grain`)
+  facet?: string;                                        // isolated categorical value (on channels.color)
+  find?: string;                                         // the substring filter
+  card?: string;                                         // the open card's id
+  queries?: string[];                                    // semantic-query dimension texts (re-embedded on open)
+  derived?: { label: string; key: string; ids: string[] }[];  // derived dims with FULL example ids
+  selection?: string[];                                  // the held set as FULL card ids
+  camera?: { target: number[]; zoom: number; rot?: number | null; rotX?: number | null };
+  // overlays, labels, and the deck's own state (M-B) — view state like everything else here
+  cite?: boolean; ghosts?: boolean; labels?: boolean;
+  deckOpen?: boolean; deckQ?: string; deckUnread?: boolean;
+};
+export type SavedView = { name: string; created: number; state: ViewState };
+
 // The full map. Arrays are node-indexed and parallel (index i = the i-th document/card) unless noted.
 export type MapContract = {
   version?: number;                        // CONTRACT_VERSION at emit time (absent = pre-versioned, treated as v1)
@@ -137,6 +164,10 @@ export type MapContract = {
 
   // frontier telescope
   ghosts?: GhostDef[];
+
+  // named, saved views (eid-thbs) — the file carries its own ways of being looked at. Optional and
+  // additive: old files lack it and load unchanged; old viewers ignore it.
+  views?: SavedView[];
 };
 
 // Narrow structural check that an object satisfies the contract's required core (not a deep validator —

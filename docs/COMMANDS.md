@@ -99,6 +99,9 @@ slot), `dimension` (one per-card field), `corpus` (the filter set), `card`, `cam
 | 45 | `controls.sheet` | *reveal* the controls · chrome | `controls ▴` (phone only — renders the identical `controls()` snippet) | — | bottom sheet with every toolbar command | n | Tab→Enter | Escape · Back |
 | 46 | `view.reset` | *reset* filters + selection + grain + camera · view | `reset view` button | — | every chip clears, card closes, grain returns to the file's default, camera goes home | (params drop) | Tab→Enter · **r** | — |
 | 47 | `overlay.close` | *close* the topmost overlay · view | ✕ buttons; **Escape**; browser **Back** | — | intro / deck / sheet / card closes | n | **Escape** | re-open |
+| **Views — named states carried IN the file (eid-thbs)** |
+| 48 | `view.save` | *save* the current view · view | name field + `save view` in the about popover (the corpus-name surface) | name | the view (layout · channels · dimProps · grain · filters · queries · derived dims with FULL example ids · selection as FULL ids · camera — no cap, no URL-capacity reference anywhere) appends to the file's `views` in memory, and the re-emitted `.eido` downloads — the browser can't write in place, so the download IS the save | n (the file is the carrier) | Tab→type→Enter | discard the download; the in-memory view lasts until reload |
+| 49 | `view.open` | *open* a saved view · view | the views list in the about popover → `open` | view index | one action: the current view state resets, then the saved state applies exactly — same restore path the URL uses, but uncapped (selection + derived-axis examples resolve from full ids) | n (deeper than a URL can carry) | Tab→Enter | open another view · `reset view` |
 
 ### Bindings that are not user commands
 

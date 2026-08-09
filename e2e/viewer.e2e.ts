@@ -605,6 +605,7 @@ try {
   ok(Math.abs(yB - yA) > 0.05 && yMid.size >= 4, `mobile: camera fit EASES, not jumps — ${yMid.size} distinct intermediate camera frames across targetY ${yA?.toFixed(2)}→${yB?.toFixed(2)} (eid-aw7x)`);
   await mp.close();
 
+<<<<<<< HEAD
   // ═══ 15. SECOND BINDINGS (eid-hsy3, M-A) — every critical command gets an expert route ═══════════
   await p.goto(`${base}/index.html`);
   await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
@@ -683,6 +684,77 @@ try {
   ok(s.color === "region", `the colour lens did not move — still ${s.color}`);
   ok(s.filters.length === 1 && s.visible < 90, `…yet the author facet filters the corpus — filters=${JSON.stringify(s.filters)} visible=${s.visible}/90`);
   await btn(/^reset view$/).click(); await p.waitForTimeout(250);
+=======
+  // ═══ 15. SAVED VIEWS (eid-thbs): the .eido carries named views. Full loop, no shortcuts — mint a
+  // derived axis from a lasso'd selection, place it, save the view, DOWNLOAD the re-emitted file, drop
+  // that downloaded file back onto the app (the real open path), open the view: axis + selection +
+  // channels + grain + camera restore exactly. A derived axis + big selection in a view is durable with
+  // NO reference to URL capacity anywhere — it rides in the file as full ids.
+  await p.goto(`${base}/index.html`);
+  await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
+  await btn(/explore/i).click().catch(() => {});
+  await p.waitForTimeout(300);
+  await p.keyboard.press("s"); await p.waitForTimeout(150);
+  await p.evaluate((path) => (window as any).__eidoLasso(path), circle(bx, by, rad));
+  await p.waitForTimeout(300);
+  ok((await st()).selection === 30, "views: blob 1 is held for the save");
+  await p.locator('[data-testid="derive-label"]').fill("blobby");
+  await p.click('[data-testid="sel-derive"]'); await p.waitForTimeout(300);
+  await p.click('[data-testid="derive-place-color"]'); await p.waitForTimeout(300);
+  await setGrain(3);
+  // move the camera somewhere deliberate so the view has a pose worth restoring
+  const [vcx, vcy] = await proj([1.6, 1.1]);
+  await p.mouse.move(vcx, vcy);
+  for (let i = 0; i < 6; i++) { await p.mouse.wheel(0, -140); await p.waitForTimeout(20); }
+  await p.waitForTimeout(300);
+  const preSave = await st();
+  ok(preSave.color === "d0" && preSave.derived === 1 && preSave.selection === 30 && preSave.grain === 3, `views: the state to be saved is real — color=${preSave.color} derived=${preSave.derived} sel=${preSave.selection} grain=${preSave.grain}`);
+  // save: name it in the about popover; the download IS the save (the browser can't write in place)
+  await closeMenus();
+  await p.click('[data-menu="bar:about"]'); await p.waitForTimeout(250);
+  const [dl] = await Promise.all([
+    p.waitForEvent("download", { timeout: 15000 }),
+    (async () => { await p.fill('[data-testid="bar:view-name"]', "beta clump"); await p.click('[data-testid="bar:view-save"]'); })(),
+  ]);
+  ok((await st()).views === 1, "views: save appends the view to the file IN MEMORY");
+  const dlPath = await dl.path();
+  const savedBytes = readFileSync(dlPath!);
+  ok(savedBytes.length > 1000, `views: the re-emitted .eido downloads — ${savedBytes.length} bytes`);
+  // …and the downloaded file decodes with our own codec, carrying the FULL uncapped state
+  const savedD = (await import("../src/mapbin.ts")).decodeMap(savedBytes);
+  const sv = savedD.views?.[0];
+  ok(savedD.views?.length === 1 && sv?.name === "beta clump", `views: the downloaded file carries the view — ${JSON.stringify(savedD.views?.map((v) => v.name))}`);
+  ok(sv?.state.selection?.length === 30 && sv?.state.derived?.[0]?.ids.length === 30 && sv?.state.derived?.[0]?.label === "blobby", `views: FULL ids in the file, no cap — sel=${sv?.state.selection?.length} derivedIds=${sv?.state.derived?.[0]?.ids.length}`);
+  // reopen the downloaded file via the existing DROP path, on a fresh page (nothing carried over)
+  await p.goto(`${base}/index.html`);
+  await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
+  await btn(/explore/i).click().catch(() => {});
+  await p.evaluate((b64) => {
+    const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    const file = new File([bytes], "saved.eido", { type: "application/octet-stream" });
+    const dt = new DataTransfer(); dt.items.add(file);
+    document.querySelector('[role="application"]')!.dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
+  }, savedBytes.toString("base64"));
+  await p.waitForFunction(() => (window as any).__eido?.()?.views === 1, null, { timeout: 15000 });
+  await btn(/explore/i).click().catch(() => {});   // a freshly opened file introduces itself
+  await p.waitForTimeout(300);
+  s = await st();
+  ok(s.derived === 0 && s.selection === 0 && s.color === "region", `views: the dropped file opens on a CLEAN slate (views wait to be opened) — derived=${s.derived} sel=${s.selection} color=${s.color}`);
+  // open the view — one action applies the state exactly
+  await p.click('[data-menu="bar:about"]'); await p.waitForTimeout(250);
+  const viewRow = await p.evaluate(() => (document.querySelector("[data-views]")?.textContent ?? ""));
+  ok(viewRow.includes("beta clump"), `views: the about popover lists the saved view — "${viewRow.slice(0, 60)}…"`);
+  await p.click('[data-testid="bar:view-open-0"]'); await p.waitForTimeout(700);
+  await closeMenus();
+  s = await st();
+  ok(s.derived === 1 && s.dims.includes("d0"), `views: opening the view re-derives the axis — derived=${s.derived}`);
+  ok(s.color === "d0", `views: …and the channel placement restores — color=${s.color}`);
+  ok(s.selection === 30, `views: …and the held selection restores in full — sel=${s.selection}`);
+  ok(s.grain === 3, `views: …and the grain restores — grain=${s.grain}`);
+  ok(Math.abs(s.zoom - preSave.zoom) < 0.05, `views: …and the camera pose restores — zoom ${preSave.zoom.toFixed(2)}→${s.zoom.toFixed(2)}`);
+  const colorName15 = await p.evaluate(() => (document.querySelector('[data-menu="bar:color"]') as HTMLElement)?.textContent?.trim());
+  ok(!!colorName15?.includes("≈ blobby"), `views: the axis comes back under its own label — "${colorName15}"`);
+>>>>>>> worktree-agent-a27295209caedae15
 
   ok(consoleErrs.length === 0, "no console errors during the run" + (consoleErrs.length ? " — " + consoleErrs[0] : ""));
 } finally {
