@@ -76,6 +76,9 @@ try {
   let s = await st();
   ok(s.grain === 2 && s.k === 12, `opens at default grain (12 regions) — got grain=${s.grain} k=${s.k}`);
   ok(s.regions === 12, `deck sees 12 non-empty regions at default grain — got ${s.regions}`);
+  // M-C1: the corpus scope readout exists with NO filter active — always-on, one consistent place
+  const scope0 = await p.evaluate(() => document.querySelector("[data-scope]")?.textContent?.trim());
+  ok(scope0 === "90 / 90 cards", `the N / M cards readout is always on, even with no filter — "${scope0}"`);
 
   // 2. grain slider moves across the ladder
   await setGrain(0); s = await st();
@@ -187,6 +190,10 @@ try {
   await btn(/unread only/i).click(); await p.waitForTimeout(200);
   const unread = await p.locator("[data-deck-card]").count();
   ok(unread < all && unread === 60, `unread-only drops read cards — ${all}→${unread}`);
+  // M-C4: the deck's own narrowing shows its scope INSIDE the deck (not as a map chip — M-N2 stands)
+  const deckScope = await p.evaluate(() => document.querySelector("[data-deck-scope]")?.textContent?.trim());
+  ok(deckScope === "60 / 90 cards", `the deck states its own scope after unread-only — "${deckScope}"`);
+  ok((await st()).filters.length === 0, "…and deck narrowing puts NO chip on the map (deck stays deck-local)");
   await p.keyboard.press("Escape"); await p.waitForTimeout(100);
 
   // 11. reset clears everything back to defaults
@@ -251,6 +258,19 @@ try {
   ok(!!bare?.hasTitle, "bare card still shows its detail panel (title present)");
   ok(!!bare && bare.meta.length > 0 && !/^·|·$|·\s*·/.test(bare.meta), `meta line shows the present field(s) only, no empty '·' — meta="${bare?.meta}"`);
   ok(bare?.anchors === 0, `no broken reader/source links when the card has none — anchors=${bare?.anchors}`);
+
+  // 11g. SCOPE (M-C2/M-C3): a restored window's chip shows the RANGE ITSELF in honest units, and every
+  // chip carries its own match count. dates run 2023-11-14 + i days; window the first 10 (i = 0..9).
+  const slo = 1_700_000_000_000, shi = 1_700_000_000_000 + 9 * 86_400_000;
+  await p.goto(`${base}/index.html?sk=date&slo=${slo}&shi=${shi}&find=${encodeURIComponent("Doc 0.1")}`);
+  await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
+  await btn(/explore/i).click().catch(() => {}); await p.waitForTimeout(400);
+  s = await st();
+  ok(s.filters.includes("date 2023-11 – 2023-11"), `the window chip states the chosen range, not "<dim> window" — filters=${JSON.stringify(s.filters)}`);
+  ok(JSON.stringify(s.filterCounts) === JSON.stringify([11, 10]), `each chip carries ITS OWN match count ("Doc 0.1" alone = 11, the date window alone = 10) — got ${JSON.stringify(s.filterCounts)}`);
+  ok(s.visible === 1, `…while the scope readout shows the intersection (only Doc 0.1 is in both) — visible=${s.visible}`);
+  const scopeW = await p.evaluate(() => document.querySelector("[data-scope]")?.textContent?.trim());
+  ok(scopeW === "1 / 90 cards", `the always-on readout agrees — "${scopeW}"`);
 
   // 12. ?map= loads a DIFFERENT corpus from the SAME built viewer (the dual-deploy path)
   await p.goto(base + "/index.html?map=alt.eido");
@@ -414,7 +434,7 @@ try {
   // 14d. FILTER TO THESE: the selection becomes a Filter, so it flows through the normal mask + chips row
   await p.click('[data-testid="sel-filter"]'); await p.waitForTimeout(350);
   s = await st();
-  ok(s.filters.includes("selection (30)"), `filter-to-these lands in the chips row — filters=${JSON.stringify(s.filters)}`);
+  ok(s.filters.includes("selection") && s.filterCounts.includes(30), `filter-to-these lands in the chips row with its own count — filters=${JSON.stringify(s.filters)} counts=${JSON.stringify(s.filterCounts)}`);
   ok(s.visible === 30, `…and hides everything else — visible=${s.visible}/90`);
   ok(s.selection === 0, "…and the selection is consumed by the filter (one state, not two)");
   // it COMPOSES: intersect the set filter with a text filter and the mask narrows further

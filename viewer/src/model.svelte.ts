@@ -241,7 +241,7 @@ export class ViewModel {
   // know how to handle a Filter.
   filterToSelection() {
     const sel = this.selection; if (!sel?.length) return;
-    this.filters = [...this.filters.filter((f) => f.kind !== "set"), { kind: "set", key: "set", label: "selection (" + sel.length + ")", idx: [...sel] }];
+    this.filters = [...this.filters.filter((f) => f.kind !== "set"), { kind: "set", key: "set", label: "selection", idx: [...sel] }];
     this.clearSelection();
   }
   // EXPORT: the curation loop's first sink — a plain JSON of what you circled.
@@ -326,9 +326,15 @@ export class ViewModel {
     return m;
   });
   // Active filters as removable chips (the scrubber window is one too, so clear/remove works uniformly).
-  chips = $derived.by((): { label: string; remove: () => void }[] => {
-    const out = this.filters.map((f) => ({ label: f.label, remove: () => this.removeFilter(f) }));
-    if (this.scrubTest && this.scrubField) out.push({ label: this.scrubField.name + " window", remove: () => this.resetScrub() });
+  // Each chip carries ITS OWN match count `n` — what that constraint alone would keep — so with three
+  // chips you can see which one is doing the cutting, not just the intersection (M-C2). The window chip's
+  // label is the chosen range itself, in the dimension's honest units (M-C3).
+  chips = $derived.by((): { label: string; n: number; remove: () => void }[] => {
+    const N = this.data?.ids.length ?? 0;
+    const cnt = (t: (i: number) => boolean) => { let c = 0; for (let i = 0; i < N; i++) if (t(i)) c++; return c; };
+    const out = this.filters.map((f) => ({ label: f.label, n: cnt(this.filterTest(f)), remove: () => this.removeFilter(f) }));
+    const st = this.scrubTest;
+    if (st && this.scrubField) out.push({ label: this.scrubField.name + " " + this.scrubText, n: cnt(st), remove: () => this.resetScrub() });
     return out;
   });
 
@@ -350,6 +356,17 @@ export class ViewModel {
     if (!((lo != null && lo > r[0]) || (hi != null && hi < r[1]))) return null; // wide open = no filter
     const L = lo ?? r[0], H = hi ?? r[1];
     return (i) => { const v = vs[i]; return typeof v === "number" && v >= L && v <= H; };
+  });
+  // The window's readout in the dimension's honest units (dates as year-month; numbers with span-adaptive
+  // decimals so a cosine range doesn't collapse to "0 – 0" while a length range doesn't show noise digits).
+  // ONE formatter for everywhere the range is shown: the toolbar button, the popover and the filter chip.
+  private static fmtDate = (ms: number) => new Date(ms).toISOString().slice(0, 7);
+  private static fmtNum = (v: number, span: number) => { const a = Math.abs(span); return v.toFixed(a >= 100 ? 0 : a >= 10 ? 1 : a >= 1 ? 2 : 3); };
+  scrubText = $derived.by(() => {
+    const r = this.scrubRange, f = this.scrubField; if (!r || !f) return "";
+    return f.kind === "temporal"
+      ? ViewModel.fmtDate(this.scrubLo ?? r[0]) + " – " + ViewModel.fmtDate(this.scrubHi ?? r[1])
+      : ViewModel.fmtNum(this.scrubLo ?? r[0], r[1] - r[0]) + " – " + ViewModel.fmtNum(this.scrubHi ?? r[1], r[1] - r[0]);
   });
   resetScrub() { this.scrubLo = null; this.scrubHi = null; this.onScrubReset?.(); }
   // called from an $effect in App: park the scrubber on a real field once the registry exists
