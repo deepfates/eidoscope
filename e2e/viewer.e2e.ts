@@ -227,7 +227,7 @@ try {
   await btn(/explore/i).click().catch(() => {}); await p.waitForTimeout(200);
   await menu("layout"); await p.click('[data-opt="bar:overlay:cite"]'); await p.waitForTimeout(120);
   await menu("layout"); await p.click('[data-opt="bar:overlay:ghosts"]'); await p.waitForTimeout(120); await closeMenus();
-  await btn(/^region labels$/).click(); await p.waitForTimeout(120);                      // labels OFF
+  await btn(/^labels$/).click(); await p.waitForTimeout(120);                      // labels OFF
   await btn(/^deck$/).click(); await p.waitForTimeout(200);                               // deck OPEN
   await p.selectOption('select[aria-label="sort the deck"]', "a"); await p.waitForTimeout(120);  // sort by AxisA
   await p.locator('input[aria-label^="find in the list"]').fill("Doc 1"); await p.waitForTimeout(200); // deck.filter
