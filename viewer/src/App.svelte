@@ -13,7 +13,9 @@
   import { resolveIdSet, type UrlIdSet } from "./idset";
   import { GRAIN_MIN_REGION, GRAIN_RATIO, GRAIN_PALETTE_N, type SavedView, type ViewState } from "../../src/schema";
   import { encodeContainer } from "../../src/eido-container";
-  import { gzipSync } from "fflate";
+  import { gzipSync, zipSync, strToU8 } from "fflate";
+  import { injectEido, vaultEntries, deckJSONL } from "../../src/export";
+  import { setSource, currentFileName, canWriteInPlace, supportsFSA, openViaPicker, openRecent, listRecents, writeEido, download, type RecentFile } from "./file";
 
   // THE MODEL — channels, filters, scrubber, the dimension registry, URL (de)serialization. App keeps the DOM,
   // the deck handle, the camera and the browser APIs; it reads the model and hands it user intent.
@@ -253,12 +255,7 @@
   }
   function exportSelection() {
     const payload = m.selectionExport(); if (!payload) return;
-    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = (prov?.title ? prov.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase() : "eidoscope") + "-selection-" + payload.ids.length + ".json";
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    download(JSON.stringify(payload, null, 2), exportBase() + "-selection-" + payload.ids.length + ".json", "application/json");
   }
 
   // ═══ DERIVE (eid-8139) — an axis from EXAMPLES. With a set held, mint a scalar dimension scoring every
@@ -360,9 +357,10 @@
   function applyUrlState() { applyState(parseUrl(location.search)); }
 
   // ═══ SAVED VIEWS (eid-thbs) — the file carries its own ways of being looked at ═══════════════════
-  // `view.save` names the current view, appends it to the file's views IN MEMORY, and offers the
-  // re-emitted .eido as a download — the browser cannot write a file in place, so the download IS the
-  // honest "save back to a file". `view.open` applies a saved state exactly: one action.
+  // `view.save` names the current view and appends it to the file's views IN MEMORY (the document is
+  // now dirty — the toolbar's save shows it). `save` (eid-cawh) is the ONE persist verb: write in
+  // place where a handle is held, a filename-preserving download elsewhere. `view.open` applies a
+  // saved state exactly: one action.
   let viewName = $state("");
   const savedViews = $derived(data?.views ?? []);
   function currentViewState(): ViewState {
@@ -381,13 +379,54 @@
     D.views = views;
     m.data.views = views;
     viewName = "";
+    dirty = true;   // unsaved work exists — the save button shows the dot until the file is written
+  }
+
+  // ═══ SAVE / OPEN / EXPORT — the document lifecycle (eid-cawh · eid-4ii9) ═════════════════════════
+  // The saved payload IS the full re-emit: the whole contract through the shared codec, views (and the
+  // work stratum they carry — selections, derived axes) included. Save is one verb; viewer/src/file.ts
+  // holds the per-browser truth (FSA write-in-place on Chromium, filename-preserving download elsewhere).
+  let dirty = $state(false);
+  let saveNote = $state("");   // transient, honest: "saved" (in place) vs "downloaded <name>"
+  let recents = $state<RecentFile[]>([]);
+  let fileInput = $state<HTMLInputElement | null>(null);   // the non-FSA open fallback
+  const exportBase = () => currentFileName().replace(/\.eido$/i, "") || "eidoscope";
+  async function saveDoc() {
+    const D = store?.map(); if (!D) return;
     const bytes = gzipSync(encodeContainer(D));   // the SAME shared codec the pipeline emits with
-    const blob = new Blob([bytes as BlobPart], { type: "application/octet-stream" });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = (prov?.title ? prov.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase() : "eidoscope") + ".eido";
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    const how = await writeEido(bytes);
+    dirty = false;
+    saveNote = how === "wrote" ? "saved" : "downloaded " + currentFileName();
+    setTimeout(() => (saveNote = ""), 4000);
+  }
+  async function openDoc() {
+    if (supportsFSA()) { const f = await openViaPicker(); if (f) await openFile(f, { named: true }); }
+    else fileInput?.click();
+  }
+  async function openRecentDoc(r: RecentFile) {
+    const f = await openRecent(r);
+    if (f) await openFile(f, { named: true });
+    else { loadFailed = true; status = "couldn't reopen " + r.name + " — permission declined or the file moved"; }
+  }
+  // ── EXPORT — one surface, every outbound flow, all fed from the cards (the shared src/export.ts) ──
+  async function exportHTML() {
+    const D = store?.map(); if (!D) return;
+    // the shell is this very app: fetched from the host when served, the live document as the file:// fallback
+    let shell = "";
+    try { const r = await fetch(location.pathname); if (r.ok) shell = await r.text(); } catch {}
+    if (!shell) shell = "<!doctype html>\n" + document.documentElement.outerHTML;
+    download(injectEido(shell, gzipSync(encodeContainer(D))), exportBase() + ".html", "text/html");
+  }
+  function exportVault() {
+    const D = store?.map(); if (!D) return;
+    const { manifest, cards } = vaultEntries(D);
+    const entries: Record<string, Uint8Array> = { [manifest.name]: strToU8(manifest.text) };
+    for (const c of cards) entries[c.name] = strToU8(c.text);
+    download(zipSync(entries), exportBase() + "-vault.zip", "application/zip");
+  }
+  function exportDeck() {
+    const D = store?.map(); if (!D) return;
+    download(deckJSONL(D), exportBase() + "-deck.jsonl", "application/x-ndjson");
   }
   function openView(v: SavedView) {
     m.resetViewState();   // a saved view applies EXACTLY — no residue from the view you were just in
@@ -441,7 +480,7 @@
       onGrainChange: (g) => m.setGrain(g),
     });
     // read-only introspection seam for the integration suite (drives the REAL built app, asserts real state)
-    (window as any).__eido = () => { const d = handle?.debug(); return { grain: m.grain, k: curCount, layout: m.layout, color: m.channels.color, pin: pinned, facetPin, focus: selected, detail: selected !== null, deckOpen: m.deckOpen, deckQ: m.deckQ, deckUnread: m.deckUnread, sort: m.channels.sort, cite: m.citeOn, ghosts: m.ghostsOn, theme, themeName, pal: Array.from({ length: 6 }, (_, i) => col(i)), hover: hovered ? hovered.kind : null, zoom: d?.zoom ?? 0, labels: d?.labels ?? 0, labelsOn, regions: d?.regions ?? 0, rot: d?.rot ?? null, rotX: d?.rotX ?? null, target: d?.target ?? null, span3: d?.span3 ?? null, filters: chips.map((c) => c.label), filterCounts: chips.map((c) => c.n), selectMode: m.selectMode, selection: selection?.length ?? 0, selShareable: m.selShareable, derived: m.derivedDims.length, dims: m.allDims.map((x) => x.key), views: (m.data?.views ?? []).length, drawing: !!lasso, visible: visibleCount }; };
+    (window as any).__eido = () => { const d = handle?.debug(); return { grain: m.grain, k: curCount, layout: m.layout, color: m.channels.color, pin: pinned, facetPin, focus: selected, detail: selected !== null, deckOpen: m.deckOpen, deckQ: m.deckQ, deckUnread: m.deckUnread, sort: m.channels.sort, cite: m.citeOn, ghosts: m.ghostsOn, theme, themeName, pal: Array.from({ length: 6 }, (_, i) => col(i)), hover: hovered ? hovered.kind : null, zoom: d?.zoom ?? 0, labels: d?.labels ?? 0, labelsOn, regions: d?.regions ?? 0, rot: d?.rot ?? null, rotX: d?.rotX ?? null, target: d?.target ?? null, span3: d?.span3 ?? null, filters: chips.map((c) => c.label), filterCounts: chips.map((c) => c.n), selectMode: m.selectMode, selection: selection?.length ?? 0, selShareable: m.selShareable, derived: m.derivedDims.length, dims: m.allDims.map((x) => x.key), views: (m.data?.views ?? []).length, drawing: !!lasso, visible: visibleCount, dirty, file: currentFileName(), inPlace: canWriteInPlace() }; };
     // the map no longer fills the window (a toolbar sits above it), so both seams speak PAGE coordinates —
     // what a test's mouse/touch actually uses — and convert at the canvas edge.
     const rect = () => canvas.getBoundingClientRect();
@@ -492,13 +531,31 @@
     } finally { clearTimeout(stallTimer); querying = false; }
   }
   async function runQuery() { const q = semQuery.trim(); if (!q) return; semQuery = ""; await embedAndAdd(q); }
-  async function openFile(file: File) {
+  // `named: true` means file.ts already recorded the source (picker/recent — it holds the handle);
+  // the drop/input paths record it here, handle-less (or with the Chromium drop handle, below).
+  async function openFile(file: File, opts?: { named?: boolean }) {
     try {
       status = "opening " + file.name + "…"; loadFailed = false;
+      if (!opts?.named) setSource(file.name);
       mountMap(await decodeEido(new Uint8Array(await file.arrayBuffer())), { intro: true });
+      dirty = false;
+      void listRecents().then((r) => (recents = r));   // a picker/drop-with-handle open just added one
     } catch (e: any) { loadFailed = true; status = "couldn't open " + file.name + " — " + (e?.message ?? e); }
   }
-  function onDrop(e: DragEvent) { e.preventDefault(); dragOver = false; const f = e.dataTransfer?.files?.[0]; if (f && /\.eido$/i.test(f.name)) openFile(f); }
+  function onDrop(e: DragEvent) {
+    e.preventDefault(); dragOver = false;
+    const f = e.dataTransfer?.files?.[0]; if (!f || !/\.eido$/i.test(f.name)) return;
+    // Chromium hands a real file handle for a DROPPED file too — keep it, so Save writes in place even
+    // when the file arrived by drag. Best-effort and async; the open itself never waits on it.
+    const item = e.dataTransfer?.items?.[0] as (DataTransferItem & { getAsFileSystemHandle?: () => Promise<any> }) | undefined;
+    item?.getAsFileSystemHandle?.().then((h) => { if (h?.kind === "file") setSource(f.name, h); }).catch(() => {});
+    openFile(f);
+  }
+  function onFileInput(e: Event) {
+    const f = (e.currentTarget as HTMLInputElement).files?.[0];
+    (e.currentTarget as HTMLInputElement).value = "";
+    if (f) openFile(f);
+  }
 
   onMount(() => {
     try {
@@ -510,9 +567,13 @@
       else if (legacy && THEMES.some((t) => t.id === legacy)) setTheme(legacy, false);
       else setTheme(matchMedia("(prefers-color-scheme: light)").matches ? DEFAULT_LIGHT : DEFAULT_DARK, false);
     } catch { setTheme(DEFAULT_DARK, false); }
+    void listRecents().then((r) => (recents = r));   // offered on the empty state; refreshed on open
     (async () => {
       try {
-        const S = await loadMap(mapUrl());
+        const url = mapUrl();
+        const S = await loadMap(url);
+        // name the document after what was actually opened (?map=/./map.eido basename) — Save preserves it
+        setSource(decodeURIComponent(url.split("/").pop() || "map.eido").replace(/\?.*$/, ""));
         try { showIntro = !localStorage.getItem("eido-seen"); } catch { showIntro = true; }
         mountMap(S);
         applyUrlState(); urlReady = true;  // restore any deep-linked view/card, then start mirroring state → URL
@@ -699,7 +760,7 @@
               <button data-testid="{scope}:view-save" class="btn btn-xs btn-primary flex-none normal-case" disabled={!viewName.trim()}
                 onclick={saveView}>save view</button>
             </div>
-            <div class="mt-1 text-[10px] leading-snug opacity-50">saving downloads the updated .eido — views travel with the file</div>
+            <div class="mt-1 text-[10px] leading-snug opacity-50">a saved view lives in the file — press save in the toolbar to write it (● marks unsaved work)</div>
           </div>
         </Popover.Content>
       </Popover.Portal>
@@ -941,6 +1002,54 @@
 {/snippet}
 
 {#snippet rightControls(scope: string)}
+  <!-- ═══ THE DOCUMENT VERBS (eid-cawh · eid-4ii9): open · save · export. Save never folds — it is the
+       one verb the document always answers to, and its dot is the unsaved-work affordance. ═══ -->
+  <DropdownMenu.Root>
+    <DropdownMenu.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case {foldCls(scope, 2)}" data-fold="2" data-menu="{scope}:open" aria-label="open a .eido file">
+      open<span class="text-[9px] opacity-50">▾</span>
+    </DropdownMenu.Trigger>
+    <DropdownMenu.Portal>
+      <DropdownMenu.Content class="eido-pop menu w-64 p-1" sideOffset={6} align="end">
+        <DropdownMenu.Item class="rounded-field flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm hover:bg-base-200" data-opt="{scope}:open:file" onSelect={openDoc}>open a .eido…</DropdownMenu.Item>
+        {#if recents.length}
+          <DropdownMenu.Separator class="my-1 h-px bg-base-300" />
+          <div class="px-3 py-1 font-mono text-[10px] uppercase tracking-widest opacity-50">recent</div>
+          {#each recents as r, i}
+            <DropdownMenu.Item class="rounded-field flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm hover:bg-base-200" data-opt="{scope}:open:recent-{i}" onSelect={() => openRecentDoc(r)}>
+              <span class="min-w-0 flex-1 truncate">{r.name}</span><span class="flex-none font-mono text-[10px] opacity-50">{provDate(r.opened)}</span>
+            </DropdownMenu.Item>
+          {/each}
+        {/if}
+        <div class="px-3 py-1 text-[10px] leading-snug opacity-50">…or drop a .eido anywhere on the map</div>
+      </DropdownMenu.Content>
+    </DropdownMenu.Portal>
+  </DropdownMenu.Root>
+  <DropdownMenu.Root>
+    <DropdownMenu.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case {foldCls(scope, 2)}" data-fold="2" data-menu="{scope}:export" aria-label="export this map">
+      export<span class="text-[9px] opacity-50">▾</span>
+    </DropdownMenu.Trigger>
+    <DropdownMenu.Portal>
+      <DropdownMenu.Content class="eido-pop menu w-72 p-1" sideOffset={6} align="end">
+        <DropdownMenu.Item class="rounded-field flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm hover:bg-base-200" data-opt="{scope}:export:html" onSelect={exportHTML}>
+          <span class="flex-1">single file</span><span class="font-mono text-[10px] opacity-50">.html — app + map, works anywhere</span>
+        </DropdownMenu.Item>
+        <DropdownMenu.Item class="rounded-field flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm hover:bg-base-200" data-opt="{scope}:export:vault" onSelect={exportVault}>
+          <span class="flex-1">markdown vault</span><span class="font-mono text-[10px] opacity-50">.zip — one .md per card</span>
+        </DropdownMenu.Item>
+        <DropdownMenu.Item class="rounded-field flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm hover:bg-base-200" data-opt="{scope}:export:deck" onSelect={exportDeck}>
+          <span class="flex-1">deck</span><span class="font-mono text-[10px] opacity-50">.jsonl — one card per line</span>
+        </DropdownMenu.Item>
+        <DropdownMenu.Item class="rounded-field flex items-center gap-2 px-3 py-1.5 text-sm {selection ? 'cursor-pointer hover:bg-base-200' : 'pointer-events-none opacity-40'}" data-opt="{scope}:export:selection" onSelect={exportSelection}>
+          <span class="flex-1">selection</span><span class="font-mono text-[10px] opacity-50">{selection ? `.json — the ${selection.length} held cards` : "nothing held — circle cards first"}</span>
+        </DropdownMenu.Item>
+      </DropdownMenu.Content>
+    </DropdownMenu.Portal>
+  </DropdownMenu.Root>
+  <button data-testid="{scope}:save" data-fold="0" class="btn btn-sm flex-none gap-1 normal-case {dirty ? 'btn-primary' : 'btn-ghost'}" onclick={saveDoc}
+    aria-label={dirty ? "save — there is unsaved work" : "save"} title={canWriteInPlace() ? "save — writes " + currentFileName() + " in place" : "save — downloads " + currentFileName()}>
+    save{#if dirty}<span aria-hidden="true" class="text-[9px] leading-none">●</span>{/if}
+  </button>
+  {#if saveNote}<span data-save-note class="flex-none font-mono text-[10px] opacity-60">{saveNote}</span>{/if}
   <button class="btn btn-sm btn-ghost flex-none normal-case {foldCls(scope, 3)}" data-fold="3" onclick={() => (m.deckOpen = true)}>deck</button>
   <!-- labels are a property of the region lens; off it the button would be meaningless, so it is
        presence-gated (the codebase's pattern for missing preconditions) rather than disabled-with-a-why -->
@@ -1202,9 +1311,30 @@
         {#if !loadFailed}<span class="loading loading-spinner loading-md text-primary" aria-hidden="true"></span>{/if}
         <div class={loadFailed ? "" : "opacity-70"} role="status">{status}</div>
         {#if loadFailed}<button class="btn btn-sm" onclick={() => location.reload()}>reload</button>{/if}
+
+        <!-- ═══ OPEN AFFORDANCES (eid-cawh) — a self-contained block on the empty state: the picker
+             (or file-input fallback), the recent files IndexedDB remembers, and the drop hint.
+             Deliberately separate from the status markup above to keep merges clean. ═══ -->
+        {#if loadFailed}
+          <div data-empty-open class="mt-2 flex w-full flex-col items-center gap-2 border-t border-base-300 pt-4">
+            <button data-testid="empty:open" class="btn btn-sm btn-primary normal-case" onclick={openDoc}>open a .eido…</button>
+            {#if recents.length}
+              <div class="mt-1 font-mono text-[10px] uppercase tracking-widest opacity-50">recent</div>
+              {#each recents as r, i}
+                <button data-testid="empty:recent-{i}" class="btn btn-ghost btn-xs w-full justify-between gap-2 normal-case" onclick={() => openRecentDoc(r)}>
+                  <span class="min-w-0 truncate">{r.name}</span><span class="flex-none font-mono text-[10px] opacity-50">{provDate(r.opened)}</span>
+                </button>
+              {/each}
+            {/if}
+            <div class="text-[10px] leading-snug opacity-50">…or drop a .eido anywhere on this window</div>
+          </div>
+        {/if}
       </div>
     </div>
   {/if}
+
+  <!-- the non-FSA open fallback (Safari/Firefox): a plain file input the open verb clicks for the user -->
+  <input bind:this={fileInput} type="file" accept=".eido" class="hidden" aria-hidden="true" tabindex="-1" onchange={onFileInput} />
 
   <!-- controls sheet: the toolbar's contents, stacked — mobile always; desktop when the bar has folded -->
   {#if sheetOpen && data}

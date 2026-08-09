@@ -27,6 +27,7 @@
     "d3-ease": "^3.0.1",
     "d3-scale-chromatic": "^3.1.0",
     "deck.gl": "^9.0.0",
+    "idb-keyval": "^6.3.0",
     "svelte-range-slider-pips": "^3.2.2"
   }
 }
