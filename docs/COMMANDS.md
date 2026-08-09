@@ -25,7 +25,7 @@ slot), `dimension` (one per-card field), `corpus` (the filter set), `card`, `cam
 | 3 | `corpus.open` | *load* a corpus · view | drop a `.eido` on the window | file | whole viewer remounts on the new corpus, intro shown | via `?map=` / `?url=` | n | reload |
 | **Layout — where cards are placed** |
 | 4 | `layout.set` | *set* layout · view | `layout ▾` menu (4 items: neighbor map · axis scatter · **3D neighbor map** · 3D axis scatter) | `mde \| axes \| orbit \| axes3d` | points re-lay-out; the button states the current layout | `?layout=` | Tab→Enter | `layout → neighbor map` |
-| 5 | `overlay.toggle` | *toggle* an overlay · view | `layout ▾` menu (cite edges, frontier) | — | citation edges / ghost papers drawn | **n** | Tab→Enter | same item |
+| 5 | `overlay.toggle` | *toggle* an overlay · view | `layout ▾` menu (cite edges, frontier) | — | citation edges / ghost papers drawn | `cite=1` · `ghosts=1` | Tab→Enter | same item |
 | 6 | `axis.set` | *put* a dimension on x/y/z · channel | `axes ▾` popover selects (scatter layouts only) | dimension key | points move; pole labels at the map edges change | `?x= ?y= ?z=` | Tab→select | pick another |
 | 7 | `dim.norm` | *set* honest⇄rank · dimension | `axes ▾` buttons; the "scale" section of the color / size / time popovers | `honest \| rank` | the dimension's spread changes **everywhere it is placed at once** | `?props=k.h0` | Tab→Enter | the other value |
 | 8 | `dim.invert` | *flip* direction · dimension | same four places | — | high↔low swap, pole labels swap with them | `?props=k.h1` | Tab→Enter | same button |
@@ -34,6 +34,7 @@ slot), `dimension` (one per-card field), `corpus` (the filter set), `card`, `cam
 | 10 | `size.set` | *put* a dimension on size · channel | `size ▾` popover | dimension key or `uniform` | point radii change | `?size=` | Tab→Enter | `size → uniform` |
 | 11 | `grain.set` | *set* clustering grain · view | **toolbar slider** (always visible; a parameter of the region dimension, not of any channel) | 0…nLevels-1 | regions merge/split; the count next to the slider and in the toolbar updates | `?grain=` | Tab→arrows | `reset view` |
 <<<<<<< HEAD
+<<<<<<< HEAD
 | 12 | `labels.toggle` | *toggle* labels · chrome | `labels` button (disabled off the region lens, with a tooltip saying why) | — | region names appear/disappear on the map | **n** | Tab→Enter | same button |
 | **Selecting — narrowing the corpus** |
 | 13 | `region.isolate` | *isolate* one region · corpus | click a legend row under colour = region (the row shows `isolate` / `release` on hover or focus) | cluster id | non-members hidden, camera flies to the set, chip `<region> · N` (its own count), `N / M cards` updates, region detail pane opens | `?region=` | Tab→Enter | click again · chip ✕ · `reset view` |
@@ -41,6 +42,9 @@ slot), `dimension` (one per-card field), `corpus` (the filter set), `card`, `cam
 | 15 | `find.set` | *filter* by substring · corpus | the `⌕ find a card…` input | text | non-matching cards hidden, chip `"…" · N` (its own match count), `N / M cards` updates | `?find=` | type | empty the box · chip ✕ · `reset view` |
 =======
 | 12 | `labels.toggle` | *toggle* region labels · chrome | `region labels` button (disabled off the region lens, with a tooltip saying why) | — | region names appear/disappear on the map | **n** | Tab→Enter · **l** | same button |
+=======
+| 12 | `labels.toggle` | *toggle* region labels · chrome | `region labels` button (disabled off the region lens, with a tooltip saying why) | — | region names appear/disappear on the map | `labels=0` (off) | Tab→Enter | same button |
+>>>>>>> worktree-agent-a0f35bcf6bcc312ac
 | **Selecting — narrowing the corpus** |
 | 13 | `region.isolate` | *isolate* one region · corpus | click a legend row under colour = region (the row shows `isolate` / `release` on hover or focus) | cluster id | non-members hidden, camera flies to the set, chip appears, `N / M cards` updates, region detail pane opens | `?region=` | Tab→Enter | click again · chip ✕ · `reset view` |
 | 14 | `facet.isolate` | *isolate* one categorical value · corpus | click a legend row under a categorical colour lens (same visible `isolate` cue); the ▾ value list every categorical dimension carries in the colour popover (works whatever colour shows) | value | same as above, for that value | `?facet=` | Tab→Enter | click again · chip ✕ · `reset view` |
@@ -68,6 +72,7 @@ slot), `dimension` (one per-card field), `corpus` (the filter set), `card`, `cam
 | 32 | `card.hover` | *preview* one card · card | hover a point | — | tooltip: region, title, first ~140 chars | n | **n** | move away |
 <<<<<<< HEAD
 | 33 | `region.drill` | *descend* into a region · view | **double-click a point** | index | grain steps finer (≤3 levels) until the region splits; camera fits the sub-region | (via `?grain=`) | **n** | `reset view` |
+<<<<<<< HEAD
 | 34 | `deck.open` | *list* the corpus · view | `deck` button (desktop + phone) | — | modal list of every card, headed by its scope `N / M cards` — the screen-reader-accessible view of the map | **n** | Tab→Enter | ✕ · Escape · Back |
 =======
 | 33 | `region.drill` | *descend* into a region · view | **double-click a point**; `drill in` in the region detail pane | index | grain steps finer (≤3 levels) until the region splits; camera fits the sub-region | (via `?grain=`) | Tab→Enter (via the pane) | `reset view` |
@@ -76,6 +81,12 @@ slot), `dimension` (one per-card field), `corpus` (the filter set), `card`, `cam
 | 35 | `deck.sort` | *sort* the list · channel | select inside the deck | dimension key | rows reorder | **n** | Tab→select | pick another |
 | 36 | `deck.filter` | *filter* the list · **deck only** | `find in list…` input inside the deck | text | rows narrow and the deck's `N / M cards` readout updates. **Does not touch the map or the chips** (see M-N2) | **n** | type | empty the box |
 | 37 | `deck.unread` | *filter* to unread · **deck only** | `unread only` toggle (only when the corpus carries read state) | — | read rows hidden; the deck's `N / M cards` readout updates | **n** | Tab→Enter | same button |
+=======
+| 34 | `deck.open` | *list* the corpus · view | `deck` button (desktop + phone) | — | modal list of every card — the screen-reader-accessible view of the map | `deck=1` | Tab→Enter | ✕ · Escape · Back |
+| 35 | `deck.sort` | *sort* the list · channel | select inside the deck | dimension key | rows reorder | `sort=<key>` | Tab→select | pick another |
+| 36 | `deck.filter` | *filter* the list · **deck only** | `find in list…` input inside the deck | text | rows narrow. **Does not touch the map or the chips** (see M-N2) | `df=<text>` | type | empty the box |
+| 37 | `deck.unread` | *filter* to unread · **deck only** | `unread only` toggle (only when the corpus carries read state) | — | read rows hidden | `du=1` | Tab→Enter | same button |
+>>>>>>> worktree-agent-a0f35bcf6bcc312ac
 | 38 | `source.open` | *open* the original · card | links in the detail pane and on deck rows | — | new tab | n | Tab→Enter | — |
 | **Camera** |
 | 39 | `camera.pan` | *move* the camera · camera | drag; **arrow keys** (hold to repeat) | — | view translates | n | **arrows** | `reset view` |
@@ -124,18 +135,22 @@ docked rather than modal so the toolbar stays operable while you read.
   zoom (clamped to the layout's own bounds, with the same reveal-on-zoom label behaviour as the
   wheel), **shift+arrows** orbit in 3D. Hold-to-repeat rides the browser's native key repeat.
 
-### M-B · The URL claims to mirror the view, and doesn't
+### M-B · ~~The URL claims to mirror the view, and doesn't~~ **FIXED 2026-08-09** (eid-hsy3)
 
-`serializeUrl` is documented as "the URL always mirrors the current view". Five commands are missing
-from it, so a shared link silently loses them:
+`serializeUrl` is documented as "the URL always mirrors the current view". Five commands were missing
+from it; all five now serialize and restore (the overlay/label/deck state moved into the ViewModel so
+one state core owns everything the URL mirrors):
 
-- **M-B1** `overlay.toggle` — cite edges and frontier ghosts do not survive a share or a reload.
-- **M-B2** `labels.toggle` — same.
-- **M-B3** `deck.sort` — the `sort` channel is a first-class channel in `CHANNELS` and is the only one
-  of the seven that is never serialized.
-- **M-B4** `deck.filter` / `deck.unread` — a second, invisible filter set (see M-N2).
-- **M-B5** the deck being *open* is pushed to history (so Back closes it) but not to the URL, so a
-  link never opens on the list view.
+- ~~**M-B1** `overlay.toggle` — cite edges and frontier ghosts do not survive a share or a reload.~~
+  **FIXED** — `cite=1` · `ghosts=1`.
+- ~~**M-B2** `labels.toggle` — same.~~ **FIXED** — `labels=0` (on is the default, so only off rides).
+- ~~**M-B3** `deck.sort` — the `sort` channel is a first-class channel in `CHANNELS` and is the only one
+  of the seven that is never serialized.~~ **FIXED** — `sort=<key>`, default-skipped like the others.
+- ~~**M-B4** `deck.filter` / `deck.unread` — a second, invisible filter set (see M-N2).~~ **FIXED** —
+  `df=<text>` · `du=1`. The M-N2 ruling stands: they still narrow the LIST only; the URL merely stops
+  losing them.
+- ~~**M-B5** the deck being *open* is pushed to history (so Back closes it) but not to the URL, so a
+  link never opens on the list view.~~ **FIXED** — `deck=1`; a link can land on the list view.
 
 ### M-C · Scope is not shown
 

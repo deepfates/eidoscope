@@ -27,19 +27,13 @@
   // contract (store.map(), mirrored as `data` via m.data); the vector-reading operators (derive, the
   // semantic query) read store.vectors() so a future ColumnarStore can serve them without a full decode.
   let store = $state<Store | null>(null);
-  let showLabels = $state(true);
-  let deckOpen = $state(false);
-  let deckQ = $state("");
-  let deckUnread = $state(false);
   let semQuery = $state("");                 // the query-box text (distinct from m.query, the substring find)
   let querying = $state(false);
   let queryErr = $state("");
   let queryStatus = $state("");   // live line while the first query downloads the model / embeds
   let queryPct = $state<number | null>(null);   // download % when known (drives the thin progress bar)
   let showIntro = $state(false);
-  let citeOn = $state(false);
   let isoOpen = $state<string | null>(null);   // which categorical dimension's value list is expanded in the colour popover (M-A4)
-  let ghostsOn = $state(false);
   let sheetOpen = $state(false);   // mobile: the toolbar's contents as a bottom sheet
 
   // ── THEMES ────────────────────────────────────────────────────────────────────────────────────────
@@ -126,14 +120,14 @@
   function doCloseOverlays() {
     if (showIntro) { try { localStorage.setItem("eido-seen", "1"); } catch {} showIntro = false; return; }
     if (sheetOpen) { sheetOpen = false; return; }
-    if (deckOpen) { deckOpen = false; return; }
+    if (m.deckOpen) { m.deckOpen = false; return; }
     if (selection !== null) { m.clearSelection(); return; }
     if (selected !== null) { focusCard(null); return; }
     if (pinned !== null) togglePin(pinned);
   }
   function requestClose() { if (overlayPushed) { try { history.back(); return; } catch {} } doCloseOverlays(); }
   function dismissIntro() { requestClose(); }
-  $effect(() => { const anyOpen = showIntro || deckOpen || sheetOpen || selected !== null; if (anyOpen && !overlayPushed) { try { history.pushState({ eido: 1 }, ""); } catch {} overlayPushed = true; } });
+  $effect(() => { const anyOpen = showIntro || m.deckOpen || sheetOpen || selected !== null; if (anyOpen && !overlayPushed) { try { history.pushState({ eido: 1 }, ""); } catch {} overlayPushed = true; } });
   const hasRead = $derived(!!data?.read?.some((r) => r === true || r === false));
   const axShort = (name: string) => name.split(/ vs\.? | and /i)[0].slice(0, 15);
   const deckList = $derived.by(() => {
@@ -143,15 +137,15 @@
     // 13,830, which quietly made the two surfaces disagree about what corpus you were looking at.
     const mask = filterMask;
     let list = data.ids.map((_, i) => i).filter((i) => !mask || mask[i] === 1);
-    const q = deckQ.trim().toLowerCase();
+    const q = m.deckQ.trim().toLowerCase();
     if (q) list = list.filter((i) => data!.titles[i].toLowerCase().includes(q) || data!.cores[i].toLowerCase().includes(q));
-    if (deckUnread && hasRead) list = list.filter((i) => data!.read![i] !== true);
+    if (m.deckUnread && hasRead) list = list.filter((i) => data!.read![i] !== true);
     const sd = allDims.find((x) => x.key === m.channels.sort);   // sort by any scalar dimension (influence, length, axis, query…)
     const sv = sd && sd.kind !== "categorical" ? scores01(sd, propsOf(sd)) : null;
     if (sv) list.sort((a, b) => (sv[b] ?? 0) - (sv[a] ?? 0));
     return list.slice(0, 2000);  // show the whole corpus (was 300 — which hid most cards + masked "unread only")
   });
-  const labelsOn = $derived(showLabels && m.channels.color === "region");  // 3D now has proper billboarded region labels (isomorphic with 2D)
+  const labelsOn = $derived(m.showLabels && m.channels.color === "region");  // 3D now has proper billboarded region labels (isomorphic with 2D)
   // switching the colour lens drops stale facet filters (a folder value means nothing under a different lens)
 
   const rgb = (c: [number, number, number]) => `rgb(${c[0]},${c[1]},${c[2]})`;
@@ -305,7 +299,7 @@
       if (selIdx?.length) m.setSelection(selIdx);   // resolved above, applied once the graph settles
     });
   }
-  $effect(() => { void [m.layout, m.channels.color, m.channels.size, m.grain, m.channels.x, m.channels.y, m.channels.z, m.pinned, m.selected, m.channels.scrub, m.scrubLo, m.scrubHi, m.dimProps, m.filters, m.queries, m.derived, m.selection, themeName]; if (urlReady) { try { history.replaceState(history.state, "", currentUrl()); } catch {} } });
+  $effect(() => { void [m.layout, m.channels.color, m.channels.size, m.grain, m.channels.x, m.channels.y, m.channels.z, m.pinned, m.selected, m.channels.scrub, m.scrubLo, m.scrubHi, m.dimProps, m.filters, m.queries, m.derived, m.selection, m.channels.sort, m.citeOn, m.ghostsOn, m.showLabels, m.deckOpen, m.deckQ, m.deckUnread, themeName]; if (urlReady) { try { history.replaceState(history.state, "", currentUrl()); } catch {} } });
 
   // focus-trap action (eid-vxm2): on open, move focus into the modal + keep Tab inside it (so keyboard
   // focus can't wander to the background controls behind the overlay); on close, return focus to the opener.
@@ -352,7 +346,7 @@
       onGrainChange: (g) => m.setGrain(g),
     });
     // read-only introspection seam for the integration suite (drives the REAL built app, asserts real state)
-    (window as any).__eido = () => { const d = handle?.debug(); return { grain: m.grain, k: curCount, layout: m.layout, color: m.channels.color, pin: pinned, facetPin, focus: selected, detail: selected !== null, deckOpen, cite: citeOn, ghosts: ghostsOn, theme, themeName, pal: Array.from({ length: 6 }, (_, i) => col(i)), hover: hovered ? hovered.kind : null, zoom: d?.zoom ?? 0, labels: d?.labels ?? 0, labelsOn, regions: d?.regions ?? 0, rot: d?.rot ?? null, rotX: d?.rotX ?? null, target: d?.target ?? null, span3: d?.span3 ?? null, filters: chips.map((c) => c.label), filterCounts: chips.map((c) => c.n), selectMode: m.selectMode, selection: selection?.length ?? 0, selShareable: m.selShareable, derived: m.derivedDims.length, dims: m.allDims.map((x) => x.key), drawing: !!lasso, visible: visibleCount }; };
+    (window as any).__eido = () => { const d = handle?.debug(); return { grain: m.grain, k: curCount, layout: m.layout, color: m.channels.color, pin: pinned, facetPin, focus: selected, detail: selected !== null, deckOpen: m.deckOpen, deckQ: m.deckQ, deckUnread: m.deckUnread, sort: m.channels.sort, cite: m.citeOn, ghosts: m.ghostsOn, theme, themeName, pal: Array.from({ length: 6 }, (_, i) => col(i)), hover: hovered ? hovered.kind : null, zoom: d?.zoom ?? 0, labels: d?.labels ?? 0, labelsOn, regions: d?.regions ?? 0, rot: d?.rot ?? null, rotX: d?.rotX ?? null, target: d?.target ?? null, span3: d?.span3 ?? null, filters: chips.map((c) => c.label), filterCounts: chips.map((c) => c.n), selectMode: m.selectMode, selection: selection?.length ?? 0, selShareable: m.selShareable, derived: m.derivedDims.length, dims: m.allDims.map((x) => x.key), drawing: !!lasso, visible: visibleCount }; };
     // the map no longer fills the window (a toolbar sits above it), so both seams speak PAGE coordinates —
     // what a test's mouse/touch actually uses — and convert at the canvas edge.
     const rect = () => canvas.getBoundingClientRect();
@@ -439,11 +433,11 @@
       const typing = !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || t.isContentEditable);
       // expert keyboard routes (M-A3 / M-A5) — single keys consistent with `s`, skipped while typing, while
       // a menu is open (its own arrow/letter navigation wins), or under a modal overlay.
-      const plain = !typing && !e.metaKey && !e.ctrlKey && !e.altKey && !document.querySelector('[data-menu][data-state="open"]') && !showIntro && !deckOpen && !sheetOpen;
+      const plain = !typing && !e.metaKey && !e.ctrlKey && !e.altKey && !document.querySelector('[data-menu][data-state="open"]') && !showIntro && !m.deckOpen && !sheetOpen;
       if (plain) {
         if (e.key === "s") { m.toggleSelectMode(); return; }
-        if (e.key === "l") { if (m.channels.color === "region") showLabels = !showLabels; return; }
-        if (e.key === "d") { deckOpen = true; return; }
+        if (e.key === "l") { if (m.channels.color === "region") m.showLabels = !m.showLabels; return; }
+        if (e.key === "d") { m.deckOpen = true; return; }
         if (e.key === "r") { reset(); return; }
         // camera: arrows pan, +/- zoom, shift+arrows orbit in 3D — hold-to-repeat via native key repeat
         if (e.key.startsWith("Arrow")) {
@@ -470,7 +464,7 @@
   });
 
   $effect(() => {
-    const l = m.layout, c = m.channels.color, s = m.channels.size, xk = m.channels.x, yk = m.channels.y, zk = m.channels.z, sl = labelsOn, g = m.grain, a = assignment, co = citeOn, go = ghostsOn, th = themeName, h = handle, d = data, ad = allDims, dp = m.dimProps, ps = m.posSig;
+    const l = m.layout, c = m.channels.color, s = m.channels.size, xk = m.channels.x, yk = m.channels.y, zk = m.channels.z, sl = labelsOn, g = m.grain, a = assignment, co = m.citeOn, go = m.ghostsOn, th = themeName, h = handle, d = data, ad = allDims, dp = m.dimProps, ps = m.posSig;
     void dp; // dimProps in deps so a norm/invert change re-pushes the accessors
     if (h && d) h.update({ getColor: m.colorGet(ad, c, a), getRadius: m.sizeGet(ad, s), getX: m.posGet(ad, xk), getY: m.posGet(ad, yk), getZ: m.posGet(ad, zk), posSig: ps, layout: l, showLabels: sl, grain: g, citeOn: co, ghostsOn: go, theme: th });
   });
@@ -621,8 +615,8 @@
         {/each}
         {#if hasCite || hasGhosts}
           <DropdownMenu.Separator class="my-1 h-px bg-base-300" />
-          {#if hasCite}<DropdownMenu.Item class="rounded-field flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm hover:bg-base-200" data-opt="{scope}:overlay:cite" role="menuitemcheckbox" aria-checked={citeOn} title="draw an edge between citing and cited cards" onSelect={() => (citeOn = !citeOn)}><span class="w-3">{citeOn ? "✓" : ""}</span>cite edges</DropdownMenu.Item>{/if}
-          {#if hasGhosts}<DropdownMenu.Item class="rounded-field flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm hover:bg-base-200" data-opt="{scope}:overlay:ghosts" role="menuitemcheckbox" aria-checked={ghostsOn} title="show cited-but-absent papers at the edge of the corpus" onSelect={() => (ghostsOn = !ghostsOn)}><span class="w-3">{ghostsOn ? "✓" : ""}</span>frontier</DropdownMenu.Item>{/if}
+          {#if hasCite}<DropdownMenu.Item class="rounded-field flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm hover:bg-base-200" data-opt="{scope}:overlay:cite" role="menuitemcheckbox" aria-checked={m.citeOn} title="draw an edge between citing and cited cards" onSelect={() => (m.citeOn = !m.citeOn)}><span class="w-3">{m.citeOn ? "✓" : ""}</span>cite edges</DropdownMenu.Item>{/if}
+          {#if hasGhosts}<DropdownMenu.Item class="rounded-field flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm hover:bg-base-200" data-opt="{scope}:overlay:ghosts" role="menuitemcheckbox" aria-checked={m.ghostsOn} title="show cited-but-absent papers at the edge of the corpus" onSelect={() => (m.ghostsOn = !m.ghostsOn)}><span class="w-3">{m.ghostsOn ? "✓" : ""}</span>frontier</DropdownMenu.Item>{/if}
         {/if}
       </DropdownMenu.Content>
     </DropdownMenu.Portal>
@@ -828,9 +822,9 @@
 {/snippet}
 
 {#snippet rightControls(scope: string)}
-  <button class="btn btn-sm btn-ghost flex-none normal-case" title="read the corpus as a sortable, filterable list (d)" onclick={() => (deckOpen = true)}>deck</button>
+  <button class="btn btn-sm btn-ghost flex-none normal-case" title="read the corpus as a sortable, filterable list (d)" onclick={() => (m.deckOpen = true)}>deck</button>
   <button disabled={m.channels.color !== "region"} title={m.channels.color !== "region" ? "region labels show when coloured by region" : "show region labels on the map (l)"}
-    aria-pressed={labelsOn} class="btn btn-sm flex-none normal-case {showLabels && m.channels.color === 'region' ? 'btn-active' : 'btn-ghost'}" onclick={() => (showLabels = !showLabels)} aria-label="toggle labels">labels</button>
+    aria-pressed={labelsOn} class="btn btn-sm flex-none normal-case {m.showLabels && m.channels.color === 'region' ? 'btn-active' : 'btn-ghost'}" onclick={() => (m.showLabels = !m.showLabels)} aria-label="toggle labels">labels</button>
   <button class="btn btn-sm btn-ghost btn-square flex-none" onclick={toggleTheme} aria-label="toggle light or dark theme" title="toggle light / dark">{theme === "dark" ? "☾" : "☀"}</button>
   <DropdownMenu.Root>
     <DropdownMenu.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case" data-menu="{scope}:theme" aria-label="pick a colour theme" title="theme">
@@ -884,7 +878,7 @@
       <div class="flex items-center gap-1 px-2 py-1.5 sm:hidden">
         <div class="min-w-0 flex-1">{@render about("m")}</div>
         <button class="btn btn-sm btn-ghost flex-none normal-case" data-menu="sheet:open" onclick={() => (sheetOpen = true)} aria-label="open controls">controls ▴</button>
-        <button class="btn btn-sm btn-ghost flex-none normal-case" onclick={() => (deckOpen = true)}>deck</button>
+        <button class="btn btn-sm btn-ghost flex-none normal-case" onclick={() => (m.deckOpen = true)}>deck</button>
       </div>
 
       <!-- ═══ FILTER CHIPS + SCOPE — the most prominent state display on screen. The `N / M cards`
@@ -1102,7 +1096,7 @@
   {/if}
 
   <!-- deck / list view — the accessible, sortable/filterable reader (real DOM, keyboard-navigable) -->
-  {#if deckOpen && data}
+  {#if m.deckOpen && data}
     <div class="fixed inset-0 z-50 grid place-items-center bg-black/50 p-2">
       <div use:trapFocus tabindex="-1" role="dialog" aria-modal="true" aria-label="deck reader" class="rounded-box flex h-full max-h-full w-full max-w-4xl flex-col border border-base-300 bg-base-100 p-3 shadow-2xl">
         <div class="mb-2 flex flex-wrap items-center gap-2">
@@ -1113,14 +1107,14 @@
             <select bind:value={m.channels.sort} aria-label="sort the deck" class="select select-xs">
               {#each scalarDims as d}<option value={d.key}>{d.name}{dimTag(d)}</option>{/each}
             </select></label>
-          {#if hasRead}<button class="btn btn-xs normal-case {deckUnread ? 'btn-active' : 'btn-ghost'}" aria-pressed={deckUnread} title="hide cards already marked read" onclick={() => (deckUnread = !deckUnread)}>unread only</button>{/if}
-          <input bind:value={deckQ} placeholder="find in list…" aria-label="find in the list — narrows these rows only, not the map" class="input input-xs min-w-0 flex-1" />
+          {#if hasRead}<button class="btn btn-xs normal-case {m.deckUnread ? 'btn-active' : 'btn-ghost'}" aria-pressed={m.deckUnread} title="hide cards already marked read" onclick={() => (m.deckUnread = !m.deckUnread)}>unread only</button>{/if}
+          <input bind:value={m.deckQ} placeholder="find in list…" aria-label="find in the list — narrows these rows only, not the map" class="input input-xs min-w-0 flex-1" />
           <button class="btn btn-ghost btn-xs btn-square ml-auto" onclick={() => requestClose()} aria-label="close deck">✕</button>
         </div>
         <div class="thin-sb grid grid-cols-1 gap-2 overflow-auto sm:grid-cols-2">
-          {#if deckList.length === 0}<div class="col-span-full py-16 text-center font-mono text-xs opacity-60">no cards match “{deckQ}”{deckUnread ? " (unread only)" : ""}</div>{/if}
+          {#if deckList.length === 0}<div class="col-span-full py-16 text-center font-mono text-xs opacity-60">no cards match “{m.deckQ}”{m.deckUnread ? " (unread only)" : ""}</div>{/if}
           {#each deckList as i (i)}
-            <button data-deck-card class="rounded-box border border-base-300 bg-base-200 p-2.5 text-left hover:border-primary/50 {data.read?.[i] === true ? 'opacity-60' : ''}" onclick={() => { focusCard(i); deckOpen = false; }}>
+            <button data-deck-card class="rounded-box border border-base-300 bg-base-200 p-2.5 text-left hover:border-primary/50 {data.read?.[i] === true ? 'opacity-60' : ''}" onclick={() => { focusCard(i); m.deckOpen = false; }}>
               <div class="flex items-start justify-between gap-2">
                 <div class="truncate text-[13px] font-bold">{data.titles[i]}</div>
                 {#if data.sources?.[i] || data.urls?.[i]}<a href={data.sources?.[i] || data.urls?.[i]} target="_blank" rel="noopener" class="link link-primary flex-none font-mono text-[10px] font-bold" onclick={(e) => e.stopPropagation()}>open →</a>{/if}

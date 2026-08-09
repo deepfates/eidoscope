@@ -68,6 +68,12 @@ export type UrlPatch = {
   derived: { label: string; key?: string; set?: UrlIdSet; ref?: boolean }[];
   region?: number; facet?: string; find?: string; card?: string;
   sel?: UrlIdSet;       // a shared SELECTION (resolved to indices once the corpus is mounted)
+  // M-B: the view state that used to be lost by a share — overlays, labels, and the deck's own state
+  sort?: string;        // the sort channel (the only channel that was never serialized)
+  cite?: boolean; ghosts?: boolean;   // overlay.toggle
+  labels?: boolean;                   // labels.toggle (present only when OFF — on is the default)
+  deck?: boolean;                     // the deck is open — a link can land on the list view
+  deckQ?: string; deckUnread?: boolean; // deck.filter / deck.unread (deck-only; the map mask is untouched)
 };
 
 export function parseUrl(search: string): UrlPatch {
@@ -113,6 +119,13 @@ export function parseUrl(search: string): UrlPatch {
   const find = p.get("find"); if (find) out.find = find;
   const card = p.get("card"); if (card) out.card = card;
   const sel = p.get("sel"); if (sel) { const set = parseIdSet(sel); if (set) out.sel = set; }
+  const so = p.get("sort"); if (so) out.sort = so;
+  if (p.get("cite") === "1") out.cite = true;
+  if (p.get("ghosts") === "1") out.ghosts = true;
+  if (p.get("labels") === "0") out.labels = false;
+  if (p.get("deck") === "1") out.deck = true;
+  const df = p.get("df"); if (df) out.deckQ = df;
+  if (p.get("du") === "1") out.deckUnread = true;
   return out;
 }
 
@@ -142,6 +155,13 @@ export class ViewModel {
   // portable and the gesture is not. The model owns it; deckmap only renders it.
   selection = $state<number[] | null>(null);
   selectMode = $state(false);                      // the lasso owns the pointer while this is on
+  // ── view-state the URL must mirror (M-B): overlays, labels, and the deck's own state ──────────────
+  citeOn = $state(false);                          // overlay: citation edges
+  ghostsOn = $state(false);                        // overlay: frontier ghost papers
+  showLabels = $state(true);                       // region labels (effective only under the region lens)
+  deckOpen = $state(false);                        // the deck (list view) is open
+  deckQ = $state("");                              // deck.filter — narrows the LIST only, never the map
+  deckUnread = $state(false);                      // deck.unread — hide cards already marked read
   private qN = 0;                                  // monotonic id source for stable query keys
   private dN = 0;                                  // …and for derived-dimension keys
 
@@ -422,6 +442,8 @@ export class ViewModel {
     this.derived = []; this.dN = 0;
     this.dimProps = {};
     this.channels = { ...INITIAL, ...defaultsFor(D) };
+    this.citeOn = false; this.ghostsOn = false; this.showLabels = true;
+    this.deckOpen = false; this.deckQ = ""; this.deckUnread = false;
     this.scrubLo = null; this.scrubHi = null;
     this.grain = D.di ?? 0;
     this.data = D;
@@ -436,6 +458,7 @@ export class ViewModel {
     if (this.layout !== "mde") p.set("layout", this.layout);
     if (ch.color !== "region") p.set("color", ch.color);
     if (ch.size !== "hub") p.set("size", ch.size);
+    if (ch.sort !== "hub") p.set("sort", ch.sort);   // the sort channel serializes like the other six
     if (this.data && this.grain !== (this.data.di ?? 0)) p.set("grain", String(this.grain));
     if (this.layout === "axes" || this.layout === "axes3d") { if (ch.x) p.set("x", ch.x); if (ch.y) p.set("y", ch.y); if (this.layout === "axes3d" && ch.z) p.set("z", ch.z); }
     // per-dimension props the user changed (norm/invert): key.<h|r><0|1>, comma-joined
@@ -458,6 +481,13 @@ export class ViewModel {
     // drops it cleanly on a corpus whose ids no longer match. Capped — past the cap we serialize NOTHING
     // and the UI says the selection is too large to share.
     if (this.selection?.length && this.data && this.selShareable && this.selEnc) p.set("sel", this.selEnc);
+    // overlays + labels + the deck's own state (M-B): serialized only off their defaults, like every param
+    if (this.citeOn) p.set("cite", "1");
+    if (this.ghostsOn) p.set("ghosts", "1");
+    if (!this.showLabels) p.set("labels", "0");
+    if (this.deckOpen) p.set("deck", "1");
+    if (this.deckQ.trim()) p.set("df", this.deckQ);
+    if (this.deckUnread) p.set("du", "1");
     const q = p.toString();
     return pathname + (q ? "?" + q : "");
   }
@@ -475,5 +505,12 @@ export class ViewModel {
     if (p.scrubKey) this.channels.scrub = p.scrubKey;
     if (p.scrubLo !== undefined) this.scrubLo = p.scrubLo;
     if (p.scrubHi !== undefined) this.scrubHi = p.scrubHi;
+    if (p.sort) this.channels.sort = p.sort;
+    if (p.cite) this.citeOn = true;
+    if (p.ghosts) this.ghostsOn = true;
+    if (p.labels === false) this.showLabels = false;
+    if (p.deck) this.deckOpen = true;
+    if (p.deckQ !== undefined) this.deckQ = p.deckQ;
+    if (p.deckUnread) this.deckUnread = true;
   }
 }
