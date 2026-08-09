@@ -605,7 +605,6 @@ try {
   ok(Math.abs(yB - yA) > 0.05 && yMid.size >= 4, `mobile: camera fit EASES, not jumps — ${yMid.size} distinct intermediate camera frames across targetY ${yA?.toFixed(2)}→${yB?.toFixed(2)} (eid-aw7x)`);
   await mp.close();
 
-<<<<<<< HEAD
   // ═══ 15. SECOND BINDINGS (eid-hsy3, M-A) — every critical command gets an expert route ═══════════
   await p.goto(`${base}/index.html`);
   await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
@@ -684,8 +683,8 @@ try {
   ok(s.color === "region", `the colour lens did not move — still ${s.color}`);
   ok(s.filters.length === 1 && s.visible < 90, `…yet the author facet filters the corpus — filters=${JSON.stringify(s.filters)} visible=${s.visible}/90`);
   await btn(/^reset view$/).click(); await p.waitForTimeout(250);
-=======
-  // ═══ 15. SAVED VIEWS (eid-thbs): the .eido carries named views. Full loop, no shortcuts — mint a
+
+  // ═══ 16. SAVED VIEWS (eid-thbs): the .eido carries named views. Full loop, no shortcuts — mint a
   // derived axis from a lasso'd selection, place it, save the view, DOWNLOAD the re-emitted file, drop
   // that downloaded file back onto the app (the real open path), open the view: axis + selection +
   // channels + grain + camera restore exactly. A derived axis + big selection in a view is durable with
@@ -754,7 +753,6 @@ try {
   ok(Math.abs(s.zoom - preSave.zoom) < 0.05, `views: …and the camera pose restores — zoom ${preSave.zoom.toFixed(2)}→${s.zoom.toFixed(2)}`);
   const colorName15 = await p.evaluate(() => (document.querySelector('[data-menu="bar:color"]') as HTMLElement)?.textContent?.trim());
   ok(!!colorName15?.includes("≈ blobby"), `views: the axis comes back under its own label — "${colorName15}"`);
->>>>>>> worktree-agent-a27295209caedae15
 
   ok(consoleErrs.length === 0, "no console errors during the run" + (consoleErrs.length ? " — " + consoleErrs[0] : ""));
 } finally {
