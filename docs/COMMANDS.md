@@ -35,11 +35,11 @@ slot), `dimension` (one per-card field), `corpus` (the filter set), `card`, `cam
 | 11 | `grain.set` | *set* clustering grain · view | **toolbar slider** (always visible; a parameter of the region dimension, not of any channel) | 0…nLevels-1 | regions merge/split; the count next to the slider and in the toolbar updates | `?grain=` | Tab→arrows | `reset view` |
 | 12 | `labels.toggle` | *toggle* region labels · chrome | `region labels` button (disabled off the region lens, with a tooltip saying why) | — | region names appear/disappear on the map | **n** | Tab→Enter | same button |
 | **Selecting — narrowing the corpus** |
-| 13 | `region.isolate` | *isolate* one region · corpus | click a legend row under colour = region (the row shows `isolate` / `release` on hover or focus) | cluster id | non-members hidden, camera flies to the set, chip appears, `N / M cards` updates, region detail pane opens | `?region=` | Tab→Enter | click again · chip ✕ · `reset view` |
-| 14 | `facet.isolate` | *isolate* one categorical value · corpus | click a legend row under a categorical colour lens (same visible `isolate` cue) | value | same as above, for that value | `?facet=` | Tab→Enter | click again · chip ✕ · `reset view` |
-| 15 | `find.set` | *filter* by substring · corpus | the `⌕ find a card…` input | text | non-matching cards hidden, chip `"…"`, `N / M cards` updates | `?find=` | type | empty the box · chip ✕ · `reset view` |
+| 13 | `region.isolate` | *isolate* one region · corpus | click a legend row under colour = region (the row shows `isolate` / `release` on hover or focus) | cluster id | non-members hidden, camera flies to the set, chip `<region> · N` (its own count), `N / M cards` updates, region detail pane opens | `?region=` | Tab→Enter | click again · chip ✕ · `reset view` |
+| 14 | `facet.isolate` | *isolate* one categorical value · corpus | click a legend row under a categorical colour lens (same visible `isolate` cue) | value | same as above, for that value (chip `<value> · N`) | `?facet=` | Tab→Enter | click again · chip ✕ · `reset view` |
+| 15 | `find.set` | *filter* by substring · corpus | the `⌕ find a card…` input | text | non-matching cards hidden, chip `"…" · N` (its own match count), `N / M cards` updates | `?find=` | type | empty the box · chip ✕ · `reset view` |
 | 16 | `scrub.field` | *choose* which dimension the window applies to · channel | select inside the `window ▾` popover | dimension key | the slider re-ranges; any existing window is cleared | `?sk=` | Tab→select | pick another |
-| 17 | `scrub.window` | *window* a scalar/temporal range · corpus | dual-thumb slider in `window <dim> ▾` | lo, hi | out-of-range cards hidden, chip `<dim> window` | `?slo= ?shi=` | Tab→arrows | `clear` · chip ✕ · `reset view` |
+| 17 | `scrub.window` | *window* a scalar/temporal range · corpus | dual-thumb slider in `window <dim> ▾` | lo, hi | out-of-range cards hidden, chip `<dim> <lo> – <hi>` · its own count (honest units: dates as year-month, numbers span-scaled) | `?slo= ?shi=` | Tab→arrows | `clear` · chip ✕ · `reset view` |
 | 18 | `filter.remove` | *remove* one filter · corpus | click a chip | the filter | that constraint lifts | (its param drops) | Tab→Enter | re-apply |
 | 19 | `filter.clearAll` | *remove* every filter · corpus | `clear all filters` (only shown with ≥2 chips) | — | all constraints lift | (params drop) | Tab→Enter | — |
 | **Interrogating — asking the corpus a question** |
@@ -48,7 +48,7 @@ slot), `dimension` (one per-card field), `corpus` (the filter set), `card`, `cam
 | **Holding — a frozen set of cards (SELECT / DERIVE)** |
 | 22 | `select.mode` | *arm* the lasso · view | `select` toolbar button (desktop + phone controls sheet) | — | button lights, hint "drag to circle cards · Escape to leave"; map drag now draws instead of panning. **Nothing else changes** | n | **s** · Escape leaves | same button · Escape · `reset view` |
 | 23 | `select.lasso` | *hold* a circled set · view | drag a closed path in select mode (one-finger on phone; pinch still zooms) | path | selection pane docks right: count, % of corpus, distinctive terms, distinctive axes, members, and the verbs below. A straight line has no area and holds nothing | `?sel=` (card ids, ≤200 — beyond that the pane says the link can't carry it) | — | `clear` · ✕ · Escape · `reset view` |
-| 24 | `select.filter` | *filter* to the held set · corpus | `filter to these` in the selection pane | — | everything else hidden; chip `selection (N)`; the selection is **consumed** by the filter (one state, not two); composes by AND with other filters | (chip drops `sel=`) | Tab→Enter | chip ✕ · `reset view` |
+| 24 | `select.filter` | *filter* to the held set · corpus | `filter to these` in the selection pane | — | everything else hidden; chip `selection · N`; the selection is **consumed** by the filter (one state, not two); composes by AND with other filters | (chip drops `sel=`) | Tab→Enter | chip ✕ · `reset view` |
 | 25 | `select.fit` | *frame* the held set · camera | `fit` in the selection pane | — | camera eases to the set's bounds (depth-aware in 3D). Explicit — holding a set never moves the camera by itself | n | Tab→Enter | `reset view` |
 | 26 | `select.export` | *download* the held set · view | `export` in the selection pane | — | JSON file of ids, titles, urls | n | Tab→Enter | — |
 | 27 | `select.clear` | *release* the held set · view | `clear` in the selection pane; ✕ closes the pane | — | selection released; map de-emphasis lifts | (`sel=` drops) | Tab→Enter | re-circle |
@@ -59,10 +59,10 @@ slot), `dimension` (one per-card field), `corpus` (the filter set), `card`, `cam
 | 31 | `card.open` | *open* one card · card | click a point; click a deck row; click a neighbour in the detail pane | index | detail pane docks right (bottom sheet on phones): restatement, axis placements, neighbours, source links | `?card=` | via the deck | ✕ · Escape · Back |
 | 32 | `card.hover` | *preview* one card · card | hover a point | — | tooltip: region, title, first ~140 chars | n | **n** | move away |
 | 33 | `region.drill` | *descend* into a region · view | **double-click a point** | index | grain steps finer (≤3 levels) until the region splits; camera fits the sub-region | (via `?grain=`) | **n** | `reset view` |
-| 34 | `deck.open` | *list* the corpus · view | `deck` button (desktop + phone) | — | modal list of every card — the screen-reader-accessible view of the map | **n** | Tab→Enter | ✕ · Escape · Back |
+| 34 | `deck.open` | *list* the corpus · view | `deck` button (desktop + phone) | — | modal list of every card, headed by its scope `N / M cards` — the screen-reader-accessible view of the map | **n** | Tab→Enter | ✕ · Escape · Back |
 | 35 | `deck.sort` | *sort* the list · channel | select inside the deck | dimension key | rows reorder | **n** | Tab→select | pick another |
-| 36 | `deck.filter` | *filter* the list · **deck only** | `find in list…` input inside the deck | text | rows narrow. **Does not touch the map or the chips** (see M-N2) | **n** | type | empty the box |
-| 37 | `deck.unread` | *filter* to unread · **deck only** | `unread only` toggle (only when the corpus carries read state) | — | read rows hidden | **n** | Tab→Enter | same button |
+| 36 | `deck.filter` | *filter* the list · **deck only** | `find in list…` input inside the deck | text | rows narrow and the deck's `N / M cards` readout updates. **Does not touch the map or the chips** (see M-N2) | **n** | type | empty the box |
+| 37 | `deck.unread` | *filter* to unread · **deck only** | `unread only` toggle (only when the corpus carries read state) | — | read rows hidden; the deck's `N / M cards` readout updates | **n** | Tab→Enter | same button |
 | 38 | `source.open` | *open* the original · card | links in the detail pane and on deck rows | — | new tab | n | Tab→Enter | — |
 | **Camera** |
 | 39 | `camera.pan` | *move* the camera · camera | drag | — | view translates | n | **n** | `reset view` |
@@ -124,16 +124,17 @@ from it, so a shared link silently loses them:
 
 The ticket's rule is: always expose the current scope, never say "these".
 
-- **M-C1 `N / M cards` only exists while a filter is active.** The chips row is collapsed to zero
-  height otherwise, so the corpus size lives only in the toolbar subtitle and the two never appear
-  together.
-- **M-C2 No chip carries its own count.** With three chips you see the size of the intersection and
-  nothing else — you cannot tell which constraint is doing the cutting. `region "Agent-Native
-  Engineering" · 813` would be the whole fix.
-- **M-C3 The scrubber chip says `<dim> window` and not the window.** The range you actually chose is
-  only visible inside the popover you just closed.
-- **M-C4 `deck.filter` / `deck.unread` narrow the list with no chip anywhere**, and the deck's own
-  `N cards` is the only readout.
+- ~~**M-C1 `N / M cards` only exists while a filter is active.**~~ **FIXED 2026-08-09** — the scope
+  row no longer collapses: `N / M cards` is always on, in the same place, filters or none.
+- ~~**M-C2 No chip carries its own count.**~~ **FIXED 2026-08-09** — every chip carries its own match
+  count (`Agent-Native Engineering · 813`, `"query" · 41`, `selection · 111`), computed from that
+  constraint's own mask, so the readout beside them stays the intersection.
+- ~~**M-C3 The scrubber chip says `<dim> window` and not the window.**~~ **FIXED 2026-08-09** — the
+  chip states the chosen range itself in the dimension's honest units (`date 2023-11 – 2024-02`,
+  `length 300 – 8000`), through the same formatter the toolbar button uses.
+- ~~**M-C4 `deck.filter` / `deck.unread` narrow the list with no chip anywhere.**~~ **FIXED
+  2026-08-09** — the deck heads itself with `N / M cards` (rows shown / cards the map shows); its
+  narrowing stays deck-local by ruling (M-N2), so the scope shows inside the deck, not as a map chip.
 
 ### M-D · The result is invisible
 

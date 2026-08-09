@@ -88,6 +88,8 @@
   const selection = $derived(m.selection);
   const selectMode = $derived(m.selectMode);
   const filterMask = $derived(m.filterMask);
+  // the corpus scope, one number everything reads: cards passing every filter (= all of them when none)
+  const visibleCount = $derived(filterMask ? filterMask.reduce((a, v) => a + v, 0) : (data?.ids.length ?? 0));
   const scrubFields = $derived(m.scrubFields), scrubField = $derived(m.scrubField), scrubRange = $derived(m.scrubRange);
   const propsOf = m.propsOf, poles = m.poles;
   const setProp = (d: Dimension, patch: Parameters<typeof m.setProp>[1]) => m.setProp(d, patch);
@@ -349,7 +351,7 @@
       onGrainChange: (g) => m.setGrain(g),
     });
     // read-only introspection seam for the integration suite (drives the REAL built app, asserts real state)
-    (window as any).__eido = () => { const d = handle?.debug(); return { grain: m.grain, k: curCount, layout: m.layout, color: m.channels.color, pin: pinned, facetPin, focus: selected, detail: selected !== null, deckOpen, cite: citeOn, ghosts: ghostsOn, theme, themeName, pal: Array.from({ length: 6 }, (_, i) => col(i)), hover: hovered ? hovered.kind : null, zoom: d?.zoom ?? 0, labels: d?.labels ?? 0, labelsOn, regions: d?.regions ?? 0, rot: d?.rot ?? null, rotX: d?.rotX ?? null, target: d?.target ?? null, span3: d?.span3 ?? null, filters: chips.map((c) => c.label), selectMode: m.selectMode, selection: selection?.length ?? 0, selShareable: m.selShareable, derived: m.derivedDims.length, dims: m.allDims.map((x) => x.key), drawing: !!lasso, visible: filterMask ? filterMask.reduce((a, v) => a + v, 0) : (data?.ids.length ?? 0) }; };
+    (window as any).__eido = () => { const d = handle?.debug(); return { grain: m.grain, k: curCount, layout: m.layout, color: m.channels.color, pin: pinned, facetPin, focus: selected, detail: selected !== null, deckOpen, cite: citeOn, ghosts: ghostsOn, theme, themeName, pal: Array.from({ length: 6 }, (_, i) => col(i)), hover: hovered ? hovered.kind : null, zoom: d?.zoom ?? 0, labels: d?.labels ?? 0, labelsOn, regions: d?.regions ?? 0, rot: d?.rot ?? null, rotX: d?.rotX ?? null, target: d?.target ?? null, span3: d?.span3 ?? null, filters: chips.map((c) => c.label), filterCounts: chips.map((c) => c.n), selectMode: m.selectMode, selection: selection?.length ?? 0, selShareable: m.selShareable, derived: m.derivedDims.length, dims: m.allDims.map((x) => x.key), drawing: !!lasso, visible: visibleCount }; };
     // the map no longer fills the window (a toolbar sits above it), so both seams speak PAGE coordinates —
     // what a test's mouse/touch actually uses — and convert at the canvas edge.
     const rect = () => canvas.getBoundingClientRect();
@@ -459,16 +461,8 @@
   let scrubNonce = $state(0);
   m.onScrubReset = () => scrubNonce++;
   const resetScrub = () => m.resetScrub();
-  const fmtDate = (ms: number) => new Date(ms).toISOString().slice(0, 7);
-  // adaptive numeric label: more decimals for small-span axes so a cosine/PCA range (~[-0.5,0.5]) doesn't
-  // collapse to "0 – 0" while a length axis (~[100,2300]) doesn't show noise decimals.
-  const fmtNum = (v: number, span: number) => { const a = Math.abs(span); return v.toFixed(a >= 100 ? 0 : a >= 10 ? 1 : a >= 1 ? 2 : 3); };
-  const scrubText = $derived.by(() => {
-    const r = scrubRange, f = scrubField; if (!r || !f) return "";
-    return f.kind === "temporal"
-      ? fmtDate(m.scrubLo ?? r[0]) + " – " + fmtDate(m.scrubHi ?? r[1])
-      : fmtNum(m.scrubLo ?? r[0], r[1] - r[0]) + " – " + fmtNum(m.scrubHi ?? r[1], r[1] - r[0]);
-  });
+  // the window's readout lives in the model (one formatter for the toolbar, the popover AND the chip)
+  const scrubText = $derived(m.scrubText);
   $effect(() => { m.ensureScrubKey(); });
   $effect(() => { const h = handle, mask = filterMask; if (h) h.setFilterMask(mask); });
   // selection + select-mode are pushed the same way the mask is: pure derived reads, no write-back.
@@ -853,21 +847,18 @@
         <button class="btn btn-sm btn-ghost flex-none normal-case" onclick={() => (deckOpen = true)}>deck</button>
       </div>
 
-      <!-- ═══ FILTER CHIPS — the most prominent state display on screen. Animated open/closed so the
-           map never jumps when a filter lands. ═══ -->
-      <div class="grid transition-[grid-template-rows] duration-150 {chips.length ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'}">
-        <div class="overflow-hidden">
-          <div class="flex flex-wrap items-center gap-1 border-t border-base-300 px-2 py-1.5">
-            <span class="font-mono text-[10px] uppercase tracking-widest opacity-50">filters</span>
-            {#each chips as chip}
-              <button onclick={chip.remove} title="remove this filter: {chip.label}" aria-label="remove filter {chip.label}" class="badge badge-sm badge-neutral gap-1 font-mono">
-                <span class="max-w-[11rem] truncate">{chip.label}</span><span class="opacity-60">✕</span>
-              </button>
-            {/each}
-            {#if chips.length > 1}<button onclick={() => m.clearFilters()} title="remove every active filter" aria-label="clear all filters" class="btn btn-ghost btn-xs normal-case">clear all filters</button>{/if}
-            <span class="ml-auto font-mono text-[10px] opacity-60">{filterMask ? filterMask.reduce((a, v) => a + v, 0) : data.ids.length} / {data.ids.length} cards</span>
-          </div>
-        </div>
+      <!-- ═══ FILTER CHIPS + SCOPE — the most prominent state display on screen. The `N / M cards`
+           readout is ALWAYS here (M-C1): the corpus scope lives in one consistent place whether or not
+           a filter is active. Each chip carries its own match count (M-C2). ═══ -->
+      <div class="flex flex-wrap items-center gap-1 border-t border-base-300 px-2 py-1.5">
+        {#if chips.length}<span class="font-mono text-[10px] uppercase tracking-widest opacity-50">filters</span>{/if}
+        {#each chips as chip}
+          <button onclick={chip.remove} title="remove this filter: {chip.label}" aria-label="remove filter {chip.label}" class="badge badge-sm badge-neutral gap-1 font-mono">
+            <span class="max-w-[11rem] truncate">{chip.label}</span><span class="opacity-60">· {chip.n}</span><span class="opacity-60">✕</span>
+          </button>
+        {/each}
+        {#if chips.length > 1}<button onclick={() => m.clearFilters()} title="remove every active filter" aria-label="clear all filters" class="btn btn-ghost btn-xs normal-case">clear all filters</button>{/if}
+        <span data-scope class="ml-auto font-mono text-[10px] opacity-60">{visibleCount} / {data.ids.length} cards</span>
       </div>
     </header>
   {/if}
@@ -1069,7 +1060,9 @@
     <div class="fixed inset-0 z-50 grid place-items-center bg-black/50 p-2">
       <div use:trapFocus tabindex="-1" role="dialog" aria-modal="true" aria-label="deck reader" class="rounded-box flex h-full max-h-full w-full max-w-4xl flex-col border border-base-300 bg-base-100 p-3 shadow-2xl">
         <div class="mb-2 flex flex-wrap items-center gap-2">
-          <span class="font-mono text-[10px] opacity-60">{deckList.length} cards</span>
+          <!-- the deck's own scope (M-C4): its find/unread narrowing stays deck-local (M-N2), so its
+               readout lives HERE — rows shown / cards the map shows -->
+          <span data-deck-scope class="font-mono text-[10px] opacity-60">{deckList.length} / {visibleCount} cards</span>
           <label class="flex items-center gap-1 text-xs"><span class="font-mono text-[10px] opacity-60">sort</span>
             <select bind:value={m.channels.sort} aria-label="sort the deck" class="select select-xs">
               {#each scalarDims as d}<option value={d.key}>{d.name}{dimTag(d)}</option>{/each}
