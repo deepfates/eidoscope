@@ -19,7 +19,9 @@ const envWith = (extra: Record<string, string> = {}, dropKeys = false) => {
 };
 
 async function cli(args: string[], env = envWith({ OPENROUTER_API_KEY: "test-key" })) {
-  const p = Bun.spawn(["bun", CLI, ...args], { cwd: ROOT, env, stdout: "pipe", stderr: "pipe" });
+  // --env-file=/dev/null: the repo's own .env (real key) must not leak into spawns that test keyless
+  // behavior — bun auto-loads .env from cwd otherwise, and these tests then pass only in worktrees.
+  const p = Bun.spawn(["bun", "--env-file=/dev/null", CLI, ...args], { cwd: ROOT, env, stdout: "pipe", stderr: "pipe" });
   const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
   return { out, err, code };
 }
