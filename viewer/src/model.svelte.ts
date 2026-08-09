@@ -6,7 +6,7 @@
 // channel draws from the same registry, so "reset every channel pointing at dimension K" is ONE loop instead
 // of seven hand-written ifs.
 
-import type { MapContract } from "../../src/schema";
+import type { MapContract, ViewState } from "../../src/schema";
 import type { Layout } from "./deckmap";
 import { distinctiveTerms, distinctiveAxes } from "../../src/distinct";
 import { buildDimensions, sizeAccessor, colorAccessor, scores01, defaultProps, type Dimension, type DimProps } from "./dimensions";
@@ -50,32 +50,26 @@ export type Filter =
 // handle). The model returns the camera intent rather than reaching for a handle it shouldn't know about.
 export type CameraOp = { kind: "fit"; indices: number[] } | { kind: "reset" } | null;
 
-// Everything a shared URL can carry, decoded. The eager half is applied by applyPatch(); the deferred half
-// (region/facet/find/card — they depend on grain-derived state — plus the query texts, which need embedding)
-// is handed back to App, which owns the async + the focus.
-export type UrlPatch = {
-  layout?: Layout;
-  color?: string; size?: string; x?: string; y?: string; z?: string;
-  grain?: number;
-  dimProps?: Record<string, DimProps>;
-  scrubKey?: string; scrubLo?: number; scrubHi?: number;
-  scrubbed: boolean;    // a window was restored → App must remount the slider (scrubNonce)
-  queries: string[];    // query-dimension texts, to be re-embedded best-effort
-  // DERIVED dimensions can't be recomputed from a label — they need their examples. Each arrives as
-  // `<label>~<key>:<set>` (key so channels pointing at it survive a reload; legacy `<label>~<ids>` still
-  // parses, keyless) and is re-derived once the corpus is mounted. `ref` = the examples ARE the shared
-  // selection (`sel=`), serialized once instead of twice.
-  derived: { label: string; key?: string; set?: UrlIdSet; ref?: boolean }[];
-  region?: number; facet?: string; find?: string; card?: string;
-  sel?: UrlIdSet;       // a shared SELECTION (resolved to indices once the corpus is mounted)
+// Everything a restored view can carry — ONE shape for both carriers (eid-thbs). A saved view in the
+// .eido is a plain ViewState (full id lists, no cap); a URL decodes to the SAME shape except that its
+// sets arrive as encoded index-sets (UrlIdSet) still needing resolution against the corpus, and a
+// derived dim may reference the shared selection (`ref`) instead of repeating it. The eager half is
+// applied by applyPatch(); the deferred half (region/facet/find/card — they depend on grain-derived
+// state — plus the query texts, which need embedding) is handed back to App, which owns the async.
+export type StatePatch = Omit<ViewState, "selection" | "derived"> & {
+  scrubbed?: boolean;   // a window was restored → App must remount the slider (scrubNonce)
+  selection?: string[] | UrlIdSet;
+  // DERIVED dimensions can't be recomputed from a label — they need their examples. From a URL each
+  // arrives as `<label>~<key>:<set>` (key so channels pointing at it survive a reload; legacy
+  // `<label>~<ids>` still parses, keyless); from a saved view, as full ids under its key.
+  derived?: { label: string; key?: string; ids?: string[]; set?: UrlIdSet; ref?: boolean }[];
 };
 
-export function parseUrl(search: string): UrlPatch {
+export function parseUrl(search: string): StatePatch {
   const p = new URLSearchParams(search);
-  const out: UrlPatch = {
-    scrubbed: false,
+  const out: StatePatch = {
     queries: p.getAll("q"),
-    derived: p.getAll("d").flatMap((s): UrlPatch["derived"] => {
+    derived: p.getAll("d").flatMap((s): NonNullable<StatePatch["derived"]> => {
       const t = s.indexOf("~"); if (t < 0) return [];
       const label = s.slice(0, t); let payload = s.slice(t + 1);
       let key: string | undefined;
@@ -86,12 +80,13 @@ export function parseUrl(search: string): UrlPatch {
       return set ? [{ label, key, set }] : [];
     }),
   };
+  const ch: NonNullable<ViewState["channels"]> = {};
   const L = p.get("layout"); if (L === "mde" || L === "axes" || L === "orbit" || L === "axes3d") out.layout = L;
-  const c = p.get("color"); if (c) out.color = c;
-  const s = p.get("size"); if (s) out.size = s;
-  const x = p.get("x"); if (x) out.x = x;
-  const y = p.get("y"); if (y) out.y = y;
-  const z = p.get("z"); if (z) out.z = z;
+  const c = p.get("color"); if (c) ch.color = c;
+  const s = p.get("size"); if (s) ch.size = s;
+  const x = p.get("x"); if (x) ch.x = x;
+  const y = p.get("y"); if (y) ch.y = y;
+  const z = p.get("z"); if (z) ch.z = z;
   const g = p.get("grain"); if (g && !Number.isNaN(+g)) out.grain = +g;
   // per-dimension props (norm/invert): key.<h|r><0|1>, comma-joined
   const props = p.get("props");
@@ -103,16 +98,18 @@ export function parseUrl(search: string): UrlPatch {
     }
     out.dimProps = next;
   }
-  const sk = p.get("sk"); if (sk) out.scrubKey = sk;
+  const sk = p.get("sk"); if (sk) ch.scrub = sk;
+  if (Object.keys(ch).length) out.channels = ch;
   const slo = p.get("slo"), shi = p.get("shi");
-  if (slo !== null && !Number.isNaN(+slo)) out.scrubLo = +slo;
-  if (shi !== null && !Number.isNaN(+shi)) out.scrubHi = +shi;
-  if (slo !== null || shi !== null) out.scrubbed = true;
+  const win: NonNullable<ViewState["window"]> = {};
+  if (slo !== null && !Number.isNaN(+slo)) win.lo = +slo;
+  if (shi !== null && !Number.isNaN(+shi)) win.hi = +shi;
+  if (slo !== null || shi !== null) { out.window = win; out.scrubbed = true; }
   const r = p.get("region"); if (r && !Number.isNaN(+r)) out.region = +r;
   const fp = p.get("facet"); if (fp) out.facet = fp;
   const find = p.get("find"); if (find) out.find = find;
   const card = p.get("card"); if (card) out.card = card;
-  const sel = p.get("sel"); if (sel) { const set = parseIdSet(sel); if (set) out.sel = set; }
+  const sel = p.get("sel"); if (sel) { const set = parseIdSet(sel); if (set) out.selection = set; }
   return out;
 }
 
@@ -397,45 +394,77 @@ export class ViewModel {
   // dimension's units; dimProps key off dimension ids that may not recur. Carrying any of it forward opened
   // the new map already silently masked — the worst possible first impression of an "honest" instrument.
   mount(D: MapContract) {
+    this.data = D;
+    this.resetViewState();
+  }
+  // Everything view-shaped back to this corpus's defaults — shared by mount() and by `view.open`, which
+  // must apply a saved state EXACTLY (residue from the view you were just in would make the opened view
+  // a blend, not the one that was saved).
+  resetViewState() {
     this.selected = null; this.pinned = null;
     this.selection = null; this.selectMode = false;
     this.filters = []; this.query = "";
     this.queries = []; this.qN = 0;
     this.derived = []; this.dN = 0;
     this.dimProps = {};
-    this.channels = { ...INITIAL, ...defaultsFor(D) };
+    this.channels = { ...INITIAL, ...defaultsFor(this.data) };
     this.scrubLo = null; this.scrubHi = null;
-    this.grain = D.di ?? 0;
-    this.data = D;
+    this.grain = this.data?.di ?? 0;
+  }
+
+  // ---- the view state as ONE plain object (eid-thbs) ----
+  // snapshot() is the single producer of the ViewState shape: the URL mirror serializes it (capped,
+  // sparse), and `view.save` writes it into the .eido verbatim (full ids, no cap). Camera is App's —
+  // it owns the deck handle — so App composes it in before saving.
+  snapshot(): ViewState {
+    const D = this.data;
+    const s: ViewState = { layout: this.layout, channels: { ...this.channels }, grain: this.grain };
+    if (Object.keys(this.dimProps).length) s.dimProps = { ...this.dimProps };
+    if (this.scrubLo !== null || this.scrubHi !== null) {
+      s.window = {};
+      if (this.scrubLo !== null) s.window.lo = this.scrubLo;
+      if (this.scrubHi !== null) s.window.hi = this.scrubHi;
+    }
+    // active filters: region (cluster) · facet (categorical value) · find (text). Each is at-most-one by construction.
+    if (this.pinned !== null) s.region = this.pinned;
+    if (this.facetPin !== null) s.facet = this.facetPin;
+    const tf = this.filters.find((f) => f.kind === "text") as Extract<Filter, { kind: "text" }> | undefined; if (tf) s.find = tf.q;
+    if (this.queries.length) s.queries = this.queries.map((q) => q.text);
+    if (this.derived.length && D) s.derived = this.derived.map((d) => ({ label: d.label, key: d.key, ids: [...d.ids] }));
+    if (this.selected !== null && D) s.card = D.ids[this.selected];
+    if (this.selection?.length && D) s.selection = this.selection.map((i) => D.ids[i]);
+    return s;
   }
 
   // ---- deep-linkable view state (eid-yxqu): the URL always mirrors the current view ----
   // Pure: takes the location pieces, returns the new path+query. App does the history.replaceState.
+  // The URL is ONE ENCODING of snapshot() — sparse (defaults elided) and capped (id sets ride as
+  // encoded index-sets and drop past SET_PARAM_CAP). The uncapped encoding is the saved view in the file.
   serializeUrl(pathname: string, search: string): string {
+    const s = this.snapshot();
+    const ch = s.channels ?? {};
     const p = new URLSearchParams();
     const m = new URLSearchParams(search).get("map"); if (m) p.set("map", m);
-    const ch = this.channels;
-    if (this.layout !== "mde") p.set("layout", this.layout);
-    if (ch.color !== "region") p.set("color", ch.color);
-    if (ch.size !== "hub") p.set("size", ch.size);
-    if (this.data && this.grain !== (this.data.di ?? 0)) p.set("grain", String(this.grain));
-    if (this.layout === "axes" || this.layout === "axes3d") { if (ch.x) p.set("x", ch.x); if (ch.y) p.set("y", ch.y); if (this.layout === "axes3d" && ch.z) p.set("z", ch.z); }
+    if (s.layout && s.layout !== "mde") p.set("layout", s.layout);
+    if (ch.color && ch.color !== "region") p.set("color", ch.color);
+    if (ch.size && ch.size !== "hub") p.set("size", ch.size);
+    if (this.data && s.grain !== undefined && s.grain !== (this.data.di ?? 0)) p.set("grain", String(s.grain));
+    if (s.layout === "axes" || s.layout === "axes3d") { if (ch.x) p.set("x", ch.x); if (ch.y) p.set("y", ch.y); if (s.layout === "axes3d" && ch.z) p.set("z", ch.z); }
     // per-dimension props the user changed (norm/invert): key.<h|r><0|1>, comma-joined
-    const dp = Object.entries(this.dimProps); if (dp.length) p.set("props", dp.map(([k, v]) => k + "." + (v.norm === "rank" ? "r" : "h") + (v.invert ? "1" : "0")).join(","));
+    const dp = Object.entries(s.dimProps ?? {}); if (dp.length) p.set("props", dp.map(([k, v]) => k + "." + (v.norm === "rank" ? "r" : "h") + (v.invert ? "1" : "0")).join(","));
     // scrubber window (the range filter) — only when actually windowed
-    if (this.scrubLo !== null || this.scrubHi !== null) { if (ch.scrub) p.set("sk", ch.scrub); if (this.scrubLo !== null) p.set("slo", String(this.scrubLo)); if (this.scrubHi !== null) p.set("shi", String(this.scrubHi)); }
-    // active filters: region (cluster) · facet (categorical value) · find (text). Each is at-most-one by construction.
-    if (this.pinned !== null) p.set("region", String(this.pinned));
-    if (this.facetPin !== null) p.set("facet", this.facetPin);
-    const tf = this.filters.find((f) => f.kind === "text") as Extract<Filter, { kind: "text" }> | undefined; if (tf) p.set("find", tf.q);
-    for (const qq of this.queries) p.append("q", qq.text);   // query dims by text (re-embedded on load, best-effort)
+    if (s.window) { if (ch.scrub) p.set("sk", ch.scrub); if (s.window.lo !== undefined) p.set("slo", String(s.window.lo)); if (s.window.hi !== undefined) p.set("shi", String(s.window.hi)); }
+    if (s.region !== undefined) p.set("region", String(s.region));
+    if (s.facet !== undefined) p.set("facet", s.facet);
+    if (s.find !== undefined) p.set("find", s.find);
+    for (const q of s.queries ?? []) p.append("q", q);   // query dims by text (re-embedded on load, best-effort)
     // derived dims as <label>~<key>:<set> (re-derived on load). The KEY rides along so channels pointing at
     // the dim (color=d1) still name the same axis after a reload even if a sibling dim dropped — restoring
     // positionally renumbered the survivors and a shared view came back painted (and labeled) by the WRONG
     // axis. A dim minted from the shared selection references it (`s`) instead of repeating the ids. Past
-    // the cap we serialize NOTHING and the pane says so.
+    // the cap we serialize NOTHING and the pane says so — a URL-capacity concern only; the file has none.
     for (const dd of this.derived) { const pay = this.derivedPayload(dd); if (pay !== null) p.append("d", dd.label.replace(/~/g, "-") + "~" + dd.key + ":" + pay); }
-    if (this.selected !== null && this.data) p.set("card", this.data.ids[this.selected]);
+    if (s.card !== undefined) p.set("card", s.card);
     // a held SELECTION rides as an encoded, checksummed index set (idset.ts) — compact, and the checksum
     // drops it cleanly on a corpus whose ids no longer match. Capped — past the cap we serialize NOTHING
     // and the UI says the selection is too large to share.
@@ -443,19 +472,22 @@ export class ViewModel {
     const q = p.toString();
     return pathname + (q ? "?" + q : "");
   }
-  // Apply the EAGER half of a restored URL. The deferred half (region/facet/find/card, query embedding) needs
-  // grain-derived state or async work, so App applies it once the reactive graph has settled.
-  applyPatch(p: UrlPatch) {
+  // Apply the EAGER half of a restored state (URL or saved view). The deferred half (region/facet/find/
+  // card, query embedding, set resolution) needs grain-derived state or async work, so App applies it
+  // once the reactive graph has settled — the SAME App path for both carriers.
+  applyPatch(p: StatePatch) {
     if (p.layout) this.layout = p.layout;
-    if (p.color) this.channels.color = p.color;
-    if (p.size) this.channels.size = p.size;
-    if (p.x) this.channels.x = p.x;
-    if (p.y) this.channels.y = p.y;
-    if (p.z) this.channels.z = p.z;
+    const ch = p.channels ?? {};
+    if (ch.color) this.channels.color = ch.color;
+    if (ch.size) this.channels.size = ch.size;
+    if (ch.x) this.channels.x = ch.x;
+    if (ch.y) this.channels.y = ch.y;
+    if (ch.z) this.channels.z = ch.z;
+    if (ch.sort) this.channels.sort = ch.sort;
     if (p.grain !== undefined) this.grain = Math.max(0, Math.min((this.data?.counts?.length ?? 1) - 1, Math.round(p.grain)));
     if (p.dimProps) this.dimProps = p.dimProps;
-    if (p.scrubKey) this.channels.scrub = p.scrubKey;
-    if (p.scrubLo !== undefined) this.scrubLo = p.scrubLo;
-    if (p.scrubHi !== undefined) this.scrubHi = p.scrubHi;
+    if (ch.scrub) this.channels.scrub = ch.scrub;
+    if (p.window?.lo !== undefined) this.scrubLo = p.window.lo;
+    if (p.window?.hi !== undefined) this.scrubHi = p.window.hi;
   }
 }

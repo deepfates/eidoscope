@@ -7,11 +7,13 @@
   import { col, axisColor, setActiveTheme } from "./encode";
   import { themePalette } from "./palette";
   import { buildDimensions, scores01, type Dimension } from "./dimensions";
-  import { ViewModel, parseUrl, type CameraOp } from "./model.svelte";
+  import { ViewModel, parseUrl, type CameraOp, type StatePatch } from "./model.svelte";
   import { embedQuery, cosineAll, resetEmbedder } from "./semantic";
   import { deriveDirection } from "./derive";
-  import { resolveIdSet } from "./idset";
-  import { GRAIN_MIN_REGION, GRAIN_RATIO, GRAIN_PALETTE_N } from "../../src/schema";
+  import { resolveIdSet, type UrlIdSet } from "./idset";
+  import { GRAIN_MIN_REGION, GRAIN_RATIO, GRAIN_PALETTE_N, type SavedView, type ViewState } from "../../src/schema";
+  import { encodeContainer } from "../../src/eido-container";
+  import { gzipSync } from "fflate";
 
   // THE MODEL — channels, filters, scrubber, the dimension registry, URL (de)serialization. App keeps the DOM,
   // the deck handle, the camera and the browser APIs; it reads the model and hands it user intent.
@@ -274,22 +276,26 @@
     const u = m.serializeUrl(location.pathname, location.search);
     return themeName === DEFAULT_DARK ? u : u + (u.includes("?") ? "&" : "?") + "theme=" + encodeURIComponent(themeName);
   }
-  // Restore: the model decodes + applies the eager half; App owns the DOM-ish half (slider remount, async
-  // query embedding, and the grain-dependent region/facet/find/card, applied once the graph has settled).
-  function applyUrlState() {
-    const p = parseUrl(location.search);
+  // Restore a StatePatch — the ONE apply path for both carriers of the same shape (eid-thbs): the URL
+  // (parseUrl) and a saved view from the file (view.open). The model applies the eager half; App owns the
+  // DOM-ish half (slider remount, async query embedding, the grain-dependent region/facet/find/card, and
+  // the camera, all applied once the graph has settled).
+  function applyState(p: StatePatch) {
+    const prevLayout = m.layout;
     m.applyPatch(p);
-    if (p.scrubbed) scrubNonce++;               // remount the slider so its thumbs show the restored window
-    for (const t of p.queries) embedAndAdd(t);  // best-effort, background; won't block the restore or hang the app
-    // a shared SELECTION resolves first (a derived dim may reference it); a set that doesn't resolve
-    // against this corpus — missing legacy ids, or an encoded set whose checksum disagrees — drops, not fakes
-    const selIdx = p.sel && data ? resolveIdSet(p.sel, data.ids) : null;
+    if (p.scrubbed ?? p.window !== undefined) scrubNonce++;   // remount the slider so its thumbs show the restored window
+    for (const t of p.queries ?? []) embedAndAdd(t);  // best-effort, background; won't block the restore or hang the app
+    // a shared SELECTION resolves first (a derived dim may reference it). Full ids (from the file) resolve
+    // per-id; an encoded index set (from a URL) that doesn't checksum against this corpus drops, not fakes.
+    const toIdx = (s: string[] | UrlIdSet | undefined): number[] | null =>
+      s && data ? resolveIdSet(Array.isArray(s) ? { ids: s } : s, data.ids) : null;
+    const selIdx = toIdx(p.selection);
     // DERIVED dims re-derive from their example ids (a label alone can't reproduce a direction), under the
-    // KEY the URL names (so channels pointing at them keep pointing at the same axis) and with the label
-    // the URL carries. Examples that don't resolve drop the axis rather than restoring a lookalike.
-    for (const d of p.derived) {
+    // KEY the patch names (so channels pointing at them keep pointing at the same axis) and with the label
+    // it carries. Examples that don't resolve drop the axis rather than restoring a lookalike.
+    for (const d of p.derived ?? []) {
       const D = data; if (!D) break;
-      const idx = d.ref ? (selIdx ?? []) : (d.set ? (resolveIdSet(d.set, D.ids) ?? []) : []);
+      const idx = d.ref ? (selIdx ?? []) : (toIdx(d.ids ?? d.set) ?? []);
       const V = store?.vectors();
       const dir = deriveDirection(V, idx);
       if (dir) m.addDerived(d.label, idx.map((i) => D.ids[i]), cosineAll(dir, V!), d.key);
@@ -300,7 +306,52 @@
       if (p.find !== undefined) m.onFind(p.find);
       if (p.card !== undefined && data) { const i = data.ids.indexOf(p.card); if (i >= 0) focusCard(i); }
       if (selIdx?.length) m.setSelection(selIdx);   // resolved above, applied once the graph settles
+      // camera LAST, after deck has consumed the (possibly new) layout. A 2D↔3D crossing runs a ~700ms
+      // camera-continuity ease that would override an immediate set, so wait it out in that one case.
+      const cam = p.camera;
+      if (cam) {
+        const crossed = p.layout !== undefined && p.layout !== prevLayout && ((p.layout === "orbit" || p.layout === "axes3d") !== (prevLayout === "orbit" || prevLayout === "axes3d"));
+        if (crossed) setTimeout(() => handle?.setCamera(cam), 800);
+        else requestAnimationFrame(() => handle?.setCamera(cam));
+      }
     });
+  }
+  function applyUrlState() { applyState(parseUrl(location.search)); }
+
+  // ═══ SAVED VIEWS (eid-thbs) — the file carries its own ways of being looked at ═══════════════════
+  // `view.save` names the current view, appends it to the file's views IN MEMORY, and offers the
+  // re-emitted .eido as a download — the browser cannot write a file in place, so the download IS the
+  // honest "save back to a file". `view.open` applies a saved state exactly: one action.
+  let viewName = $state("");
+  const savedViews = $derived(data?.views ?? []);
+  function currentViewState(): ViewState {
+    const s = m.snapshot();
+    if (handle) s.camera = handle.getCamera();   // App owns the deck handle, so App composes the camera in
+    return s;
+  }
+  function saveView() {
+    const D = store?.map(); const name = viewName.trim();
+    if (!D || !name || !m.data) return;
+    // ONE array, written to BOTH faces of the same map: the raw contract (what encodeContainer reads —
+    // Svelte's $state proxy does NOT write through to its underlying object, verified by e2e: the first
+    // cut wrote only m.data and the downloaded file carried no views) and the reactive proxy (what the
+    // views list renders from).
+    const views = [...(D.views ?? []), { name, created: Date.now(), state: currentViewState() }];
+    D.views = views;
+    m.data.views = views;
+    viewName = "";
+    const bytes = gzipSync(encodeContainer(D));   // the SAME shared codec the pipeline emits with
+    const blob = new Blob([bytes as BlobPart], { type: "application/octet-stream" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = (prov?.title ? prov.title.replace(/[^a-z0-9]+/gi, "-").toLowerCase() : "eidoscope") + ".eido";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  function openView(v: SavedView) {
+    m.resetViewState();   // a saved view applies EXACTLY — no residue from the view you were just in
+    scrubNonce++;
+    applyState(v.state);
   }
   $effect(() => { void [m.layout, m.channels.color, m.channels.size, m.grain, m.channels.x, m.channels.y, m.channels.z, m.pinned, m.selected, m.channels.scrub, m.scrubLo, m.scrubHi, m.dimProps, m.filters, m.queries, m.derived, m.selection, themeName]; if (urlReady) { try { history.replaceState(history.state, "", currentUrl()); } catch {} } });
 
@@ -349,7 +400,7 @@
       onGrainChange: (g) => m.setGrain(g),
     });
     // read-only introspection seam for the integration suite (drives the REAL built app, asserts real state)
-    (window as any).__eido = () => { const d = handle?.debug(); return { grain: m.grain, k: curCount, layout: m.layout, color: m.channels.color, pin: pinned, facetPin, focus: selected, detail: selected !== null, deckOpen, cite: citeOn, ghosts: ghostsOn, theme, themeName, pal: Array.from({ length: 6 }, (_, i) => col(i)), hover: hovered ? hovered.kind : null, zoom: d?.zoom ?? 0, labels: d?.labels ?? 0, labelsOn, regions: d?.regions ?? 0, rot: d?.rot ?? null, rotX: d?.rotX ?? null, target: d?.target ?? null, span3: d?.span3 ?? null, filters: chips.map((c) => c.label), selectMode: m.selectMode, selection: selection?.length ?? 0, selShareable: m.selShareable, derived: m.derivedDims.length, dims: m.allDims.map((x) => x.key), drawing: !!lasso, visible: filterMask ? filterMask.reduce((a, v) => a + v, 0) : (data?.ids.length ?? 0) }; };
+    (window as any).__eido = () => { const d = handle?.debug(); return { grain: m.grain, k: curCount, layout: m.layout, color: m.channels.color, pin: pinned, facetPin, focus: selected, detail: selected !== null, deckOpen, cite: citeOn, ghosts: ghostsOn, theme, themeName, pal: Array.from({ length: 6 }, (_, i) => col(i)), hover: hovered ? hovered.kind : null, zoom: d?.zoom ?? 0, labels: d?.labels ?? 0, labelsOn, regions: d?.regions ?? 0, rot: d?.rot ?? null, rotX: d?.rotX ?? null, target: d?.target ?? null, span3: d?.span3 ?? null, filters: chips.map((c) => c.label), selectMode: m.selectMode, selection: selection?.length ?? 0, selShareable: m.selShareable, derived: m.derivedDims.length, dims: m.allDims.map((x) => x.key), views: (m.data?.views ?? []).length, drawing: !!lasso, visible: filterMask ? filterMask.reduce((a, v) => a + v, 0) : (data?.ids.length ?? 0) }; };
     // the map no longer fills the window (a toolbar sits above it), so both seams speak PAGE coordinates —
     // what a test's mouse/touch actually uses — and convert at the canvas edge.
     const rect = () => canvas.getBoundingClientRect();
@@ -572,6 +623,28 @@
               {#if madeBy?.generated}<dt class="opacity-60">generated</dt><dd>{provDate(madeBy.generated)}</dd>{/if}
               {#if !madeBy}<dt class="opacity-60">provenance</dt><dd>not recorded (pre-v2 file)</dd>{/if}
             </dl>
+          </div>
+
+          <!-- SAVED VIEWS (eid-thbs): the file's own ways of being looked at. Open applies one exactly;
+               save appends the current view and downloads the updated .eido (the browser can't write in
+               place — the download is the save). -->
+          <div class="mt-3 border-t border-base-300 pt-2" data-views>
+            <div class="mb-1 font-mono text-[10px] uppercase tracking-widest opacity-60">views</div>
+            {#each savedViews as v, i}
+              <div class="flex items-center gap-1 py-0.5 text-[11px]">
+                <span class="min-w-0 flex-1 truncate" title={v.name}>{v.name}</span>
+                <span class="flex-none font-mono text-[10px] opacity-50">{provDate(v.created)}</span>
+                <button data-testid="{scope}:view-open-{i}" class="btn btn-ghost btn-xs normal-case" title="apply this saved view exactly" onclick={() => openView(v)}>open</button>
+              </div>
+            {:else}
+              <div class="text-[11px] opacity-60">no saved views in this file yet</div>
+            {/each}
+            <div class="mt-1 flex gap-1">
+              <input data-testid="{scope}:view-name" bind:value={viewName} placeholder="name this view…" aria-label="name the current view" class="input input-xs min-w-0 flex-1" onkeydown={(e) => e.key === "Enter" && saveView()} />
+              <button data-testid="{scope}:view-save" class="btn btn-xs btn-primary flex-none normal-case" disabled={!viewName.trim()}
+                title="save the current view into this file's views and download the updated .eido" onclick={saveView}>save view</button>
+            </div>
+            <div class="mt-1 text-[10px] leading-snug opacity-50">saving downloads the updated .eido — views travel with the file</div>
           </div>
         </Popover.Content>
       </Popover.Portal>

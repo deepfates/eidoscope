@@ -36,6 +36,10 @@ export type MapHandle = {
   setSelection: (idx: number[] | null) => void;
   setSelectMode: (on: boolean) => void;
   selectPolygon: (path: number[][], mask: ArrayLike<number> | null) => number[];
+  // CAMERA as data (eid-thbs): a saved view carries where you were standing. getCamera reads the live
+  // pose; setCamera restores one — an explicit user act (`view.open`), so it is allowed to move the camera.
+  getCamera: () => { target: number[]; zoom: number; rot: number | null; rotX: number | null };
+  setCamera: (c: { target?: number[]; zoom?: number; rot?: number | null; rotX?: number | null }) => void;
 };
 type Opts = { getColor: (i: number) => RGB; getRadius: (i: number) => number; layout: Layout; getX: (i: number) => number; getY: (i: number) => number; getZ: (i: number) => number; posSig?: string; showLabels: boolean; grain: number; citeOn?: boolean; ghostsOn?: boolean; theme?: string };
 
@@ -447,6 +451,17 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
       return selectInPolygon({ count: n, positionOf: pos, project: (w) => vp.project(w), path, mask, clipZ: is3d(layout) });
     },
     resetView: () => { viewState = home(layout); deck.setProps({ viewState }); },
+    getCamera: () => ({ target: (viewState?.target ?? [0, 0, 0]).slice(), zoom: viewState?.zoom ?? 0, rot: viewState?.rotationOrbit ?? null, rotX: viewState?.rotationX ?? null }),
+    setCamera: (c) => {
+      viewState = {
+        ...viewState,
+        ...(c.target ? { target: c.target } : {}),
+        ...(c.zoom !== undefined ? { zoom: c.zoom } : {}),
+        ...(is3d(layout) && c.rot != null ? { rotationOrbit: c.rot } : {}),
+        ...(is3d(layout) && c.rotX != null ? { rotationX: c.rotX } : {}),
+      };
+      deck.setProps({ viewState });
+    },
     setFilterMask: (mask) => { filterMask = mask; filterVer++; paint(); },
     destroy: () => deck.finalize(),
   };
