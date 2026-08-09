@@ -36,6 +36,34 @@ export const labelAxes = ax(`
   coherenceScores:number[] "1-5 per axis, in order: 5=a crisp single interpretable contrast, 1=incoherent/noise"
 `);
 
+// Aggregate token usage across every signature above — Ax records per-model usage on each program as
+// calls complete, so summing the four programs covers carding + axis labeling + region naming. Cached
+// calls spend nothing and appear nowhere. Ax's normalized usage carries tokens only (an OpenAI-shaped
+// endpoint reports no pricing), so we report tokens and never fabricate a dollar figure.
+export function llmUsage(): { prompt: number; completion: number; total: number; models: string[]; reported: boolean } {
+  let prompt = 0, completion = 0, total = 0, reported = false;
+  const models = new Set<string>();
+  for (const p of [deriveCard, labelAxes, labelAxis, nameCluster]) {
+    for (const u of ((p as any).getUsage?.() ?? []) as any[]) {
+      reported = true;
+      if (u?.model) models.add(u.model);
+      const t = u?.tokens; if (!t) continue;
+      prompt += t.promptTokens ?? 0; completion += t.completionTokens ?? 0;
+      total += t.totalTokens ?? (t.promptTokens ?? 0) + (t.completionTokens ?? 0);
+    }
+  }
+  return { prompt, completion, total, models: [...models], reported };
+}
+
+// One honest line for the console + REPORT.md. Three cases, never faked: real tokens; calls made but
+// the endpoint returned no counts; or zero calls (everything served from cache).
+export function llmUsageLine(): string {
+  const u = llmUsage();
+  if (u.total > 0) return `LLM usage: ${u.prompt.toLocaleString("en-US")} prompt + ${u.completion.toLocaleString("en-US")} completion = ${u.total.toLocaleString("en-US")} tokens (${u.models.join(", ") || "model unknown"}; carding + naming — cost not shown: the endpoint reports no pricing)`;
+  if (u.reported) return "LLM usage: tokens unavailable — this endpoint returned no usage counts";
+  return "LLM usage: 0 tokens — every card and label came from cache";
+}
+
 // Name a region — but PHRASE a contrast the deterministic layer already computed, don't rediscover it.
 // distinctiveTerms/distinctiveAxes are what makes this region distinct from the REST of the corpus
 // (globally-frequent tokens are already filtered out upstream); the members ground it in specifics.

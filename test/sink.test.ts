@@ -36,6 +36,27 @@ describe("vault sink", () => {
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 
+  test("export → re-ingest with the DEFAULT floor: the fixture map round-trips exactly, short cards included", async () => {
+    // The printed hint after `eidoscope export` is `eidoscope <vault-dir>` — no --min-chars. So the
+    // round trip must survive the default 200-char junk floor: vault cards are exempt (id + axes
+    // frontmatter), and the manifest carries the source map's title through.
+    const D = decodeMap(readFileSync(join(import.meta.dir, "fixtures", "example.eido")));
+    // the 24-doc fixture has no sub-200-char restatement — synthesize one so the floor is actually exercised
+    D.ids.push("tiny-card"); D.titles.push("Tiny Card"); D.cores.push("A deliberately short restatement.");
+    D.notes.push({}); D.cluster.push(0); D.urls?.push(undefined);
+    for (const key of Object.keys(D.scores)) D.scores[key].push(0);
+    expect(D.cores.some((c) => c.length < 200)).toBe(true);
+    const dir = mkdtempSync(join(tmpdir(), "eido-vault-rt-"));
+    try {
+      const files = vaultSink.emit(D, dir);
+      expect(files.length).toBe(D.ids.length);
+      const { docs, title } = await folderSource(dir).load();   // DEFAULT opts — exactly the printed command
+      expect(docs.length).toBe(D.ids.length);
+      expect(new Set(docs.map((d) => d.id))).toEqual(new Set(D.ids));
+      expect(title).toBe(D.provenance!.title!);   // provenance survives the round trip, not the temp dir's name
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
   test("id collisions after filename sanitization stay distinct files", () => {
     const D = synthMap();
     D.ids[1] = "we/ird"; D.ids[2] = "we ird";   // both sanitize to "we_ird"
