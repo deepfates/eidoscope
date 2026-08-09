@@ -20,6 +20,7 @@ import { embedDocs } from "./map.ts";
 import { run, relabelMap, descendMap } from "./pipeline.ts";
 import { decodeMap } from "./mapbin.ts";
 import { eidoSink, vaultSink, slugify } from "./sink.ts";
+import { llmUsageLine } from "./signatures.ts";
 import { CFG } from "./config.ts";
 import type { MapContract } from "./schema.ts";
 
@@ -116,6 +117,7 @@ if (args[0] === "descend") {
     const files = eidoSink.emit(D, outDir, { slug });
     const html = files.find((f) => f.endsWith(".html"));
     console.error(`\n✅ descended ${D.ids.length}/${P.ids.length} cards · ${D.axes.length} local axes · ${D.k} regions  →  ${outDir}/`);
+    console.error(`   ${llmUsageLine()}`);
     console.error(`   → map   ${files[0]}${html ? `\n   → open  ${html}` : ""}`);
   });
   process.exit(0);
@@ -140,6 +142,7 @@ if (args.includes("--relabel")) {
     const files = eidoSink.emit(D2, d, { slug });   // re-encode so the .eido carries the new labels (the viewer reads it)
     const html = files.find((f) => f.endsWith(".html"));
     console.error(`\n✅ relabeled ${D2.counts?.length ?? 1} grain levels → ${files[0]}${html ? ` + ${basename(html)}` : ""}`);
+    console.error(`   ${llmUsageLine()}`);
   });
   process.exit(0);
 }
@@ -156,7 +159,7 @@ else {
   source = folderSource(dir, { limit, minChars: val("--min-chars") ? Number(val("--min-chars")) : undefined });
 }
 await attempt(async () => {
-  let { docs, embeddings } = await source.load();
+  let { docs, embeddings, title } = await source.load();
   if (!docs.length) { console.error(`no documents found (${source.describe})`); process.exit(1); }
   if (embeddings) {
     console.error(`${source.describe}: ${docs.length} docs`);
@@ -168,7 +171,9 @@ await attempt(async () => {
     console.error(`loaded ${loaded} docs (${source.describe})${sp.split ? ` → ${docs.length} after splitting` : ""}; embedding full text (local MiniLM)…`);
     embeddings = await embedDocs(docs);
   }
-  const name = args.includes("--fixture") ? "Readwise library" : (dir?.split("/").filter(Boolean).pop() || "Corpus");
+  // a vault manifest (folderSource read it) carries the SOURCE map's title through the round trip;
+  // otherwise the folder's own name is the honest default.
+  const name = args.includes("--fixture") ? "Readwise library" : (title || dir?.split("/").filter(Boolean).pop() || "Corpus");
   const embed = val("--embed") === "raw" ? "raw" : "card";
   await run(docs, embeddings, { frontier: args.includes("--frontier"), name, source: dir, embed, out: val("--out"), debugJson: args.includes("--debug-json") });
 });

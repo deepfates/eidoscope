@@ -9,6 +9,7 @@ import { eidoSink, slugify } from "./sink.ts";
 import { trajectory } from "./trajectory.ts";
 import { buildReport } from "./report.ts";
 import { fetchFrontier, buildGhosts } from "./frontier.ts";
+import { llmUsageLine } from "./signatures.ts";
 import { CFG, cachePath, cacheRoot } from "./config.ts";
 import { type MapContract } from "./schema.ts";
 import { loadFixture, type Doc } from "./corpus.ts";
@@ -139,8 +140,10 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
   if (!htmlOut) console.error("  ⚠ viewer not built — skipped the self-contained HTML (run `cd viewer && bun run build`); the .eido still opens in the viewer");
   const state = trajectory({ dates: deck.map((c) => c.date), cluster: D.cluster, scores: D.scores, axes: D.axes, clusters });
   if (state) writeFileSync(join(outDir, "STATE.md"), state);
-  writeFileSync(join(outDir, "REPORT.md"), buildReport(D, opts.name || "Corpus"));
+  const usage = llmUsageLine();   // measured across carding + axis labeling + region naming (signatures.ts)
+  writeFileSync(join(outDir, "REPORT.md"), buildReport(D, opts.name || "Corpus", { usage }));
   console.error(`\n✅ ${deck.length} cards · ${axes.length} axes · ${k} regions  →  ${outDir}/`);
+  console.error(`   ${usage}`);
   console.error(`   → map   ${eidoOut}   (the portable L-space; open in the viewer)`);
   if (htmlOut) console.error(`   → open  ${htmlOut}   (self-contained interactive explorer)`);
   console.error(`   → read  ${join(outDir, "REPORT.md")}        (shareable summary${state ? " + STATE.md trajectory" : ""})`);

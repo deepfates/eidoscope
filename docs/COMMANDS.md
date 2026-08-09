@@ -6,9 +6,10 @@ surface (toolbar menu, legend row, map gesture, keyboard, URL, the `__eido` test
 agent) is only a **binding** to one of these commands. Two bindings to the same command must do the
 same thing and be called the same thing.
 
-Everything here was read out of the source and then **driven in real Chromium** on `map.eido`
-(1446 Readwise docs, v2 file) and `tldr.eido` (6261 CLI pages, v1 file) — see the verification log at
-the end.
+Everything here was read out of the source and then **driven in real Chromium** on the Readwise map
+(now `markdown-export.eido`, 1386 docs, v2 file — regenerated 2026-08-07; the log below was recorded
+against its earlier 1446-doc build) and `tldr.eido` (6261 CLI pages, v1 file) — see the verification
+log at the end.
 
 Notation: **scope** is what the command acts on — `view` (the whole viewer), `channel` (one visual
 slot), `dimension` (one per-card field), `corpus` (the filter set), `card`, `camera`, `chrome`.
@@ -275,12 +276,15 @@ order, and putting it on a scalar channel would be meaningless.
 ## 5. Verification
 
 Driven in real Chromium (Playwright, 1440×900) against the built single-file viewer, every command in
-§1 exercised at least once on `map.eido`, plus the v1 fallback path on `tldr.eido`.
+§1 exercised at least once on the Readwise map, plus the v1 fallback path on `tldr.eido`.
+
+The Readwise map has since been regenerated as `markdown-export.eido` (1386 cards, 18 regions,
+2026-08-07); the counts in this log are as measured on the 1446-card build it was driven against.
 
 Selected results:
 
 ```
-── map.eido (v2, 1446 cards, 21 regions) ──
+── map.eido (v2, 1446 cards, 21 regions; since regenerated → markdown-export.eido, 1386 cards) ──
   ✓ first-run intro introduces the corpus / dismissed by its explore button
   ✓ about popover opens and explains positions/axes/regions
   ✓ about shows derivedBy: card model, embedder, geometryBasis

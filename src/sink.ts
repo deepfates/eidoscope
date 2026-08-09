@@ -47,6 +47,13 @@ export const vaultSink: Sink = {
   name: "vault",
   emit(D, outDir) {
     mkdirSync(outDir, { recursive: true });
+    // The manifest is how the round trip keeps identity: folderSource reads it and names the
+    // re-ingested map after the SOURCE map, not the folder the vault happens to sit in.
+    // (Not in the returned file list — callers count that list as "cards exported".)
+    writeFileSync(join(outDir, "eidoscope-vault.json"), JSON.stringify({
+      eidoscope: "vault", title: D.provenance?.title, source: D.provenance?.source,
+      exported: Date.now(), count: D.ids.length,
+    }, null, 2) + "\n");
     const files: string[] = [];
     const used = new Set<string>();
     const di = D.di ?? 0;

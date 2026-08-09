@@ -760,3 +760,19 @@ test("real corpus fixture: a genuine .eido decodes with every invariant the view
   // provenance the "about this map" surface reads
   expect(D.derivedBy?.embedder?.dim).toBeGreaterThan(0);
 });
+
+// REPORT.md honesty: the 2% main/minor split and the printed percentages must agree — a 1.96%
+// minor axis must never render as "2.0%" under a header that says "each under 2%".
+test("buildReport: a minor axis near the 2% line never rounds up across it", async () => {
+  const { buildReport } = await import("../src/report.ts");
+  const D = synthMap();
+  D.axes = [
+    { key: "a", name: "AxisA", low: "LowA", high: "HighA", variance: 0.03 },
+    { key: "b", name: "AxisB", low: "LowB", high: "HighB", variance: 0.0196, weak: true },
+  ];
+  const md = buildReport(D, "T");
+  expect(md).toContain("1.96% of the variation");
+  expect(md).not.toContain("2.0% of the variation");
+  // and the usage line lands in the footer when given
+  expect(buildReport(D, "T", { usage: "LLM usage: 12 tokens" })).toContain("LLM usage: 12 tokens");
+});
