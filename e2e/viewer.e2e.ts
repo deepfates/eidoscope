@@ -213,6 +213,36 @@ try {
   ok(s.layout === "axes", `?layout=axes restores the layout — got ${s.layout}`);
   ok(s.detail === true && s.focus === 5, `?card=d5 deep-links straight to that card — detail=${s.detail} focus=${s.focus}`);
 
+  // 11c-ter. M-B (eid-hsy3): "every view is a URL" now includes overlays, labels, and the deck's own
+  // state. Set each through the real UI, read the URL it minted, then load that URL FRESH and assert the
+  // view comes back — the same round-trip discipline as ?sel= / ?d=.
+  await p.goto(`${base}/index.html`); await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
+  await btn(/explore/i).click().catch(() => {}); await p.waitForTimeout(200);
+  await menu("layout"); await p.click('[data-opt="bar:overlay:cite"]'); await p.waitForTimeout(120);
+  await menu("layout"); await p.click('[data-opt="bar:overlay:ghosts"]'); await p.waitForTimeout(120); await closeMenus();
+  await btn(/^region labels$/).click(); await p.waitForTimeout(120);                      // labels OFF
+  await btn(/^deck$/).click(); await p.waitForTimeout(200);                               // deck OPEN
+  await p.selectOption('select[aria-label="sort the deck"]', "a"); await p.waitForTimeout(120);  // sort by AxisA
+  await p.locator('input[aria-label^="find in the list"]').fill("Doc 1"); await p.waitForTimeout(200); // deck.filter
+  await btn(/unread only/i).click(); await p.waitForTimeout(200);                         // deck.unread
+  url = new URL(p.url());
+  ok(url.searchParams.get("cite") === "1" && url.searchParams.get("ghosts") === "1", `overlays mirror to the URL — cite=${url.searchParams.get("cite")} ghosts=${url.searchParams.get("ghosts")}`);
+  ok(url.searchParams.get("labels") === "0", `labels-off mirrors to the URL — labels=${url.searchParams.get("labels")}`);
+  ok(url.searchParams.get("sort") === "a", `the sort channel serializes like the other six — sort=${url.searchParams.get("sort")}`);
+  ok(url.searchParams.get("deck") === "1" && url.searchParams.get("df") === "Doc 1" && url.searchParams.get("du") === "1", `the deck's open/filter/unread state rides the URL — deck=${url.searchParams.get("deck")} df=${url.searchParams.get("df")} du=${url.searchParams.get("du")}`);
+  const mbUrl = p.url();
+  await p.goto(mbUrl); await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
+  await p.waitForTimeout(500);
+  s = await st();
+  ok(s.cite === true && s.ghosts === true, `a fresh load restores the overlays — cite=${s.cite} ghosts=${s.ghosts}`);
+  ok(s.labelsOn === false, `…and the labels-off state — labelsOn=${s.labelsOn}`);
+  ok(s.sort === "a", `…and the sort channel — sort=${s.sort}`);
+  ok(s.deckOpen === true && s.deckQ === "Doc 1" && s.deckUnread === true, `…and the link LANDS ON THE LIST VIEW with its filter + unread state — deckOpen=${s.deckOpen} deckQ=${JSON.stringify(s.deckQ)} deckUnread=${s.deckUnread}`);
+  // the restored deck really shows the narrowed, unread-only, AxisA-sorted rows (state → pixels, not just state)
+  const mbRows = await p.locator("[data-deck-card]").count();
+  ok(mbRows > 0 && mbRows < 90, `the restored deck is narrowed by df+du — ${mbRows} rows of 90`);
+  await p.keyboard.press("Escape"); await p.waitForTimeout(150);
+
   // 11d. FOCUS TRAP: opening the deck moves focus inside it and Tab stays trapped (eid-vxm2)
   await p.goto(`${base}/index.html`); await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
   await btn(/explore/i).click().catch(() => {}); await p.waitForTimeout(150);
