@@ -573,10 +573,10 @@
     <!-- discovered axes are rank-normalized positions by design (even, readable spread); norm isn't a
          user choice there, so only metrics/queries get the honest⇄rank toggle. invert applies to all. -->
     {#if !d.fixedNorm}
-      <li><button onclick={() => setProp(d, { norm: "honest" })} aria-label="honest magnitudes" aria-pressed={p.norm === "honest"} title="scale {d.name} by its true magnitudes — the skew shows"><span class="w-3">{p.norm === "honest" ? "✓" : ""}</span> honest magnitudes <span class="ml-auto text-xs opacity-50">the skew shows</span></button></li>
-      <li><button onclick={() => setProp(d, { norm: "rank" })} aria-label="rank-normalized" aria-pressed={p.norm === "rank"} title="spread {d.name} evenly by rank order"><span class="w-3">{p.norm === "rank" ? "✓" : ""}</span> rank-normalized <span class="ml-auto text-xs opacity-50">even spread</span></button></li>
+      <li><button onclick={() => setProp(d, { norm: "honest" })} aria-label="honest magnitudes" aria-pressed={p.norm === "honest"}><span class="w-3">{p.norm === "honest" ? "✓" : ""}</span> honest magnitudes <span class="ml-auto text-xs opacity-50">the skew shows</span></button></li>
+      <li><button onclick={() => setProp(d, { norm: "rank" })} aria-label="rank-normalized" aria-pressed={p.norm === "rank"}><span class="w-3">{p.norm === "rank" ? "✓" : ""}</span> rank-normalized <span class="ml-auto text-xs opacity-50">even spread</span></button></li>
     {/if}
-    <li><button onclick={() => setProp(d, { invert: !p.invert })} aria-label="invert direction" aria-pressed={p.invert} title="flip {d.name}: high ↔ low"><span class="w-3">{p.invert ? "✓" : ""}</span> invert direction <span class="ml-auto text-xs opacity-50">high ↔ low</span></button></li>
+    <li><button onclick={() => setProp(d, { invert: !p.invert })} aria-label="invert direction" aria-pressed={p.invert}><span class="w-3">{p.invert ? "✓" : ""}</span> invert direction <span class="ml-auto text-xs opacity-50">high ↔ low</span></button></li>
   {/if}
 {/snippet}
 
@@ -650,7 +650,7 @@
               <div class="flex items-center gap-1 py-0.5 text-[11px]">
                 <span class="min-w-0 flex-1 truncate" title={v.name}>{v.name}</span>
                 <span class="flex-none font-mono text-[10px] opacity-50">{provDate(v.created)}</span>
-                <button data-testid="{scope}:view-open-{i}" class="btn btn-ghost btn-xs normal-case" title="apply this saved view exactly" onclick={() => openView(v)}>open</button>
+                <button data-testid="{scope}:view-open-{i}" class="btn btn-ghost btn-xs normal-case" onclick={() => openView(v)}>open</button>
               </div>
             {:else}
               <div class="text-[11px] opacity-60">no saved views in this file yet</div>
@@ -658,7 +658,7 @@
             <div class="mt-1 flex gap-1">
               <input data-testid="{scope}:view-name" bind:value={viewName} placeholder="name this view…" aria-label="name the current view" class="input input-xs min-w-0 flex-1" onkeydown={(e) => e.key === "Enter" && saveView()} />
               <button data-testid="{scope}:view-save" class="btn btn-xs btn-primary flex-none normal-case" disabled={!viewName.trim()}
-                title="save the current view into this file's views and download the updated .eido" onclick={saveView}>save view</button>
+                onclick={saveView}>save view</button>
             </div>
             <div class="mt-1 text-[10px] leading-snug opacity-50">saving downloads the updated .eido — views travel with the file</div>
           </div>
@@ -673,7 +673,6 @@
        drag is off and the pointer draws a lasso; pinch-zoom keeps working. Keyboard: s / Escape. -->
   <button data-testid="{scope}:select" aria-pressed={selectMode}
     class="btn btn-sm flex-none gap-1 normal-case {selectMode ? 'btn-active btn-primary' : 'btn-ghost'}"
-    title={selectMode ? "drawing mode — drag to circle cards (Escape to leave)" : "select: circle cards on the map to hold them as a set (s)"}
     onclick={() => m.toggleSelectMode()}>
     <span aria-hidden="true">◌</span><span class="font-medium">select</span>
     {#if selection}<span class="badge badge-xs badge-primary">{selection.length}</span>{/if}
@@ -693,8 +692,8 @@
         {/each}
         {#if hasCite || hasGhosts}
           <DropdownMenu.Separator class="my-1 h-px bg-base-300" />
-          {#if hasCite}<DropdownMenu.Item class="rounded-field flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm hover:bg-base-200" data-opt="{scope}:overlay:cite" role="menuitemcheckbox" aria-checked={m.citeOn} title="draw an edge between citing and cited cards" onSelect={() => (m.citeOn = !m.citeOn)}><span class="w-3">{m.citeOn ? "✓" : ""}</span>cite edges</DropdownMenu.Item>{/if}
-          {#if hasGhosts}<DropdownMenu.Item class="rounded-field flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm hover:bg-base-200" data-opt="{scope}:overlay:ghosts" role="menuitemcheckbox" aria-checked={m.ghostsOn} title="show cited-but-absent papers at the edge of the corpus" onSelect={() => (m.ghostsOn = !m.ghostsOn)}><span class="w-3">{m.ghostsOn ? "✓" : ""}</span>frontier</DropdownMenu.Item>{/if}
+          {#if hasCite}<DropdownMenu.Item class="rounded-field flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm hover:bg-base-200" data-opt="{scope}:overlay:cite" role="menuitemcheckbox" aria-checked={m.citeOn} onSelect={() => (m.citeOn = !m.citeOn)}><span class="w-3">{m.citeOn ? "✓" : ""}</span>cite edges</DropdownMenu.Item>{/if}
+          {#if hasGhosts}<DropdownMenu.Item class="rounded-field flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm hover:bg-base-200" data-opt="{scope}:overlay:ghosts" role="menuitemcheckbox" aria-checked={m.ghostsOn} onSelect={() => (m.ghostsOn = !m.ghostsOn)}><span class="w-3">{m.ghostsOn ? "✓" : ""}</span>frontier</DropdownMenu.Item>{/if}
         {/if}
       </DropdownMenu.Content>
     </DropdownMenu.Portal>
@@ -723,13 +722,12 @@
                        current state, clicking flips it, and the button never changes width. -->
                   <button class="btn btn-xs btn-ghost btn-square font-mono" aria-pressed={p.norm === "rank"}
                     aria-label="{ax.ch} axis: {p.norm === 'honest' ? 'honest magnitudes' : 'rank-normalized'} — click to switch"
-                    title={p.norm === "honest" ? "honest magnitudes — the skew shows" : "rank-normalized — even spread"}
                     onclick={() => setProp(ax.d!, { norm: p.norm === "honest" ? "rank" : "honest" })}>{p.norm === "honest" ? "▁▁█" : "▃▅▇"}</button>
-                  <button class="btn btn-xs {p.invert ? 'btn-active' : 'btn-ghost'}" aria-pressed={p.invert} aria-label="{ax.ch} axis: invert direction" title="flip the axis: high ↔ low" onclick={() => setProp(ax.d!, { invert: !p.invert })}>invert</button>
+                  <button class="btn btn-xs {p.invert ? 'btn-active' : 'btn-ghost'}" aria-pressed={p.invert} aria-label="{ax.ch} axis: invert direction" onclick={() => setProp(ax.d!, { invert: !p.invert })}>invert</button>
                 </div>
               {:else if ax.d}
                 {@const p = propsOf(ax.d)}
-                <div class="ml-6 flex gap-1"><button class="btn btn-xs {p.invert ? 'btn-active' : 'btn-ghost'}" aria-pressed={p.invert} aria-label="{ax.ch} axis: invert direction" title="flip the axis: high ↔ low" onclick={() => setProp(ax.d!, { invert: !p.invert })}>invert</button></div>
+                <div class="ml-6 flex gap-1"><button class="btn btn-xs {p.invert ? 'btn-active' : 'btn-ghost'}" aria-pressed={p.invert} aria-label="{ax.ch} axis: invert direction" onclick={() => setProp(ax.d!, { invert: !p.invert })}>invert</button></div>
               {/if}
             </div>
           {/each}
@@ -773,13 +771,13 @@
         <div class="thin-sb max-h-56 flex-none overflow-y-auto border-t border-base-300">
           <ul class="menu menu-sm w-full p-1">
             <li class="menu-title text-[10px] tracking-widest uppercase">color by</li>
-            <li><button data-opt="{scope}:color:region" aria-pressed={m.channels.color === "region"} title="colour by the region clustering at the current grain" onclick={() => (m.channels.color = "region")}><span class="w-3">{m.channels.color === "region" ? "✓" : ""}</span>region</button></li>
+            <li><button data-opt="{scope}:color:region" aria-pressed={m.channels.color === "region"} onclick={() => (m.channels.color = "region")}><span class="w-3">{m.channels.color === "region" ? "✓" : ""}</span>region</button></li>
             <!-- M-A4: isolate is a CORPUS command, so every categorical dimension carries its own value
                  list here — isolation no longer requires putting the dimension on colour first. -->
             {#each catDims as d}
               <li class="flex flex-row items-center gap-0">
-                <button class="min-w-0 flex-1" data-opt="{scope}:color:{d.key}" aria-pressed={m.channels.color === d.key} title="colour by {d.name} — {d.ord?.length} values" onclick={() => (m.channels.color = d.key)}><span class="w-3">{m.channels.color === d.key ? "✓" : ""}</span><span class="truncate">{d.name}</span></button>
-                <button class="flex-none px-2" data-iso="{scope}:{d.key}" aria-expanded={isoOpen === d.key} aria-label="isolate a {d.name} value" title="isolate by {d.name} — works whatever colour shows" onclick={() => (isoOpen = isoOpen === d.key ? null : d.key)}><span class="text-[9px] opacity-60">{isoOpen === d.key ? "▴" : "▾"}</span></button>
+                <button class="min-w-0 flex-1" data-opt="{scope}:color:{d.key}" aria-pressed={m.channels.color === d.key} onclick={() => (m.channels.color = d.key)}><span class="w-3">{m.channels.color === d.key ? "✓" : ""}</span><span class="truncate">{d.name}</span></button>
+                <button class="flex-none px-2" data-iso="{scope}:{d.key}" aria-expanded={isoOpen === d.key} aria-label="isolate a {d.name} value" onclick={() => (isoOpen = isoOpen === d.key ? null : d.key)}><span class="text-[9px] opacity-60">{isoOpen === d.key ? "▴" : "▾"}</span></button>
               </li>
               {#if isoOpen === d.key}
                 {#each d.ord!.slice(0, 16) as v}
@@ -788,7 +786,7 @@
                 {#if d.ord!.length > 16}<li class="px-3 py-1 text-xs opacity-60">+{d.ord!.length - 16} more</li>{/if}
               {/if}
             {/each}
-            {#each scalarDims as d}<li><button data-opt="{scope}:color:{d.key}" aria-pressed={m.channels.color === d.key} title="colour by {d.name} (a gradient low → high)" onclick={() => (m.channels.color = d.key)}><span class="w-3">{m.channels.color === d.key ? "✓" : ""}</span><span class="truncate {d.weak ? 'opacity-50' : ''}">{d.name}</span>{#if d.variance != null}<span class="ml-auto flex-none font-mono text-[10px] opacity-50">{pctOf(d.variance)}</span>{/if}</button></li>{/each}
+            {#each scalarDims as d}<li><button data-opt="{scope}:color:{d.key}" aria-pressed={m.channels.color === d.key} onclick={() => (m.channels.color = d.key)}><span class="w-3">{m.channels.color === d.key ? "✓" : ""}</span><span class="truncate {d.weak ? 'opacity-50' : ''}">{d.name}</span>{#if d.variance != null}<span class="ml-auto flex-none font-mono text-[10px] opacity-50">{pctOf(d.variance)}</span>{/if}</button></li>{/each}
             {@render propItems(colorDim)}
           </ul>
         </div>
@@ -801,7 +799,7 @@
        resolution is a first-class, always-visible control. It briefly lived inside the colour popover —
        that conflated "where regions are displayed" with "what regions are". -->
   {#if nLevels > 1}
-    <label class="flex flex-none items-center gap-1.5 px-1 text-xs" title="how finely the map is divided into regions — continents to towns">
+    <label class="flex flex-none items-center gap-1.5 px-1 text-xs">
       <span class="flex-none font-mono text-[10px] uppercase opacity-60">grain</span>
       <input type="range" data-testid="grain" min="0" max={nLevels - 1} value={m.grain} oninput={(e) => m.setGrain(+(e.currentTarget as HTMLInputElement).value)} class="range range-xs w-20 min-w-0" aria-label="grain level: how finely the map is divided into regions" aria-valuetext="{curCount} regions" />
       <span class="w-6 flex-none text-right font-mono text-[10px] opacity-60">{curCount}</span>
@@ -817,9 +815,9 @@
       <Popover.Content class="eido-pop thin-sb max-h-[min(28rem,70vh)] w-60 overflow-y-auto p-0" sideOffset={6} align="start">
         <ul class="menu menu-sm w-full p-1">
           <li class="menu-title text-[10px] tracking-widest uppercase">size by</li>
-          <li><button data-opt="{scope}:size:uniform" aria-pressed={m.channels.size === "uniform"} title="every card the same radius" onclick={() => (m.channels.size = "uniform")}><span class="w-3">{m.channels.size === "uniform" ? "✓" : ""}</span>uniform</button></li>
+          <li><button data-opt="{scope}:size:uniform" aria-pressed={m.channels.size === "uniform"} onclick={() => (m.channels.size = "uniform")}><span class="w-3">{m.channels.size === "uniform" ? "✓" : ""}</span>uniform</button></li>
           {#each allDims.filter((d) => d.kind === "scalar") as d}
-            <li><button data-opt="{scope}:size:{d.key}" aria-pressed={m.channels.size === d.key} title="size by {d.name}" onclick={() => (m.channels.size = d.key)}><span class="w-3">{m.channels.size === d.key ? "✓" : ""}</span><span class="truncate {d.weak ? 'opacity-50' : ''}">{d.name}</span>{#if d.variance != null}<span class="ml-auto flex-none font-mono text-[10px] opacity-50">{pctOf(d.variance)}</span>{/if}</button></li>
+            <li><button data-opt="{scope}:size:{d.key}" aria-pressed={m.channels.size === d.key} onclick={() => (m.channels.size = d.key)}><span class="w-3">{m.channels.size === d.key ? "✓" : ""}</span><span class="truncate {d.weak ? 'opacity-50' : ''}">{d.name}</span>{#if d.variance != null}<span class="ml-auto flex-none font-mono text-[10px] opacity-50">{pctOf(d.variance)}</span>{/if}</button></li>
           {/each}
           {@render propItems(sizeDim)}
         </ul>
@@ -831,7 +829,7 @@
        temporal one — the label always names it, so the button never claims to be about time when it isn't) -->
   {#if scrubFields.length && scrubRange && scrubField}
     <Popover.Root>
-      <Popover.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case" data-menu="{scope}:window" aria-label="window a dimension — currently {scrubField.name}" title="window the corpus along {scrubField.name}">
+      <Popover.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case" data-menu="{scope}:window" aria-label="window a dimension — currently {scrubField.name}">
         <span class="opacity-60">window</span><span class="max-w-[6rem] truncate">{scrubField.name}</span><span class="max-w-[10rem] truncate font-mono text-xs">{scrubText}</span><span class="text-[9px] opacity-50">▾</span>
       </Popover.Trigger>
       <Popover.Portal>
@@ -850,7 +848,7 @@
           </div>
           <div class="mt-1 flex items-center gap-2">
             <span class="min-w-0 flex-1 truncate font-mono text-[11px] opacity-70">{scrubText}</span>
-            <button class="btn btn-ghost btn-xs" onclick={resetScrub} title="clear this window (the other filters stay)" aria-label="clear the {scrubField.name} window">clear</button>
+            <button class="btn btn-ghost btn-xs" onclick={resetScrub} aria-label="clear the {scrubField.name} window">clear</button>
           </div>
           {@render propItems(scrubField)}
         </Popover.Content>
@@ -867,7 +865,7 @@
   <!-- + AXIS — embed a question into a first-class dimension (an axis) you can place on any channel -->
   {#if store?.vectors()}
     <Popover.Root>
-      <Popover.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case" data-menu="{scope}:axis" aria-label="add an axis from a question" title="add an axis from a question you ask the corpus">
+      <Popover.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case" data-menu="{scope}:axis" aria-label="add an axis from a question">
         <span class="font-medium">+ axis</span>
         <!-- M-D1: the 23MB cold-start must SHOW even when the popover is closed (a URL-restored query embeds
              in the background) — the trigger itself carries the working signal, in the app's own affordance style -->
@@ -879,7 +877,7 @@
           <div class="mb-1 font-mono text-[10px] uppercase tracking-widest opacity-60">axis from a question</div>
           <div class="flex gap-1">
             <input bind:value={semQuery} onkeydown={(e) => e.key === "Enter" && runQuery()} placeholder="e.g. arguments about scaling" aria-label="the question this axis measures" disabled={querying} class="input input-sm min-w-0 flex-1" />
-            <button onclick={runQuery} disabled={querying || !semQuery.trim()} title="embed the question and add it as an axis you can place on any channel" aria-label="add this axis" class="btn btn-sm btn-primary flex-none normal-case">{querying ? "…" : "add"}</button>
+            <button onclick={runQuery} disabled={querying || !semQuery.trim()} aria-label="add this axis" class="btn btn-sm btn-primary flex-none normal-case">{querying ? "…" : "add"}</button>
           </div>
           {#if querying}
             <div class="mt-2 flex items-center gap-1.5 text-[11px] opacity-70">
@@ -904,12 +902,15 @@
 {/snippet}
 
 {#snippet rightControls(scope: string)}
-  <button class="btn btn-sm btn-ghost flex-none normal-case" title="read the corpus as a sortable, filterable list (d)" onclick={() => (m.deckOpen = true)}>deck</button>
-  <button disabled={m.channels.color !== "region"} title={m.channels.color !== "region" ? "region labels show when coloured by region" : "show region labels on the map (l)"}
-    aria-pressed={labelsOn} class="btn btn-sm flex-none normal-case {m.showLabels && m.channels.color === 'region' ? 'btn-active' : 'btn-ghost'}" onclick={() => (m.showLabels = !m.showLabels)} aria-label="toggle labels">labels</button>
-  <button class="btn btn-sm btn-ghost btn-square flex-none" onclick={toggleTheme} aria-label="toggle light or dark theme" title="toggle light / dark">{theme === "dark" ? "☾" : "☀"}</button>
+  <button class="btn btn-sm btn-ghost flex-none normal-case" onclick={() => (m.deckOpen = true)}>deck</button>
+  <!-- labels are a property of the region lens; off it the button would be meaningless, so it is
+       presence-gated (the codebase's pattern for missing preconditions) rather than disabled-with-a-why -->
+  {#if m.channels.color === "region"}
+    <button aria-pressed={labelsOn} class="btn btn-sm flex-none normal-case {labelsOn ? 'btn-active' : 'btn-ghost'}" onclick={() => (m.showLabels = !m.showLabels)} aria-label="toggle labels">labels</button>
+  {/if}
+  <button class="btn btn-sm btn-ghost btn-square flex-none" onclick={toggleTheme} aria-label="toggle light or dark theme" title="toggle light or dark theme">{theme === "dark" ? "☾" : "☀"}</button>
   <DropdownMenu.Root>
-    <DropdownMenu.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case" data-menu="{scope}:theme" aria-label="pick a colour theme" title="theme">
+    <DropdownMenu.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case" data-menu="{scope}:theme" aria-label="pick a colour theme" title="pick a colour theme">
       <span class="max-w-[6rem] truncate">{themeName}</span><span class="text-[9px] opacity-50">▾</span>
     </DropdownMenu.Trigger>
     <DropdownMenu.Portal>
@@ -926,7 +927,7 @@
       </DropdownMenu.Content>
     </DropdownMenu.Portal>
   </DropdownMenu.Root>
-  <button class="btn btn-sm btn-ghost flex-none normal-case" title="clear every filter, close the open card, and return grain + camera to this map's defaults (r)" onclick={reset}>reset view</button>
+  <button class="btn btn-sm btn-ghost flex-none normal-case" onclick={reset}>reset view</button>
 {/snippet}
 
 <div class="flex h-screen w-screen flex-col overflow-hidden bg-base-100 text-base-content"
@@ -969,11 +970,11 @@
       <div class="flex flex-wrap items-center gap-1 border-t border-base-300 px-2 py-1.5">
         {#if chips.length}<span class="font-mono text-[10px] uppercase tracking-widest opacity-50">filters</span>{/if}
         {#each chips as chip}
-          <button onclick={chip.remove} title="remove this filter: {chip.label}" aria-label="remove filter {chip.label}" class="badge badge-sm badge-neutral gap-1 font-mono">
+          <button onclick={chip.remove} title="remove filter {chip.label}" aria-label="remove filter {chip.label}" class="badge badge-sm badge-neutral gap-1 font-mono">
             <span class="max-w-[11rem] truncate">{chip.label}</span><span class="opacity-60">· {chip.n}</span><span class="opacity-60">✕</span>
           </button>
         {/each}
-        {#if chips.length > 1}<button onclick={() => m.clearFilters()} title="remove every active filter" aria-label="clear all filters" class="btn btn-ghost btn-xs normal-case">clear all filters</button>{/if}
+        {#if chips.length > 1}<button onclick={() => m.clearFilters()} aria-label="clear all filters" class="btn btn-ghost btn-xs normal-case">clear all filters</button>{/if}
         <span data-scope class="ml-auto font-mono text-[10px] opacity-60">{visibleCount} / {data.ids.length} cards</span>
       </div>
     </header>
@@ -1048,7 +1049,7 @@
           {#each placements(selected) as p}
             <!-- a placement IS a position on a bipolar axis, so it renders as one: a mark on a track
                  between the two poles. A weak axis mutes the whole row — the quantity shows, no label. -->
-            <div data-placement class="border-b border-base-200 py-1.5 text-xs {p.a.weak ? 'opacity-40' : ''}" title={p.note}>
+            <div data-placement class="border-b border-base-200 py-1.5 text-xs {p.a.weak ? 'opacity-40' : ''}">
               <div class="flex justify-between gap-3 text-[10px] opacity-60"><span class="truncate">{p.a.low}</span><span class="truncate text-right">{p.a.high}</span></div>
               <div class="relative mt-1 h-[3px]">
                 <div class="absolute inset-0 rounded-full bg-current opacity-10"></div>
@@ -1069,11 +1070,10 @@
           <div class="mb-3 font-mono text-[10px] opacity-60">selection · {Math.round((100 * selection.length) / (data.ids.length || 1))}% of the corpus</div>
 
           <div class="mb-2 flex flex-wrap gap-1">
-            <button data-testid="sel-filter" class="btn btn-primary btn-xs normal-case" title="hide everything else — the selection becomes a filter, and composes with the others" onclick={() => m.filterToSelection()}>filter to these</button>
-            <button data-testid="sel-fit" class="btn btn-xs normal-case" title="move the camera to frame these cards" onclick={() => fitTo(selection!)}>fit</button>
-            <button data-testid="sel-export" class="btn btn-xs normal-case" title="download these cards as JSON (ids, titles, urls)" onclick={exportSelection}>export</button>
+            <button data-testid="sel-filter" class="btn btn-primary btn-xs normal-case" onclick={() => m.filterToSelection()}>filter to these</button>
+            <button data-testid="sel-fit" class="btn btn-xs normal-case" onclick={() => fitTo(selection!)}>fit</button>
+            <button data-testid="sel-export" class="btn btn-xs normal-case" onclick={exportSelection}>export</button>
             <button data-testid="sel-derive" class="btn btn-xs normal-case" disabled={!!deriveWhyNot}
-              title={deriveWhyNot || "mint an axis scoring every card by how much like these it is — it appears in every channel menu; nothing moves until you place it"}
               onclick={deriveAxis}>derive axis</button>
             <button data-testid="sel-clear" class="btn btn-ghost btn-xs normal-case" onclick={() => { m.clearSelection(); mintedKey = null; }}>clear</button>
           </div>
@@ -1117,7 +1117,7 @@
             {@const ax = data.axes.find((x) => x.name === a.name)}
             <!-- how far this set's mean sits from the corpus centre, as a diverging bar — direction and
                  magnitude in one mark -->
-            <div data-sel-axis class="border-b border-base-200 py-1.5 text-xs {ax?.weak ? 'opacity-40' : ''}" title="{a.name}: set mean {a.mean}, corpus 50">
+            <div data-sel-axis class="border-b border-base-200 py-1.5 text-xs {ax?.weak ? 'opacity-40' : ''}">
               <div class="flex justify-between gap-3 text-[10px] opacity-60"><span class="truncate">{ax?.low ?? ""}</span><span class="truncate text-right">{ax?.high ?? a.pole}</span></div>
               <div class="relative mt-1 h-[3px]">
                 <div class="absolute inset-0 rounded-full bg-current opacity-10"></div>
@@ -1137,10 +1137,10 @@
           <div class="mb-2 font-mono text-[10px] opacity-60">region · {pinnedRegion.n} cards · grain {m.grain + 1}/{nLevels}</div>
           {#if pinnedBlurb}<div class="mb-2 text-xs leading-relaxed opacity-80">{pinnedBlurb}</div>{/if}
           <div class="mb-2 flex flex-wrap gap-1">
-            <button data-testid="region-fit" class="btn btn-xs normal-case" title="move the camera to frame this region" onclick={() => fitTo(m.membersOf(pinnedRegion.c))}>fit</button>
+            <button data-testid="region-fit" class="btn btn-xs normal-case" onclick={() => fitTo(m.membersOf(pinnedRegion.c))}>fit</button>
             <!-- second binding for region.drill (M-A1): the pane already knows the region — same act as double-clicking one of its points -->
             {#if m.grain < nLevels - 1}
-              <button data-testid="region-drill" class="btn btn-xs normal-case" title="descend: step the grain finer until this region splits, and frame it" onclick={() => handle?.drillIndex(m.membersOf(pinnedRegion.c)[0] ?? -1)}>drill in</button>
+              <button data-testid="region-drill" class="btn btn-xs normal-case" onclick={() => handle?.drillIndex(m.membersOf(pinnedRegion.c)[0] ?? -1)}>drill in</button>
             {/if}
           </div>
           <div class="mt-3 mb-1 font-mono text-[10px] uppercase tracking-wide opacity-60">members</div>
@@ -1189,7 +1189,7 @@
             <select bind:value={m.channels.sort} aria-label="sort the deck" class="select select-xs">
               {#each scalarDims as d}<option value={d.key}>{d.name}{dimTag(d)}</option>{/each}
             </select></label>
-          {#if hasRead}<button class="btn btn-xs normal-case {m.deckUnread ? 'btn-active' : 'btn-ghost'}" aria-pressed={m.deckUnread} title="hide cards already marked read" onclick={() => (m.deckUnread = !m.deckUnread)}>unread only</button>{/if}
+          {#if hasRead}<button class="btn btn-xs normal-case {m.deckUnread ? 'btn-active' : 'btn-ghost'}" aria-pressed={m.deckUnread} onclick={() => (m.deckUnread = !m.deckUnread)}>unread only</button>{/if}
           <input bind:value={m.deckQ} placeholder="find in list…" aria-label="find in the list — narrows these rows only, not the map" class="input input-xs min-w-0 flex-1" />
           <button class="btn btn-ghost btn-xs btn-square ml-auto" onclick={() => requestClose()} aria-label="close deck">✕</button>
         </div>

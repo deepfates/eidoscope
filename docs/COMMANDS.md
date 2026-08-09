@@ -33,23 +33,11 @@ slot), `dimension` (one per-card field), `corpus` (the filter set), `card`, `cam
 | 9 | `color.set` | *put* a dimension on colour · channel | `color ▾` popover, "color by" list; the ● button on a query chip | dimension key or `region` | every point recolours; the legend above becomes that dimension's legend | `?color=` | Tab→Enter | `color → region` |
 | 10 | `size.set` | *put* a dimension on size · channel | `size ▾` popover | dimension key or `uniform` | point radii change | `?size=` | Tab→Enter | `size → uniform` |
 | 11 | `grain.set` | *set* clustering grain · view | **toolbar slider** (always visible; a parameter of the region dimension, not of any channel) | 0…nLevels-1 | regions merge/split; the count next to the slider and in the toolbar updates | `?grain=` | Tab→arrows | `reset view` |
-<<<<<<< HEAD
-<<<<<<< HEAD
-| 12 | `labels.toggle` | *toggle* labels · chrome | `labels` button (disabled off the region lens, with a tooltip saying why) | — | region names appear/disappear on the map | **n** | Tab→Enter | same button |
+| 12 | `labels.toggle` | *toggle* region labels · chrome | `labels` button (present only under the region lens — off it the toggle is meaningless, so it does not render) | — | region names appear/disappear on the map | `labels=0` (off) | Tab→Enter · **l** | same button |
 | **Selecting — narrowing the corpus** |
 | 13 | `region.isolate` | *isolate* one region · corpus | click a legend row under colour = region (the row shows `isolate` / `release` on hover or focus) | cluster id | non-members hidden, camera flies to the set, chip `<region> · N` (its own count), `N / M cards` updates, region detail pane opens | `?region=` | Tab→Enter | click again · chip ✕ · `reset view` |
-| 14 | `facet.isolate` | *isolate* one categorical value · corpus | click a legend row under a categorical colour lens (same visible `isolate` cue) | value | same as above, for that value (chip `<value> · N`) | `?facet=` | Tab→Enter | click again · chip ✕ · `reset view` |
+| 14 | `facet.isolate` | *isolate* one categorical value · corpus | click a legend row under a categorical colour lens (same visible `isolate` cue); the ▾ value list every categorical dimension carries in the colour popover (works whatever colour shows) | value | same as above, for that value (chip `<value> · N`) | `?facet=` | Tab→Enter | click again · chip ✕ · `reset view` |
 | 15 | `find.set` | *filter* by substring · corpus | the `⌕ find a card…` input | text | non-matching cards hidden, chip `"…" · N` (its own match count), `N / M cards` updates | `?find=` | type | empty the box · chip ✕ · `reset view` |
-=======
-| 12 | `labels.toggle` | *toggle* region labels · chrome | `region labels` button (disabled off the region lens, with a tooltip saying why) | — | region names appear/disappear on the map | **n** | Tab→Enter · **l** | same button |
-=======
-| 12 | `labels.toggle` | *toggle* region labels · chrome | `region labels` button (disabled off the region lens, with a tooltip saying why) | — | region names appear/disappear on the map | `labels=0` (off) | Tab→Enter | same button |
->>>>>>> worktree-agent-a0f35bcf6bcc312ac
-| **Selecting — narrowing the corpus** |
-| 13 | `region.isolate` | *isolate* one region · corpus | click a legend row under colour = region (the row shows `isolate` / `release` on hover or focus) | cluster id | non-members hidden, camera flies to the set, chip appears, `N / M cards` updates, region detail pane opens | `?region=` | Tab→Enter | click again · chip ✕ · `reset view` |
-| 14 | `facet.isolate` | *isolate* one categorical value · corpus | click a legend row under a categorical colour lens (same visible `isolate` cue); the ▾ value list every categorical dimension carries in the colour popover (works whatever colour shows) | value | same as above, for that value | `?facet=` | Tab→Enter | click again · chip ✕ · `reset view` |
-| 15 | `find.set` | *filter* by substring · corpus | the `⌕ find a card…` input | text | non-matching cards hidden, chip `"…"`, `N / M cards` updates | `?find=` | type | empty the box · chip ✕ · `reset view` |
->>>>>>> worktree-agent-acc1315826ed52ed2
 | 16 | `scrub.field` | *choose* which dimension the window applies to · channel | select inside the `window ▾` popover | dimension key | the slider re-ranges; any existing window is cleared | `?sk=` | Tab→select | pick another |
 | 17 | `scrub.window` | *window* a scalar/temporal range · corpus | dual-thumb slider in `window <dim> ▾` | lo, hi | out-of-range cards hidden, chip `<dim> <lo> – <hi>` · its own count (honest units: dates as year-month, numbers span-scaled) | `?slo= ?shi=` | Tab→arrows | `clear` · chip ✕ · `reset view` |
 | 18 | `filter.remove` | *remove* one filter · corpus | click a chip | the filter | that constraint lifts | (its param drops) | Tab→Enter | re-apply |
@@ -70,23 +58,11 @@ slot), `dimension` (one per-card field), `corpus` (the filter set), `card`, `cam
 | **Reading — the cards themselves** |
 | 31 | `card.open` | *open* one card · card | click a point; click a deck row; click a neighbour in the detail pane | index | detail pane docks right (bottom sheet on phones): restatement, axis placements, neighbours, source links | `?card=` | via the deck | ✕ · Escape · Back |
 | 32 | `card.hover` | *preview* one card · card | hover a point | — | tooltip: region, title, first ~140 chars | n | **n** | move away |
-<<<<<<< HEAD
-| 33 | `region.drill` | *descend* into a region · view | **double-click a point** | index | grain steps finer (≤3 levels) until the region splits; camera fits the sub-region | (via `?grain=`) | **n** | `reset view` |
-<<<<<<< HEAD
-| 34 | `deck.open` | *list* the corpus · view | `deck` button (desktop + phone) | — | modal list of every card, headed by its scope `N / M cards` — the screen-reader-accessible view of the map | **n** | Tab→Enter | ✕ · Escape · Back |
-=======
 | 33 | `region.drill` | *descend* into a region · view | **double-click a point**; `drill in` in the region detail pane | index | grain steps finer (≤3 levels) until the region splits; camera fits the sub-region | (via `?grain=`) | Tab→Enter (via the pane) | `reset view` |
-| 34 | `deck.open` | *list* the corpus · view | `deck` button (desktop + phone) | — | modal list of every card — the screen-reader-accessible view of the map | **n** | Tab→Enter · **d** | ✕ · Escape · Back |
->>>>>>> worktree-agent-acc1315826ed52ed2
-| 35 | `deck.sort` | *sort* the list · channel | select inside the deck | dimension key | rows reorder | **n** | Tab→select | pick another |
-| 36 | `deck.filter` | *filter* the list · **deck only** | `find in list…` input inside the deck | text | rows narrow and the deck's `N / M cards` readout updates. **Does not touch the map or the chips** (see M-N2) | **n** | type | empty the box |
-| 37 | `deck.unread` | *filter* to unread · **deck only** | `unread only` toggle (only when the corpus carries read state) | — | read rows hidden; the deck's `N / M cards` readout updates | **n** | Tab→Enter | same button |
-=======
-| 34 | `deck.open` | *list* the corpus · view | `deck` button (desktop + phone) | — | modal list of every card — the screen-reader-accessible view of the map | `deck=1` | Tab→Enter | ✕ · Escape · Back |
+| 34 | `deck.open` | *list* the corpus · view | `deck` button (desktop + phone) | — | modal list of every card, headed by its scope `N / M cards` — the screen-reader-accessible view of the map | `deck=1` | Tab→Enter · **d** | ✕ · Escape · Back |
 | 35 | `deck.sort` | *sort* the list · channel | select inside the deck | dimension key | rows reorder | `sort=<key>` | Tab→select | pick another |
-| 36 | `deck.filter` | *filter* the list · **deck only** | `find in list…` input inside the deck | text | rows narrow. **Does not touch the map or the chips** (see M-N2) | `df=<text>` | type | empty the box |
-| 37 | `deck.unread` | *filter* to unread · **deck only** | `unread only` toggle (only when the corpus carries read state) | — | read rows hidden | `du=1` | Tab→Enter | same button |
->>>>>>> worktree-agent-a0f35bcf6bcc312ac
+| 36 | `deck.filter` | *filter* the list · **deck only** | `find in list…` input inside the deck | text | rows narrow and the deck's `N / M cards` readout updates. **Does not touch the map or the chips** (see M-N2) | `df=<text>` | type | empty the box |
+| 37 | `deck.unread` | *filter* to unread · **deck only** | `unread only` toggle (only when the corpus carries read state) | — | read rows hidden; the deck's `N / M cards` readout updates | `du=1` | Tab→Enter | same button |
 | 38 | `source.open` | *open* the original · card | links in the detail pane and on deck rows | — | new tab | n | Tab→Enter | — |
 | **Camera** |
 | 39 | `camera.pan` | *move* the camera · camera | drag; **arrow keys** (hold to repeat) | — | view translates | n | **arrows** | `reset view` |
@@ -126,8 +102,8 @@ docked rather than modal so the toolbar stays operable while you read.
   still shown ("21 regions" in the toolbar), so the user can see a thing they can no longer touch.
 - ~~**M-A3 `labels.toggle`, `deck.open`, `view.reset` have no expert route.**~~ **FIXED 2026-08-09** —
   single keys in the style of `s`: **l** toggles region labels, **d** opens the deck, **r** resets the
-  view. Skipped while typing, while a menu is open, or under a modal overlay; the buttons' tooltips
-  name their keys.
+  view. Skipped while typing, while a menu is open, or under a modal overlay. The keys are documented
+  here (tooltips no longer carry them — 2026-08-09 tooltip-policy ruling: explanatory tooltips die).
 - ~~**M-A4 `facet.isolate` can only isolate on the dimension currently on the colour channel.**~~
   **FIXED 2026-08-09** — every categorical dimension in the colour popover's "color by" list carries a
   ▾ disclosure opening its own value list with the same visible `isolate`/`release` rows the legend
@@ -205,7 +181,9 @@ Mechanical only — behaviour unchanged. See commits `6879c70`, `c703ec6`, `83d3
 - The dead `source: "region"` branch in `dimensions.ts` — deleted (rationale in §4).
 - Missing `aria-checked` / `aria-pressed` on every channel option and property toggle.
 - Missing tooltips on `reset` (whose scope was stated nowhere), `deck`, `cite edges`, `frontier`,
-  `unread only`, and every colour/size option.
+  `unread only`, and every colour/size option. *(Reversed 2026-08-09 by the tooltip-policy ruling:
+  `title=` survives only where it duplicates an aria-label; explanatory tooltips became visual
+  affordances or were deleted.)*
 - Filter chips said "remove filter"; they now name the filter.
 - `labelsOn` added to the `__eido` seam.
 
