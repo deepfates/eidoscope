@@ -1,5 +1,6 @@
 import { test, expect } from "bun:test";
 import { descendMap } from "../src/pipeline.ts";
+import { descendMap as engineDescend } from "../src/engine.ts";
 import { encodeMap, decodeMap } from "../src/mapbin.ts";
 import type { MapContract } from "../src/schema.ts";
 import { mulberry32 } from "../src/axes.ts";
@@ -81,6 +82,33 @@ test("descendMap: child round-trips through the .eido codec", async () => {
   expect(back.axes.map((a) => a.key)).toEqual(C.axes.map((a) => a.key));
   expect(back.provenance!.source).toBe(C.provenance!.source);
   expect(back.vectors!.data.length).toBe(8 * 8);                                   // f16 on the wire, still present
+});
+
+// eid-kep3: the page binding (viewer descendInPage) and the CLI both run src/engine.ts descendMap —
+// this pins the node wrapper to the engine core: same axes, same scores, same layout, float-for-float.
+test("engine descendMap ≡ pipeline descendMap (page-binding parity): axes/scores/xy match within float tolerance", async () => {
+  const P = synthParent();
+  const A = await descendMap(P, selIds, { llm: {}, sig: mockSig, quiet: true });     // node face
+  const B = await engineDescend(P, selIds, { llm: {}, sig: mockSig });               // what the page runs
+  expect(B.axes.map((a) => a.key)).toEqual(A.axes.map((a) => a.key));
+  expect(B.axes.map((a) => a.variance)).toEqual(A.axes.map((a) => a.variance));
+  for (const key of Object.keys(A.scores)) B.scores[key]!.forEach((v, i) => expect(Math.abs(v - A.scores[key][i])).toBeLessThan(1e-9));
+  B.xy.forEach((p, i) => { expect(Math.abs(p[0] - A.xy[i][0])).toBeLessThan(1e-9); expect(Math.abs(p[1] - A.xy[i][1])).toBeLessThan(1e-9); });
+  expect(B.cluster).toEqual(A.cluster);
+  expect(B.clusters.map((c) => c.label)).toEqual(A.clusters.map((c) => c.label));
+  expect(B.vectors!.data).toEqual(A.vectors!.data);
+});
+
+// eid-kep3: descend WITHOUT an llm — the one place no key is required (the cards already exist).
+// Axes wear PC names, regions wear their deterministic contrastive-term labels; nothing errors.
+test("engine descendMap with no llm: PC axis names + term region labels, honest and unerrored", async () => {
+  const C = await engineDescend(synthParent(), selIds, {});
+  expect(C.axes.length).toBeGreaterThanOrEqual(2);
+  for (const a of C.axes) { expect(a.name).toMatch(/^PC\d+$/); expect(C.scores[a.key]!.length).toBe(8); }   // unnamed-but-honest
+  // regions labeled from the math (distinctive terms), not "region"/empty — and no LLM was ever consulted
+  expect(C.clusters.every((c) => c.label.length > 0 && !c.label.startsWith("R:"))).toBe(true);
+  expect(C.levelLabels!.every((lvl) => lvl.every((l) => l.length > 0))).toBe(true);
+  expect(C.provenance!.title).toBe("Parent Corpus ▸ descent (8)");
 });
 
 test("descendMap: fails loud on a lite emit (no vectors), unknown ids, or a too-small selection", async () => {
