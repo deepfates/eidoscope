@@ -1,6 +1,5 @@
-import { decodeContainer } from "../../src/eido-container";
+import { decodeContainerAsync } from "../../src/eido-container";
 import { EmbeddedStore, type Store } from "../../src/store";
-export { decodeContainer };   // the ONE shared container parser (was hand-copied here — now src/eido-container.ts)
 export type { Store };
 
 // Browser side of the wire format (src/mapbin.ts). Same container, but gzip via the native
@@ -37,14 +36,14 @@ export async function loadMap(url = "./map.eido"): Promise<Store> {
   const embedded = (globalThis as any).__EIDO_DATA__;
   if (typeof embedded === "string") {
     const bin = Uint8Array.from(atob(embedded), (c) => c.charCodeAt(0));
-    return new EmbeddedStore(decodeContainer(await gunzip(bin)));
+    return new EmbeddedStore(await decodeContainerAsync(await gunzip(bin)));
   }
   const res = await fetch(url);
   if (!res.ok) throw new Error(`eidoscope: could not load ${url} (${res.status})`);
-  return new EmbeddedStore(decodeContainer(await gunzip(new Uint8Array(await res.arrayBuffer()))));
+  return new EmbeddedStore(await decodeContainerAsync(await gunzip(new Uint8Array(await res.arrayBuffer()))));
 }
 
 // Decode a .eido the user dropped in / opened locally (browser File → bytes). Same container, no network.
 export async function decodeEido(bytes: Uint8Array): Promise<Store> {
-  return new EmbeddedStore(decodeContainer(await gunzip(bytes)));
+  return new EmbeddedStore(await decodeContainerAsync(await gunzip(bytes)));
 }

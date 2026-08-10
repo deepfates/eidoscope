@@ -194,12 +194,24 @@ export function encodeContainer(D: MapContract): Uint8Array {
 // Parse an UNCOMPRESSED container → MapContract. Callers gunzip first (host-specific) then hand the bytes here.
 // width-aware + presence-tolerant: getOpt returns undefined for an absent buffer (a reader on a file that
 // predates a section skips it, no crash); get() throws a CLEAR error naming a genuinely-missing required buffer.
-export function decodeContainer(buf: Uint8Array): MapContract {
+//
+// ONE decode, two drains (review round 2, finding 3): the body is a GENERATOR that yields at chunk
+// boundaries inside every heavy expansion loop. decodeContainer drains it synchronously (Bun pipeline,
+// tests — identical behavior to before); decodeContainerAsync awaits a scheduler yield between chunks,
+// so a browser main thread decoding a worker's result (or a dropped .eido) never runs one long task.
+// Chunk sizes are engineering constants (like NOTES_BLOCK), sized so one chunk is ~a millisecond of
+// work: 8192 rows of small-array building / 2^19 flat f16 conversions per slice.
+const ROW_CHUNK = 8192, ELEM_CHUNK = 1 << 19;
+function* decodeGen(buf: Uint8Array): Generator<void, MapContract> {
   const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const magic = new TextDecoder().decode(buf.subarray(0, 8));
   if (magic !== MAGIC) throw new Error("eidoscope: not a .eido payload (bad magic: " + magic + ")");
   const metaLen = dv.getUint32(8, true);
+  // NOTE: this JSON.parse is the one unchunkable step (ids/titles/cores/axes in one meta document) —
+  // measured ~8ms on the largest shipping map (pathfinder, 13,796 docs, 31MB uncompressed; 2026-08-09
+  // finding-3 probe), well under one frame; notes moved out of meta (v2.1), which is why it is small.
   const meta = JSON.parse(new TextDecoder().decode(buf.subarray(12, 12 + metaLen)));
+  yield;
   const metaPad = (4 - (metaLen % 4)) % 4;
   const base = 12 + metaLen + metaPad;
   const getOpt = (key: string): Float32Array | Int32Array | Uint16Array | Uint8Array | undefined => {
@@ -213,31 +225,80 @@ export function decodeContainer(buf: Uint8Array): MapContract {
     return b as Float32Array | Int32Array;
   };
   const n = meta.n;
-  const unflat = (a: ArrayLike<number>, w: number) => Array.from({ length: n }, (_, i) => Array.from({ length: w }, (_, j) => a[i * w + j]));
-  const unragged = (vals: ArrayLike<number>, offs: ArrayLike<number>) => Array.from({ length: offs.length - 1 }, (_, i) => Array.from({ length: offs[i + 1] - offs[i] }, (_, j) => vals[offs[i] + j]));
+  function* unflat(a: ArrayLike<number>, w: number): Generator<void, number[][]> {
+    const out: number[][] = new Array(n);
+    for (let i = 0; i < n; i++) {
+      const r = new Array(w); for (let j = 0; j < w; j++) r[j] = a[i * w + j]; out[i] = r;
+      if (i % ROW_CHUNK === ROW_CHUNK - 1) yield;
+    }
+    return out;
+  }
+  function* unragged(vals: ArrayLike<number>, offs: ArrayLike<number>): Generator<void, number[][]> {
+    const m = (offs as any).length - 1, out: number[][] = new Array(m);
+    for (let i = 0; i < m; i++) {
+      const len = offs[i + 1] - offs[i], r = new Array(len); for (let j = 0; j < len; j++) r[j] = vals[offs[i] + j]; out[i] = r;
+      if (i % ROW_CHUNK === ROW_CHUNK - 1) yield;
+    }
+    return out;
+  }
+  function* col(a: ArrayLike<number>, ai: number): Generator<void, number[]> {
+    const out = new Array(n);
+    for (let i = 0; i < n; i++) { out[i] = a[ai * n + i]; if (i % (ROW_CHUNK * 4) === ROW_CHUNK * 4 - 1) yield; }
+    return out;
+  }
   // JSON turns undefined-in-array into null; the contract's optional metadata is (T | undefined)[], so restore that.
   const sparse = <T>(a: (T | null)[] | undefined) => (a ? a.map((x) => (x === null ? undefined : x)) : a);
   const scores: Record<string, number[]> = {};
-  const sc = get("scores"); meta.axes.forEach((a: any, ai: number) => { scores[a.key] = Array.from({ length: n }, (_, i) => sc[ai * n + i]); });
+  const sc = get("scores");
+  for (let ai = 0; ai < meta.axes.length; ai++) scores[meta.axes[ai].key] = yield* col(sc, ai);
   let rawScores: Record<string, number[]> | undefined;
-  if (meta.buffers.some((b: any) => b.key === "rawScores")) { const rs = get("rawScores"); rawScores = {}; meta.axes.forEach((a: any, ai: number) => { rawScores![a.key] = Array.from({ length: n }, (_, i) => rs[ai * n + i]); }); }
-  const nbr = unragged(get("nbr_v"), get("nbr_o"));
-  const levels = meta.hasLevels ? unragged(get("levels_v"), get("levels_o")) : undefined;
-  const cite = meta.hasCite ? unragged(get("cite_v"), get("cite_o")) : undefined;
+  if (meta.buffers.some((b: any) => b.key === "rawScores")) {
+    const rs = get("rawScores"); rawScores = {};
+    for (let ai = 0; ai < meta.axes.length; ai++) rawScores[meta.axes[ai].key] = yield* col(rs, ai);
+  }
+  const nbr = yield* unragged(get("nbr_v"), get("nbr_o"));
+  const levels = meta.hasLevels ? yield* unragged(get("levels_v"), get("levels_o")) : undefined;
+  const cite = meta.hasCite ? yield* unragged(get("cite_v"), get("cite_o")) : undefined;
   // vectors stay ONE flat Float32Array (n × vdim, row-major) — materializing n JS arrays was measured as
-  // the largest decode-memory cost (~600MB of a ~1GB decode at 13,830 docs; eid-cl83).
-  const vectors = meta.hasVectors ? { data: fromF16Buf(getOpt("vectors") as Uint16Array), dim: meta.vdim } : undefined;
+  // the largest decode-memory cost (~600MB of a ~1GB decode at 13,830 docs; eid-cl83). The f16→f32
+  // conversion (the measured decode hot spot) is chunked here rather than through fromF16Buf.
+  let vectors: { data: Float32Array; dim: number } | undefined;
+  if (meta.hasVectors) {
+    const raw = getOpt("vectors") as Uint16Array;
+    if (!F16_LUT) { F16_LUT = new Float32Array(65536); for (let h = 0; h < 65536; h++) F16_LUT[h] = f16ToF32(h); }
+    const data = new Float32Array(raw.length);
+    for (let i = 0; i < raw.length; i++) { data[i] = F16_LUT[raw[i]]; if (i % ELEM_CHUNK === ELEM_CHUNK - 1) yield; }
+    vectors = { data, dim: meta.vdim };
+  }
   // notes: v2.1 files carry them as a ragged utf8 buffer, decoded LAZILY per card (a card's notes are only
   // parsed when that card is opened, cached after). Pre-v2.1 files still carry meta.notes — read as-is.
   const notes = meta.notes ?? lazyNotes(getOpt("notes_z") as Uint8Array, getOpt("notes_zi") as Int32Array, getOpt("notes_o") as Int32Array, meta.notesBlock);
 
+  const xy = yield* unflat(get("xy"), 2);
+  const xyz = yield* unflat(get("xyz"), 3);
   return {
     version: meta.version, provenance: meta.provenance, derivedBy: meta.derivedBy, metaFields: meta.metaFields, ids: meta.ids, titles: meta.titles, cores: meta.cores, notes,
-    axes: meta.axes, scores, rawScores, xy: unflat(get("xy"), 2), xyz: unflat(get("xyz"), 3), xyzAgree: meta.xyzAgree,
+    axes: meta.axes, scores, rawScores, xy, xyz, xyzAgree: meta.xyzAgree,
     cluster: Array.from(get("cluster")), k: meta.k, di: meta.di, levels, counts: meta.counts,
     levelLabels: meta.levelLabels, levelBlurbs: meta.levelBlurbs, clusters: meta.clusters,
     hub: Array.from(get("hub")), nbr, cite, citec: meta.citec, vectors,
     urls: sparse(meta.urls), sources: sparse(meta.sources), siteNames: sparse(meta.siteNames), authors: sparse(meta.authors), tags: sparse(meta.tags), dates: sparse(meta.dates), read: sparse(meta.read), ghosts: meta.ghosts, folders: sparse(meta.folders),
     views: meta.views,
   };
+}
+
+// Synchronous drain — the Bun pipeline and tests, where blocking is fine and awaiting is noise.
+export function decodeContainer(buf: Uint8Array): MapContract {
+  const g = decodeGen(buf);
+  for (;;) { const r = g.next(); if (r.done) return r.value; }
+}
+
+// Cooperative drain for a browser MAIN thread: between chunks the decode yields to the event loop
+// (scheduler.yield where the platform has it — continuation-priority, no 4ms setTimeout clamp — else
+// setTimeout(0)), so frames keep painting while a large map materializes.
+const yieldToLoop = (): Promise<void> =>
+  typeof (globalThis as any).scheduler?.yield === "function" ? (globalThis as any).scheduler.yield() : new Promise((r) => setTimeout(r, 0));
+export async function decodeContainerAsync(buf: Uint8Array): Promise<MapContract> {
+  const g = decodeGen(buf);
+  for (;;) { const r = g.next(); if (r.done) return r.value; await yieldToLoop(); }
 }

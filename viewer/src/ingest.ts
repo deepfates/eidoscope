@@ -13,7 +13,7 @@
 // RESULTS cross as the encoded .eido container (one transferred buffer — no big structured clones,
 // review finding 3) and are decoded here by the SAME decodeContainer/EmbeddedStore a dropped file uses.
 import { EmbeddedStore, type Store as MapStore } from "../../src/store";
-import { decodeContainer } from "../../src/eido-container";
+import { decodeContainerAsync } from "../../src/eido-container";
 import type { DescendParent } from "../../src/engine";
 import type { MapContract } from "../../src/schema";
 import type { IngestFile, IngestStatus } from "./run";
@@ -107,8 +107,10 @@ class Bridge {
     const id = ++seq;
     return new Promise<T>((resolve, reject) => {
       this.pending.set(id, { resolve, reject, ...hooks });
+      // a send/clone failure means the bridge's health is unknown — recycle it (terminate rejects every
+      // pending request, INCLUDING this one, which is already registered above), never reuse it
       try { this.w.postMessage({ ...req, id, seams: seams() } as WorkerReq, transfer ?? []); }
-      catch (e: any) { this.pending.delete(id); reject(new Error("could not send to the engine worker: " + (e?.message ?? e))); }
+      catch (e: any) { this.terminate(new Error("could not send to the engine worker — recycled it: " + (e?.message ?? e))); }
     });
   }
   terminate(err: Error = new CancelledError()) {
@@ -130,7 +132,9 @@ class Bridge {
   }
 }
 
-const decode = (bytes: Uint8Array): MapStore => new EmbeddedStore(decodeContainer(bytes));
+// decode COOPERATIVELY: the container expansion yields to the event loop between chunks, so a large
+// result never lands as one long main-thread task at completion (review round 2, finding 3).
+const decode = async (bytes: Uint8Array): Promise<MapStore> => new EmbeddedStore(await decodeContainerAsync(bytes));
 
 // Deep-materialize before postMessage: the app hands svelte $state proxies (structured clone throws
 // "could not be cloned" on them); plain property reads unwrap every proxy while typed arrays pass
@@ -160,7 +164,7 @@ export const engine = {
       const r = await b.call<DoneMsg>({ op: "ingest", runId, files: toPlain(files), name, key }, { onStatus });
       const complete = !!r.bytes && r.cardsFailed === 0;
       if (complete) { b.dispose(); ingestBridges.delete(runId); }
-      return { store: r.bytes ? decode(r.bytes) : null, cardsFailed: r.cardsFailed, warnings: r.warnings };
+      return { store: r.bytes ? await decode(r.bytes) : null, cardsFailed: r.cardsFailed, warnings: r.warnings };
     } catch (e) {
       if (!(e instanceof CancelledError)) { b.terminate(e as Error); ingestBridges.delete(runId); }
       throw e;
@@ -191,7 +195,7 @@ export const engine = {
       const r = await b.call<DoneMsg>({ op: "descend", map: parent, selIds: toPlain(selIds), key }, { onStatus },
         parent.vectors ? [parent.vectors.data.buffer as ArrayBuffer] : []);
       b.dispose();   // graceful: the worker closes itself (its heap teardown never blocks the page)
-      return decode(r.bytes!);
+      return await decode(r.bytes!);
     } catch (e) { b.terminate(e as Error); throw e; }
   },
   // Embed one semantic query on the persistent embed worker (it keeps the warmed model between queries).

@@ -101,15 +101,19 @@ await p.addInitScript(`window.__EIDO_TF_HOST = ${JSON.stringify(base + "/hf/")};
 // RECEIPTS for the async engine (eid-yhj7): (1) main-thread responsiveness across the FULL cold ingest,
 // measured by TWO independent instruments — the long-animation-frame observer (spec threshold: an entry
 // exists only when a frame ran >=50ms) and a continuous rAF clock recording every gap >100ms. The
-// "longtask" entryType was measured (2026-08-09, probe with all three instruments side by side) to
-// report the WORKER's 1.2s wasm embed task against a main thread whose rAF cadence never gapped — it
-// misattributes cross-thread work in this Chromium, so it is NOT the instrument here.
+// The "longtask" entryType was dropped after a side-by-side probe (2026-08-09) reported a 1.2s entry
+// while the rAF cadence never gapped; whether that was misattributed worker wasm time or a real
+// main-thread stall the old rig missed, LoAF (spec: covers long tasks even without a rendering
+// update) + the independent rAF clock is the sound pair — and the arrays are read only after a
+// post-completion settle, so a terminal stall cannot dodge the observer.
 // (2) a 100ms sampler of the panel's status label + estimate line — the stages must narrate granularly
 // (axes replicates, per-card counts) and the measured-rate estimate line must actually appear.
 await p.addInitScript(`
-  window.__loaf = []; window.__gaps = []; window.__labels = []; window.__est = [];
+  window.__loaf = []; window.__gaps = []; window.__labels = []; window.__est = []; window.__loafOK = false;
   (function tick(prev) { requestAnimationFrame((now) => { if (prev && now - prev > 100) window.__gaps.push(Math.round(now - prev)); tick(now); }); })(0);
-  try { new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__loaf.push(Math.round(e.duration)); }).observe({ entryTypes: ["long-animation-frame"] }); } catch {}
+  // if LoAF is unsupported the receipt must FAIL loudly (an unobserved run is indistinguishable from a
+  // clean one otherwise) — __loafOK is asserted below.
+  try { new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__loaf.push(Math.round(e.duration)); }).observe({ entryTypes: ["long-animation-frame"] }); window.__loafOK = true; } catch {}
   setInterval(() => {
     const s = document.querySelector('[data-testid=ingest-status]')?.textContent?.trim();
     if (s && window.__labels[window.__labels.length - 1] !== s) window.__labels.push(s);
@@ -154,14 +158,18 @@ try {
   await p.fill("[data-testid=ingest-key]", "sk-or-e2e-test");
   await p.click("[data-testid=ingest-start]");
   await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 120000 });
-  const perf = await p.evaluate(() => ({ loaf: (window as any).__loaf as number[], gaps: (window as any).__gaps as number[], labels: (window as any).__labels as string[], est: (window as any).__est as string[] }));
+  // SETTLE BEFORE READING (review round 2, finding 7): a terminal decode/mount stall can set __eido and
+  // only then be delivered to the observer / land as a late rAF gap — read the arrays AFTER a settle,
+  // never in the same beat as the completion flag.
+  await p.waitForTimeout(500);
+  const perf = await p.evaluate(() => ({ loafOK: (window as any).__loafOK as boolean, loaf: (window as any).__loaf as number[], gaps: (window as any).__gaps as number[], labels: (window as any).__labels as string[], est: (window as any).__est as string[] }));
+  ok(perf.loafOK, "the long-animation-frame observer is actually observing (an unsupported API would fake a clean receipt)");
   // an entry EXISTS only at >=50ms — the honest bar is ZERO across the whole cold window:
   // model download + wasm init + embed + axes + cards + layout + map mount.
   ok(perf.loaf.length === 0, `ZERO main-thread long frames (>=50ms) through the ENTIRE cold ingest — model load → embed → axes → cards → layout → mount${perf.loaf.length ? ` — saw [${perf.loaf.join(",")}]ms` : ""}`);
   ok(perf.gaps.length === 0, `the rAF clock never gapped >100ms through the same window (independent ground truth)${perf.gaps.length ? ` — gaps [${perf.gaps.join(",")}]ms` : ""}`);
   ok(perf.labels.some((l) => /replicate \d\/8/.test(l)) || perf.labels.some((l) => /PCA over/.test(l)), `the axes stage narrates its real steps (PCA / shuffle replicates), not one static label — saw: ${JSON.stringify(perf.labels.filter((l) => /replicate|PCA|naming/.test(l)).slice(0, 3))}`);
   ok(perf.est.length > 0, `the measured-rate ESTIMATE line appeared during the run (the refusal envelope is dead) — "${perf.est[0]}"`);
-  await p.waitForTimeout(400);
   const s = await p.evaluate(() => (window as any).__eido());
   ok(s.visible === 12, `the mounted map shows the 12 real docs (stub.md dropped by the floor) — visible=${s.visible}`);
   ok(llmCalls.card === 12, `exactly one card call per doc — ${llmCalls.card}`);

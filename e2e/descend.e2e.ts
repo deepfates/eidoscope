@@ -134,11 +134,11 @@ try {
   // moved, while a longtask observer proves the main thread never blocked >200ms.
   mockDelayMs = 500;   // stretch naming calls: a real in-flight window (~seconds), same deterministic answers
   await p.evaluate(() => {
-    // long-animation-frame + a rAF clock — the same two instruments as ingest.e2e.ts ("longtask" was
-    // measured to misattribute worker-thread wasm work to the window there; see that rig's comment)
-    (window as any).__lt = []; (window as any).__gaps = [];
+    // long-animation-frame + a rAF clock — the same two instruments as ingest.e2e.ts (see that rig's
+    // comment for why "longtask" was dropped); unsupported LoAF must fail loudly, so __ltOK is asserted.
+    (window as any).__lt = []; (window as any).__gaps = []; (window as any).__ltOK = false;
     (function tick(prev: number) { requestAnimationFrame((now) => { if (prev && now - prev > 100) (window as any).__gaps.push(Math.round(now - prev)); tick(now); }); })(0);
-    try { new PerformanceObserver((l: any) => { for (const e of l.getEntries()) (window as any).__lt.push(Math.round(e.duration)); }).observe({ entryTypes: ["long-animation-frame"] }); } catch {}
+    try { new PerformanceObserver((l: any) => { for (const e of l.getEntries()) (window as any).__lt.push(Math.round(e.duration)); }).observe({ entryTypes: ["long-animation-frame"] }); (window as any).__ltOK = true; } catch {}
   });
   await p.click('[data-testid="sel-descend"]');
   await p.waitForTimeout(250);   // the run is now in flight (axes naming is delayed 500ms)
@@ -150,7 +150,9 @@ try {
   ok(midRun.visible === 90, "mid-descend the PARENT map is still the working document (the run cooks in the worker)");
   ok(midRun.zoom !== zoom0, `the camera answered a real wheel gesture MID-DESCEND — zoom ${zoom0} → ${midRun.zoom}`);
   await p.waitForFunction(() => (window as any).__eido?.()?.visible === 30, null, { timeout: 60000 });
-  const lt = await p.evaluate(() => ({ loaf: (window as any).__lt as number[], gaps: (window as any).__gaps as number[] }));
+  await p.waitForTimeout(500);   // settle BEFORE reading — a terminal decode/mount stall must reach the observer first
+  const lt = await p.evaluate(() => ({ ltOK: (window as any).__ltOK as boolean, loaf: (window as any).__lt as number[], gaps: (window as any).__gaps as number[] }));
+  ok(lt.ltOK, "the long-animation-frame observer is actually observing (unsupported would fake a clean receipt)");
   ok(lt.loaf.length === 0, `ZERO main-thread long frames (>=50ms) through the whole keyed descend${lt.loaf.length ? ` — saw [${lt.loaf.join(",")}]ms` : ""}`);
   ok(lt.gaps.length === 0, `the rAF clock never gapped >100ms mid-descend${lt.gaps.length ? ` — gaps [${lt.gaps.join(",")}]ms` : ""}`);
   mockDelayMs = 0;
