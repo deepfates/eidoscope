@@ -27,14 +27,14 @@ export const setKey = (k: string): void => { try { k ? localStorage.setItem(KEY_
 // ax call dies. Fixed through ax's own extension point (AxAIServiceOptions.fetch — "useful for
 // proxies or custom HTTP handling"): a scoped fetch that drops exactly those two headers. Upstream
 // issue to file with ax: browser targets shouldn't send un-allowlisted tracking headers.
-const corsSafeFetch: typeof fetch = (input, init) => {
+const corsSafeFetch = ((input: RequestInfo | URL, init?: RequestInit) => {
   if (init?.headers) {
     const h = new Headers(init.headers);
     h.delete("x-request-id"); h.delete("x-retry-count");
     init = { ...init, headers: h };
   }
   return fetch(input, init);
-};
+}) as typeof fetch;
 
 export const pageLLM = (key: string) =>
   ai({ name: "openai", apiKey: key, apiURL: DEFAULT_API_URL, config: { model: DEFAULT_MODEL, stream: false }, options: { fetch: corsSafeFetch } } as any);
