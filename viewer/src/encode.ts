@@ -1,6 +1,6 @@
 import { schemeTableau10, interpolateSinebow, interpolateViridis } from "d3-scale-chromatic";
 import { rgb } from "d3-color";
-import { themePalette, type RGB } from "./palette";
+import { themePalette, treeThemePalette, buildRegionTree, type RegionTree, type RGB } from "./palette";
 
 // Encodings: how a card's region/metadata/axis-position becomes colour and size. Kept out of the render
 // core so the control panel + legend and the deck layers share ONE source of truth for what a colour means.
@@ -27,19 +27,46 @@ let activeTheme = "";
 // current grain, or a categorical dimension's value count) — set reactively by App. No fixed size,
 // no modulo recycling: every region gets its own colour, as separated as the engine can make k of them.
 let paletteK = 24;
+// REGION-TREE COLOUR MODE (eid-yhj7): when the colour channel shows regions and the map carries a
+// nested grain ladder, hues come from the GRAIN TREE (ancestry-stable across grain levels) rather
+// than the spread-k ring. Categorical dims (no tree) keep the spread-k path below.
+let regionTree: RegionTree | null = null;
+let treeSrc: number[][] | undefined;           // identity guard: rebuild only when the map changes
+let mode: "flat" | "tree" = "flat";
+let grainLevel = 0;
 export let paletteVer = 0;
-export const palette = (name: string = activeTheme): RGB[] => (name ? themePalette(name, undefined, paletteK)?.colors ?? PALX : PALX);
+export const palette = (name: string = activeTheme): RGB[] => {
+  if (!name) return PALX;
+  if (mode === "tree" && regionTree) return treeThemePalette(name, regionTree, grainLevel)?.colors ?? PALX;
+  return themePalette(name, undefined, paletteK)?.colors ?? PALX;
+};
 export function setActiveTheme(name: string): number {
   if (name === activeTheme) return paletteVer;
   activeTheme = name;
-  themePalette(name, undefined, paletteK);   // generate + log the canary metrics now, while the DOM carries this theme
+  palette(name);   // generate + log the canary metrics now, while the DOM carries this theme
   return ++paletteVer;
 }
 export function setPaletteK(k: number): number {
   const kk = Math.max(2, Math.floor(k) || 2);
-  if (kk === paletteK) return paletteVer;
-  paletteK = kk;
+  if (kk === paletteK && mode === "flat") return paletteVer;
+  paletteK = kk; mode = "flat";
   if (activeTheme) themePalette(activeTheme, undefined, kk);
+  return ++paletteVer;
+}
+/** Hand the current map's grain ladder to the colour engine (undefined = no ladder / map closed). */
+export function setRegionTree(levels?: number[][]): number {
+  if (levels === treeSrc) return paletteVer;
+  treeSrc = levels;
+  regionTree = levels ? buildRegionTree(levels) : null;
+  if (regionTree?.violations) console.warn(`[eido] grain ladder is not nested (${regionTree.violations} nodes) — tree hues may mislead`);
+  return ++paletteVer;
+}
+/** Colour channel = region at `level`: tree hues when the map has a ladder, else spread-k over `fallbackK`. */
+export function setColorRegion(level: number, fallbackK: number): number {
+  if (!regionTree) return setPaletteK(fallbackK);
+  if (mode === "tree" && grainLevel === level) return paletteVer;
+  mode = "tree"; grainLevel = level;
+  if (activeTheme) treeThemePalette(activeTheme, regionTree, level);
   return ++paletteVer;
 }
 export const activeThemeName = () => activeTheme;

@@ -1,5 +1,6 @@
 import { expect, test, describe } from "bun:test";
-import { derivePalette, type ThemeTokens } from "../viewer/src/palette";
+import { derivePalette, buildRegionTree, treeHues, anchorHueOf, treeThemePalette, type ThemeTokens } from "../viewer/src/palette";
+import { converter } from "culori";
 
 // Fixtures are the token sets verbatim from daisyui/theme/*.css — the same values the browser hands
 // readThemeTokens() at runtime, so what we assert here is what the map actually paints.
@@ -71,5 +72,64 @@ describe("theme-derived palette", () => {
     expect(derivePalette({ "base-100": "not-a-color", primary: "🙃" })).toBeNull();  // unparseable
     // a mid-grey canvas: no lightness band can clear even the degenerate 2.0:1 floor
     expect(derivePalette({ "base-100": "oklch(55% 0 0)", "base-content": "oklch(50% 0 0)" })).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TREE HUES (eid-yhj7): region colours follow the grain tree — hue = ancestry.
+describe("grain-tree hues", () => {
+  // a nested 3-level ladder over 12 nodes: 2 → 3 → 5 regions (region 1 never splits)
+  const levels = [
+    [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1],
+    [0, 0, 0, 0, 1, 1, 1, 2, 2, 2, 2, 2],
+    [0, 0, 3, 3, 1, 1, 4, 2, 2, 2, 2, 2],
+  ];
+  const tree = buildRegionTree(levels)!;
+  const hueDist = (a: number, b: number) => { const d = Math.abs(a - b) % 360; return Math.min(d, 360 - d); };
+
+  test("tree derives parents/sizes from the levels arrays; real nesting has zero violations", () => {
+    expect(tree.counts).toEqual([2, 3, 5]);
+    expect(tree.parents[1]).toEqual([0, 0, 1]);
+    expect(tree.parents[2]).toEqual([0, 1, 2, 0, 1]);
+    expect(tree.sizes[0]).toEqual([7, 5]);
+    expect(tree.violations).toBe(0);
+    // a broken ladder is detected, not silently coloured
+    expect(buildRegionTree([[0, 0, 1, 1], [0, 1, 0, 1]])!.violations).toBeGreaterThan(0);
+  });
+
+  test("hue = ancestry: children stay inside the parent's hue neighbourhood; an unsplit region keeps its exact hue", () => {
+    const hues = treeHues(tree, 0);
+    // every child's hue is nearer its OWN parent than any other parent (refinement, not reroll)
+    for (let l = 1; l < 3; l++) for (let r = 0; r < tree.counts[l]; r++) {
+      const p = tree.parents[l][r];
+      for (let q = 0; q < tree.counts[l - 1]; q++) if (q !== p) expect(hueDist(hues[l][r], hues[l - 1][p])).toBeLessThan(hueDist(hues[l][r], hues[l - 1][q]));
+    }
+    // region 1@L1 (= 2@L2) never splits: its hue is IDENTICAL at both grains
+    expect(hueDist(hues[2][2], hues[1][2])).toBeLessThan(1e-9);
+    // sibling guard gap: no two same-level hues coincide
+    for (const lvl of hues) for (let i = 0; i < lvl.length; i++) for (let j = i + 1; j < lvl.length; j++) expect(hueDist(lvl[i], lvl[j])).toBeGreaterThan(0.5);
+  });
+
+  test("anchor rotation lands the largest top-level region on the theme's primary hue", () => {
+    const anchor = anchorHueOf(THEMES.light);
+    const hues = treeHues(tree, anchor);
+    expect(hueDist(hues[0][0], anchor)).toBeLessThan(1e-9);   // region 0 is the largest (7 of 12)
+  });
+
+  test("tree palette: fixed hues survive the engine (chroma/lightness move, hue does not)", () => {
+    const toOklch = converter("oklch") as any;
+    for (const [name, tokens] of Object.entries(THEMES)) {
+      const hues = treeHues(tree, anchorHueOf(tokens));
+      for (let l = 0; l < 3; l++) {
+        const d = treeThemePalette(`${name}-t${l}`, tree, l, tokens);
+        expect(d).not.toBeNull();
+        expect(d!.colors.length).toBe(tree.counts[l]);
+        expect(d!.metrics.worstContrast).toBeGreaterThanOrEqual(2.9);
+        d!.colors.forEach((c, r) => {
+          const h = toOklch({ mode: "rgb", r: c[0] / 255, g: c[1] / 255, b: c[2] / 255 }).h ?? 0;
+          expect(hueDist(h, hues[l][r])).toBeLessThan(4);   // 8-bit quantization + clamp wobble only
+        });
+      }
+    }
   });
 });
