@@ -157,6 +157,72 @@ export function encodeContainer(D: MapContract): Uint8Array {
     bufs.push({ key: "notes_z", arr: notes_z, type: "u8" }, { key: "notes_zi", arr: zi, type: "i32" }, { key: "notes_o", arr: offs, type: "i32" });
   }
 
+  // v2.2 (async-engine review round 3): NOTHING that grows with n rides in the meta JSON — its one
+  // unchunkable JSON.parse must be bounded by content that does not grow with the corpus (axes, views,
+  // provenance, per-LEVEL counts ~ O(log n)). Per-doc columns (ids/titles/cores + the optional
+  // metadata) ride as ONE ragged utf8 buffer of per-row JSON (prow_*); per-region labels/blurbs, the
+  // default-level region defs and the frontier ghosts as another (rrow_*); saved views as vrow_*. All
+  // are chunk-parsed with event-loop yields on decode — one bounded row at a time. This is the ONLY
+  // format (owner ruling 2026-08-09: no backward compatibility — every shipping .eido regenerated).
+  // Outer gzip compresses the utf8 rows exactly as it did the meta.
+  const rowsBuf = (rows: string[]): { vals: Uint8Array; offs: Int32Array } => {
+    const enc2 = new TextEncoder();
+    const bs = rows.map((r) => enc2.encode(r));
+    const offs = new Int32Array(bs.length + 1);
+    for (let i = 0; i < bs.length; i++) offs[i + 1] = offs[i] + bs[i].byteLength;
+    const vals = new Uint8Array(offs[bs.length]);
+    for (let i = 0; i < bs.length; i++) vals.set(bs[i], offs[i]);
+    return { vals, offs };
+  };
+  const cols = {
+    urls: !!D.urls, sources: !!D.sources, siteNames: !!D.siteNames, authors: !!D.authors,
+    tags: !!D.tags, dates: !!D.dates, read: !!D.read, folders: !!D.folders, citec: !!D.citec,
+  };
+  const pr = rowsBuf(D.ids.map((_, i) => JSON.stringify([
+    D.ids[i], D.titles[i], D.cores[i],
+    D.urls?.[i] ?? null, D.sources?.[i] ?? null, D.siteNames?.[i] ?? null, D.authors?.[i] ?? null,
+    D.tags?.[i] ?? null, D.dates?.[i] ?? null, D.read?.[i] ?? null, D.folders?.[i] ?? null, D.citec?.[i] ?? null,
+  ])));
+  bufs.push({ key: "prow_v", arr: pr.vals, type: "u8" }, { key: "prow_o", arr: pr.offs, type: "i32" });
+  // rrow segments, in order: level labels · level BLURBS (independent of labels — a present blurb
+  // ladder without labels must survive) · default-level RegionDefs · ghosts. Presence flags + counts
+  // in meta make every optional [] round-trip as [] (never collapsed to undefined).
+  const lls = D.levelLabels ?? [], lbs = D.levelBlurbs ?? [];
+  const rrows: string[] = [];
+  for (const lvl of lls) for (const lab of lvl) rrows.push(JSON.stringify(lab));
+  for (const lvl of lbs) for (const b of lvl) rrows.push(JSON.stringify(b ?? null));
+  for (const c of D.clusters) rrows.push(JSON.stringify(c));
+  for (const g of D.ghosts ?? []) rrows.push(JSON.stringify(g));
+  const rr = rowsBuf(rrows);
+  bufs.push({ key: "rrow_v", arr: rr.vals, type: "u8" }, { key: "rrow_o", arr: rr.offs, type: "i32" });
+  // Views (review rounds 4+5): a saved view's SETTINGS are one small JSON row (vrow_*), but its
+  // card-id lists (state.selection, state.derived[].ids) are UNCAPPED — O(n) when a view references
+  // the whole corpus — so they don't belong inside any single JSON.parse. They ride as vid_*: one RAW
+  // utf8 id per ragged row (no JSON, offsets delimit), consumed in file order by the decoder's
+  // chunk-yielding id loop. The view row carries only counts (__selN null = selection absent;
+  // __derN[k] = ids count of derived entry k, null = that entry's ids absent).
+  const vrowsJson: string[] = [];
+  const vids: string[] = [];
+  for (const v of D.views ?? []) {
+    const st: any = { ...((v as any).state ?? {}) };
+    let selN: number | null = null;
+    if (Array.isArray(st.selection)) { selN = st.selection.length; for (const id of st.selection) vids.push(id); delete st.selection; }
+    let derN: (number | null)[] | null = null;
+    if (Array.isArray(st.derived)) {
+      derN = [];
+      st.derived = st.derived.map((d: any) => {
+        const { ids, ...rest } = d;
+        if (Array.isArray(ids)) { derN!.push(ids.length); for (const id of ids) vids.push(id); return rest; }
+        derN!.push(null); return d;
+      });
+    }
+    vrowsJson.push(JSON.stringify({ ...v, state: st, __selN: selN, __derN: derN }));
+  }
+  const vr = rowsBuf(vrowsJson);
+  bufs.push({ key: "vrow_v", arr: vr.vals, type: "u8" }, { key: "vrow_o", arr: vr.offs, type: "i32" });
+  const vi = rowsBuf(vids);
+  bufs.push({ key: "vid_v", arr: vi.vals, type: "u8" }, { key: "vid_o", arr: vi.offs, type: "i32" });
+
   // lay buffers out 4-byte aligned; build the manifest
   const manifest: BufSpec[] = []; const chunks: Uint8Array[] = []; let offset = 0;
   for (const b of bufs) {
@@ -168,14 +234,17 @@ export function encodeContainer(D: MapContract): Uint8Array {
   const bufferBlob = new Uint8Array(offset);
   { let o = 0; for (const c of chunks) { bufferBlob.set(c, o); o += c.byteLength; } }
 
-  // meta = the contract MINUS what we moved to buffers (+ the manifest + axis key order).
-  // `views` rides here: it is small relative to notes, and JSON keeps it trivially additive.
+  // meta = the contract MINUS what we moved to buffers (+ the manifest + axis key order). Everything
+  // here is bounded by axes and the level ladder (O(log n) counts) — NEVER by n or by user-work.
   const meta = {
     version: CONTRACT_VERSION, n, provenance: D.provenance, derivedBy: D.derivedBy, metaFields: D.metaFields,
-    ids: D.ids, titles: D.titles, cores: D.cores,
-    axes: D.axes, k: D.k, di: D.di, xyzAgree: D.xyzAgree, counts: D.counts, levelLabels: D.levelLabels, levelBlurbs: D.levelBlurbs, clusters: D.clusters,
-    urls: D.urls, sources: D.sources, siteNames: D.siteNames, authors: D.authors, tags: D.tags, dates: D.dates, read: D.read, citec: D.citec, ghosts: D.ghosts, folders: D.folders,
-    views: D.views,
+    axes: D.axes, k: D.k, di: D.di, xyzAgree: D.xyzAgree, counts: D.counts,
+    cols,
+    hasLevelLabels: !!D.levelLabels, levelCounts: lls.map((a) => a.length),
+    hasBlurbs: !!D.levelBlurbs, blurbCounts: lbs.map((a) => a.length),
+    clustersN: D.clusters.length,
+    hasGhosts: !!D.ghosts, ghostsN: (D.ghosts ?? []).length,
+    hasViews: !!D.views, viewsN: (D.views ?? []).length,
     hasLevels: !!D.levels, hasCite: !!D.cite, hasVectors: !!(D.vectors && vdim), vdim, notesBlock: NOTES_BLOCK,
     buffers: manifest,
   };
@@ -194,50 +263,195 @@ export function encodeContainer(D: MapContract): Uint8Array {
 // Parse an UNCOMPRESSED container → MapContract. Callers gunzip first (host-specific) then hand the bytes here.
 // width-aware + presence-tolerant: getOpt returns undefined for an absent buffer (a reader on a file that
 // predates a section skips it, no crash); get() throws a CLEAR error naming a genuinely-missing required buffer.
-export function decodeContainer(buf: Uint8Array): MapContract {
+//
+// ONE decode, two drains (review round 2, finding 3): the body is a GENERATOR that yields at chunk
+// boundaries inside every heavy expansion loop. decodeContainer drains it synchronously (Bun pipeline,
+// tests — identical behavior to before); decodeContainerAsync awaits a scheduler yield between chunks,
+// so a browser main thread decoding a worker's result (or a dropped .eido) never runs one long task.
+// Chunk sizes are engineering constants (like NOTES_BLOCK), sized so one chunk is ~a millisecond of
+// work: 8192 rows of small-array building / 2^19 flat f16 conversions per slice.
+const ROW_CHUNK = 8192, ELEM_CHUNK = 1 << 19;
+function* decodeGen(buf: Uint8Array): Generator<void, MapContract> {
   const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   const magic = new TextDecoder().decode(buf.subarray(0, 8));
   if (magic !== MAGIC) throw new Error("eidoscope: not a .eido payload (bad magic: " + magic + ")");
   const metaLen = dv.getUint32(8, true);
+  // The one unchunkable step. Since v2.2 the meta JSON carries NOTHING that grows with n (per-doc and
+  // per-region content ride as ragged utf8 buffers, chunk-parsed below), so this parse is bounded by
+  // axes (~dozen) + views (user-saved) + per-LEVEL counts (~O(log n)) — measured ~8ms even on the OLD
+  // layout with 13,796 docs' ids/titles/cores still inside (2026-08-09 probe); the v2.2 meta is ~KB.
   const meta = JSON.parse(new TextDecoder().decode(buf.subarray(12, 12 + metaLen)));
+  yield;
   const metaPad = (4 - (metaLen % 4)) % 4;
   const base = 12 + metaLen + metaPad;
-  const getOpt = (key: string): Float32Array | Int32Array | Uint16Array | Uint8Array | undefined => {
+  // Materialize one buffer, COPY CHUNKED: buf.buffer.slice() of a whole column is itself an unbounded
+  // main-thread pass (1M docs × 384 f16 dims = 732MiB in one memcpy). The allocation is one lazily
+  // zero-paged step; the copy proceeds 8MiB per yield (~sub-ms each).
+  function* getOptG(key: string): Generator<void, Float32Array | Int32Array | Uint16Array | Uint8Array | undefined> {
     const s: BufSpec | undefined = meta.buffers.find((b: BufSpec) => b.key === key);
     if (!s) return undefined;
-    const start = buf.byteOffset + base + s.offset, ab = buf.buffer.slice(start, start + s.length * (WIDTH[s.type] ?? 4));
-    return s.type === "f32" ? new Float32Array(ab) : s.type === "f16" ? new Uint16Array(ab) : s.type === "u8" ? new Uint8Array(ab) : new Int32Array(ab);
-  };
-  const get = (key: string): Float32Array | Int32Array => {
-    const b = getOpt(key); if (!b) throw new Error(`eidoscope: required buffer '${key}' missing from .eido`);
+    const bytes = s.length * (WIDTH[s.type] ?? 4);
+    const src = new Uint8Array(buf.buffer, buf.byteOffset + base + s.offset, bytes);
+    const out = new Uint8Array(bytes);
+    const COPY_CHUNK = 1 << 23;
+    for (let o = 0; o < bytes; o += COPY_CHUNK) { out.set(src.subarray(o, Math.min(bytes, o + COPY_CHUNK)), o); yield; }
+    return s.type === "f32" ? new Float32Array(out.buffer) : s.type === "f16" ? new Uint16Array(out.buffer) : s.type === "u8" ? out : new Int32Array(out.buffer);
+  }
+  function* getG(key: string): Generator<void, Float32Array | Int32Array> {
+    const b = yield* getOptG(key); if (!b) throw new Error(`eidoscope: required buffer '${key}' missing from .eido`);
     return b as Float32Array | Int32Array;
-  };
+  }
   const n = meta.n;
-  const unflat = (a: ArrayLike<number>, w: number) => Array.from({ length: n }, (_, i) => Array.from({ length: w }, (_, j) => a[i * w + j]));
-  const unragged = (vals: ArrayLike<number>, offs: ArrayLike<number>) => Array.from({ length: offs.length - 1 }, (_, i) => Array.from({ length: offs[i + 1] - offs[i] }, (_, j) => vals[offs[i] + j]));
-  // JSON turns undefined-in-array into null; the contract's optional metadata is (T | undefined)[], so restore that.
-  const sparse = <T>(a: (T | null)[] | undefined) => (a ? a.map((x) => (x === null ? undefined : x)) : a);
+  function* unflat(a: ArrayLike<number>, w: number): Generator<void, number[][]> {
+    const out: number[][] = new Array(n);
+    for (let i = 0; i < n; i++) {
+      const r = new Array(w); for (let j = 0; j < w; j++) r[j] = a[i * w + j]; out[i] = r;
+      if (i % ROW_CHUNK === ROW_CHUNK - 1) yield;
+    }
+    return out;
+  }
+  // yields on BOTH rows and elements (round 4): element count alone never advances on a million empty
+  // rows (their allocations still accumulate in one task), and row count alone lets one pathological
+  // giant row run an unbounded inner loop.
+  function* unragged(vals: ArrayLike<number>, offs: ArrayLike<number>): Generator<void, number[][]> {
+    const m = (offs as any).length - 1, out: number[][] = new Array(m);
+    let c = 0;
+    for (let i = 0; i < m; i++) {
+      const len = offs[i + 1] - offs[i], r = new Array(len);
+      for (let j = 0; j < len; j++) { r[j] = vals[offs[i] + j]; if (++c % ELEM_CHUNK === 0) yield; }
+      out[i] = r;
+      if (i % ROW_CHUNK === ROW_CHUNK - 1) yield;
+    }
+    return out;
+  }
+  function* col(a: ArrayLike<number>, ai: number): Generator<void, number[]> {
+    const out = new Array(n);
+    for (let i = 0; i < n; i++) { out[i] = a[ai * n + i]; if (i % (ROW_CHUNK * 4) === ROW_CHUNK * 4 - 1) yield; }
+    return out;
+  }
+  function* numArr(a: ArrayLike<number>): Generator<void, number[]> {
+    const m = (a as any).length, out = new Array(m);
+    for (let i = 0; i < m; i++) { out[i] = a[i]; if (i % (ROW_CHUNK * 4) === ROW_CHUNK * 4 - 1) yield; }
+    return out;
+  }
   const scores: Record<string, number[]> = {};
-  const sc = get("scores"); meta.axes.forEach((a: any, ai: number) => { scores[a.key] = Array.from({ length: n }, (_, i) => sc[ai * n + i]); });
+  const sc = yield* getG("scores");
+  for (let ai = 0; ai < meta.axes.length; ai++) scores[meta.axes[ai].key] = yield* col(sc, ai);
   let rawScores: Record<string, number[]> | undefined;
-  if (meta.buffers.some((b: any) => b.key === "rawScores")) { const rs = get("rawScores"); rawScores = {}; meta.axes.forEach((a: any, ai: number) => { rawScores![a.key] = Array.from({ length: n }, (_, i) => rs[ai * n + i]); }); }
-  const nbr = unragged(get("nbr_v"), get("nbr_o"));
-  const levels = meta.hasLevels ? unragged(get("levels_v"), get("levels_o")) : undefined;
-  const cite = meta.hasCite ? unragged(get("cite_v"), get("cite_o")) : undefined;
+  if (meta.buffers.some((b: any) => b.key === "rawScores")) {
+    const rs = yield* getG("rawScores"); rawScores = {};
+    for (let ai = 0; ai < meta.axes.length; ai++) rawScores[meta.axes[ai].key] = yield* col(rs, ai);
+  }
+  const nbr = yield* unragged(yield* getG("nbr_v"), yield* getG("nbr_o"));
+  const levels = meta.hasLevels ? yield* unragged(yield* getG("levels_v"), yield* getG("levels_o")) : undefined;
+  const cite = meta.hasCite ? yield* unragged(yield* getG("cite_v"), yield* getG("cite_o")) : undefined;
   // vectors stay ONE flat Float32Array (n × vdim, row-major) — materializing n JS arrays was measured as
-  // the largest decode-memory cost (~600MB of a ~1GB decode at 13,830 docs; eid-cl83).
-  const vectors = meta.hasVectors ? { data: fromF16Buf(getOpt("vectors") as Uint16Array), dim: meta.vdim } : undefined;
-  // notes: v2.1 files carry them as a ragged utf8 buffer, decoded LAZILY per card (a card's notes are only
-  // parsed when that card is opened, cached after). Pre-v2.1 files still carry meta.notes — read as-is.
-  const notes = meta.notes ?? lazyNotes(getOpt("notes_z") as Uint8Array, getOpt("notes_zi") as Int32Array, getOpt("notes_o") as Int32Array, meta.notesBlock);
+  // the largest decode-memory cost (~600MB of a ~1GB decode at 13,830 docs; eid-cl83). The f16→f32
+  // conversion (the measured decode hot spot) is chunked here rather than through fromF16Buf.
+  let vectors: { data: Float32Array; dim: number } | undefined;
+  if (meta.hasVectors) {
+    const raw = (yield* getOptG("vectors")) as Uint16Array;
+    if (!F16_LUT) { F16_LUT = new Float32Array(65536); for (let h = 0; h < 65536; h++) F16_LUT[h] = f16ToF32(h); }
+    const data = new Float32Array(raw.length);
+    for (let i = 0; i < raw.length; i++) { data[i] = F16_LUT[raw[i]]; if (i % ELEM_CHUNK === ELEM_CHUNK - 1) yield; }
+    vectors = { data, dim: meta.vdim };
+  }
+  // notes: a ragged utf8 buffer, decoded LAZILY per card (a card's notes are only parsed when that
+  // card is opened, cached after).
+  const notes = lazyNotes((yield* getOptG("notes_z")) as Uint8Array, (yield* getOptG("notes_zi")) as Int32Array, (yield* getOptG("notes_o")) as Int32Array, meta.notesBlock);
+
+  const xy = yield* unflat(yield* getG("xy"), 2);
+  const xyz = yield* unflat(yield* getG("xyz"), 3);
+  const cluster = yield* numArr(yield* getG("cluster"));
+  const hub = yield* numArr(yield* getG("hub"));
+
+  // per-doc columns: prow rows — one bounded JSON.parse per doc, chunked.
+  const pv = (yield* getG("prow_v")) as unknown as Uint8Array, po = (yield* getG("prow_o")) as Int32Array;
+  const td = new TextDecoder(), c = meta.cols ?? {};
+  const ids: string[] = new Array(n), titles: string[] = new Array(n), cores: string[] = new Array(n);
+  const urls = c.urls ? new Array(n) : undefined, sources = c.sources ? new Array(n) : undefined;
+  const siteNames = c.siteNames ? new Array(n) : undefined, authors = c.authors ? new Array(n) : undefined;
+  const tags = c.tags ? new Array(n) : undefined, dates = c.dates ? new Array(n) : undefined;
+  const read = c.read ? new Array(n) : undefined, folders = c.folders ? new Array(n) : undefined;
+  const citec = c.citec ? new Array(n) : undefined;
+  for (let i = 0; i < n; i++) {
+    const row = JSON.parse(td.decode(pv.subarray(po[i], po[i + 1])));
+    ids[i] = row[0]; titles[i] = row[1]; cores[i] = row[2];
+    if (urls) urls[i] = row[3] ?? undefined; if (sources) sources[i] = row[4] ?? undefined;
+    if (siteNames) siteNames[i] = row[5] ?? undefined; if (authors) authors[i] = row[6] ?? undefined;
+    if (tags) tags[i] = row[7] ?? undefined; if (dates) dates[i] = row[8] ?? undefined;
+    if (read) read[i] = row[9] ?? undefined; if (folders) folders[i] = row[10] ?? undefined;
+    if (citec) citec[i] = row[11] ?? 0;
+    if (i % 2048 === 2047) yield;
+  }
+  // per-region rows: level labels, level blurbs (independent segments — blurbs survive without
+  // labels), the default-level RegionDefs, then ghosts — all chunk-parsed (region count grows with
+  // n: finest grain ≈ n/GRAIN_MIN_REGION). Presence flags keep [] and undefined distinct.
+  const rv = (yield* getG("rrow_v")) as unknown as Uint8Array, ro = (yield* getG("rrow_o")) as Int32Array;
+  let at = 0;
+  const rrow = (i: number) => JSON.parse(td.decode(rv.subarray(ro[i], ro[i + 1])));
+  function* rladder(counts: number[], nulls: boolean): Generator<void, any[][]> {
+    const out: any[][] = [];
+    for (const lc of counts) {
+      const lvl = new Array(lc);
+      for (let r = 0; r < lc; r++) { const v = rrow(at++); lvl[r] = nulls && v === null ? undefined : v; if (at % 2048 === 0) yield; }
+      out.push(lvl);
+    }
+    return out;
+  }
+  const levelLabels = meta.hasLevelLabels ? yield* rladder(meta.levelCounts ?? [], false) : undefined;
+  const levelBlurbs = meta.hasBlurbs ? yield* rladder(meta.blurbCounts ?? [], true) : undefined;
+  const clusters = new Array(meta.clustersN ?? 0);
+  for (let r = 0; r < clusters.length; r++) { clusters[r] = rrow(at++); if (at % 2048 === 0) yield; }
+  const ghosts = meta.hasGhosts ? new Array(meta.ghostsN ?? 0) : undefined;
+  if (ghosts) for (let r = 0; r < ghosts.length; r++) { ghosts[r] = rrow(at++); if (at % 2048 === 0) yield; }
+  // views: each view's JSON row is O(its own small settings) — the uncapped id lists (selection,
+  // derived[].ids) live in vid_* as raw utf8 rows and are reassembled here through the same
+  // chunk-yielding loop as every other per-row pass, so no single parse grows with n or user-work.
+  let views: any = undefined;
+  if (meta.hasViews) {
+    const vv = (yield* getG("vrow_v")) as unknown as Uint8Array, vo = (yield* getG("vrow_o")) as Int32Array;
+    const iv = (yield* getG("vid_v")) as unknown as Uint8Array, io = (yield* getG("vid_o")) as Int32Array;
+    let idAt = 0;
+    function* takeIds(count: number): Generator<void, string[]> {
+      const out = new Array(count);
+      for (let j = 0; j < count; j++) { out[j] = td.decode(iv.subarray(io[idAt], io[idAt + 1])); idAt++; if (idAt % 2048 === 0) yield; }
+      return out;
+    }
+    views = new Array(meta.viewsN ?? 0);
+    for (let r = 0; r < views.length; r++) {
+      const { __selN, __derN, ...v } = JSON.parse(td.decode(vv.subarray(vo[r], vo[r + 1])));
+      if (__selN != null) v.state.selection = yield* takeIds(__selN);
+      if (__derN != null && Array.isArray(v.state?.derived))
+        for (let k = 0; k < v.state.derived.length; k++) if (__derN[k] != null) v.state.derived[k] = { ...v.state.derived[k], ids: yield* takeIds(__derN[k]) };
+      views[r] = v;
+      yield;
+    }
+  }
 
   return {
-    version: meta.version, provenance: meta.provenance, derivedBy: meta.derivedBy, metaFields: meta.metaFields, ids: meta.ids, titles: meta.titles, cores: meta.cores, notes,
-    axes: meta.axes, scores, rawScores, xy: unflat(get("xy"), 2), xyz: unflat(get("xyz"), 3), xyzAgree: meta.xyzAgree,
-    cluster: Array.from(get("cluster")), k: meta.k, di: meta.di, levels, counts: meta.counts,
-    levelLabels: meta.levelLabels, levelBlurbs: meta.levelBlurbs, clusters: meta.clusters,
-    hub: Array.from(get("hub")), nbr, cite, citec: meta.citec, vectors,
-    urls: sparse(meta.urls), sources: sparse(meta.sources), siteNames: sparse(meta.siteNames), authors: sparse(meta.authors), tags: sparse(meta.tags), dates: sparse(meta.dates), read: sparse(meta.read), ghosts: meta.ghosts, folders: sparse(meta.folders),
-    views: meta.views,
+    version: meta.version, provenance: meta.provenance, derivedBy: meta.derivedBy, metaFields: meta.metaFields, ids, titles, cores, notes,
+    axes: meta.axes, scores, rawScores, xy, xyz, xyzAgree: meta.xyzAgree,
+    cluster, k: meta.k, di: meta.di, levels, counts: meta.counts,
+    levelLabels, levelBlurbs, clusters,
+    hub, nbr, cite, citec, vectors,
+    urls, sources, siteNames, authors, tags, dates, read, ghosts, folders,
+    views,
   };
+}
+
+// Synchronous drain — the Bun pipeline and tests, where blocking is fine and awaiting is noise.
+export function decodeContainer(buf: Uint8Array): MapContract {
+  const g = decodeGen(buf);
+  for (;;) { const r = g.next(); if (r.done) return r.value; }
+}
+
+// Cooperative drain for a browser MAIN thread: between chunks the decode yields to the event loop
+// (scheduler.yield where the platform has it — continuation-priority, no 4ms setTimeout clamp — else
+// setTimeout(0)), so frames keep painting while a large map materializes.
+const yieldToLoop = (): Promise<void> =>
+  typeof (globalThis as any).scheduler?.yield === "function" ? (globalThis as any).scheduler.yield() : new Promise((r) => setTimeout(r, 0));
+export async function decodeContainerAsync(buf: Uint8Array): Promise<MapContract> {
+  const g = decodeGen(buf);
+  for (;;) { const r = g.next(); if (r.done) return r.value; await yieldToLoop(); }
 }

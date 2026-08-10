@@ -1,48 +1,38 @@
-// IN-PAGE INGEST (eid-bacg) — folder → map, entirely in the tab. This is the page FACE of the ONE
-// engine (src/engine.ts): the stages (parse → embed full text → discover axes → card → embed cards →
-// project+cluster → name regions → assemble) are the shared host-free modules; this file only binds
-// them to the browser host — File objects instead of fs, transformers.js as the embedder, an OpenRouter
-// client built from the user-held key (fetch straight from the page; CORS allow-origin:* measured
-// 2026-08-09), and session-memory caches (which make a partial run RESUMABLE: retry re-runs failures only).
-import { ai } from "@ax-llm/ax";
-import { docsFromFiles, splitOversized, parseVaultManifest, SOURCE_EXT, type Doc } from "../../src/corpus-core";
-import { buildMap, descendMap, type EngineProgress } from "../../src/engine";
-import { poolEmbedWith } from "../../src/geometry";
-import { discoverAxes, type Axis } from "../../src/axes";
-import { Store } from "../../src/llm";
-import { DEFAULT_MODEL, DEFAULT_API_URL, DEFAULT_EMBED_MODEL, DEFAULT_MAX_DOC_CHARS, INPAGE_ENVELOPE_DOCS } from "../../src/defaults";
+// MAIN-THREAD FACE of the async engine (eid-yhj7): folder collection, the user-held key, and the
+// ENGINE CLIENT — worker spawning, ownership and the postMessage bridge to viewer/src/engine.worker.ts,
+// where every long operation (ingest, descend, query embedding) actually runs. Nothing heavy is
+// imported here: engine, ax and transformers.js live only in the worker bundle.
+//
+// OWNERSHIP (one worker per operation class — review finding 4): each ingest RUN owns a worker (alive
+// across need-key/retry resumes, terminated on clean completion, cancel, or error), each descend owns
+// a short-lived worker, and query embeds share one persistent worker (it holds the warmed model).
+// cancelIngest(runId) therefore terminates exactly that run — never a query or a descend in flight.
+// A worker whose health is unknown (onerror / onmessageerror / clone failure) is REJECTED-AND-RECYCLED:
+// every pending promise on it fails and the worker is discarded, never reused (review finding 5).
+//
+// RESULTS cross as the encoded .eido container (one transferred buffer — no big structured clones,
+// review finding 3) and are decoded here by the SAME decodeContainer/EmbeddedStore a dropped file uses.
+import { EmbeddedStore, type Store as MapStore } from "../../src/store";
+import { decodeContainerAsync } from "../../src/eido-container";
+import type { DescendParent } from "../../src/engine";
 import type { MapContract } from "../../src/schema";
-import { embedItems, type EmbedProgress } from "./semantic";
-import { pageKnn } from "./knn";
-import { opfsStore, cacheFileName } from "./opfs";
+import type { IngestFile, IngestStatus } from "./run";
+import type { EmbedProgress } from "./embedder";
+import type { WorkerOp, WorkerReq, WorkerRes, Seams } from "./engine.worker";
+import EngineWorker from "./engine.worker?worker&inline";
 
-export { INPAGE_ENVELOPE_DOCS };
+export type { IngestFile, IngestStatus };
+// the connectors' pre-download guard (see src/defaults.ts — the ingest-RUN refusal is dead, this
+// bounds only what a connector will pull into the page when the row count is known up front)
+export { INPAGE_ENVELOPE_DOCS } from "../../src/defaults";
 
 // ── the user-held LLM key: a field the user fills, kept in localStorage, never in any file ───────────
 export const KEY_STORAGE = "eido-llm-key";
 export const getKey = (): string => { try { return localStorage.getItem(KEY_STORAGE) ?? ""; } catch { return ""; } };
 export const setKey = (k: string): void => { try { k ? localStorage.setItem(KEY_STORAGE, k) : localStorage.removeItem(KEY_STORAGE); } catch {} };
 
-// ax stamps x-request-id / x-retry-count onto every request. OpenRouter's CORS allow-list doesn't
-// include them, so a browser's preflight rejects the whole call ("Failed to fetch") and ax retries
-// into the void — measured 2026-08-10: a raw fetch to the same endpoint answers in 1.4s while every
-// ax call dies. Fixed through ax's own extension point (AxAIServiceOptions.fetch — "useful for
-// proxies or custom HTTP handling"): a scoped fetch that drops exactly those two headers. Upstream
-// issue to file with ax: browser targets shouldn't send un-allowlisted tracking headers.
-const corsSafeFetch = ((input: RequestInfo | URL, init?: RequestInit) => {
-  if (init?.headers) {
-    const h = new Headers(init.headers);
-    h.delete("x-request-id"); h.delete("x-retry-count");
-    init = { ...init, headers: h };
-  }
-  return fetch(input, init);
-}) as typeof fetch;
-
-export const pageLLM = (key: string) =>
-  ai({ name: "openai", apiKey: key, apiURL: DEFAULT_API_URL, config: { model: DEFAULT_MODEL, stream: false }, options: { fetch: corsSafeFetch } } as any);
-
 // ── collecting the folder's files (picker or drop) ──────────────────────────────────────────────────
-export type IngestFile = { path: string; name: string; text: string };
+import { SOURCE_EXT } from "../../src/corpus-core";
 
 const readTexts = async (files: File[]): Promise<IngestFile[]> => {
   const out: IngestFile[] = [];
@@ -81,154 +71,146 @@ export async function filesFromDataTransfer(dt: DataTransfer): Promise<IngestFil
   return readTexts(files);
 }
 
-// ── the run: honest per-stage progress, resumable within the session ────────────────────────────────
-export type IngestStatus = {
-  phase: "read" | "model" | "embed" | "axes" | "need-key" | "cards" | "embed-cards" | "layout" | "regions" | "done" | "error";
-  label: string;
-  done?: number; total?: number; failed?: number; pct?: number;
+// ── the engine client ───────────────────────────────────────────────────────────────────────────────
+export class CancelledError extends Error { constructor() { super("cancelled"); } }
+
+type Pending = { resolve: (v: any) => void; reject: (e: Error) => void; onStatus?: (s: IngestStatus) => void; onEmbed?: (p: EmbedProgress) => void };
+
+// the e2e seams are set on the PAGE by playwright init scripts (which never run inside workers) — the
+// client forwards them with every request so the worker's embedder sees them before first load.
+const seams = (): Seams | undefined => {
+  const host = (globalThis as any).__EIDO_TF_HOST, wasm = (globalThis as any).__EIDO_TF_WASM;
+  return host || wasm ? { host, wasm } : undefined;
 };
 
-export class EnvelopeError extends Error {}
+let seq = 0;
 
-// ── DESCEND as a gesture (eid-kep3): the page FACE of src/engine.ts descendMap ──────────────────────
-// The selection pane calls this with the held ids; the child map comes back as a plain MapContract the
-// app mounts through the SAME in-memory path a dropped .eido takes. No file is ferried anywhere.
-// The key is OPTIONAL — the cards already exist, so without one the child opens honest-but-unnamed:
-// PC axis names + deterministic contrastive-term region labels (naming can be applied later with a key).
-export async function descendInPage(P: MapContract, selIds: string[], key: string, onStatus: (s: IngestStatus) => void): Promise<MapContract> {
-  const llm = key ? pageLLM(key) : undefined;
-  return descendMap(P, selIds, {
-    llm, knn: pageKnn, regionCache: await opfsStore(cacheFileName("regions")),
-    onProgress: (p: EngineProgress) => {
-      if (p.stage === "axes") onStatus({ phase: "axes", label: `discovering local axes over ${p.docs} cards…` });
-      else if (p.stage === "axes-done") onStatus({ phase: "axes", label: `${p.axes} local axes (${p.realDims} above the noise floor)` });
-      else if (p.stage === "layout") onStatus({ phase: "layout", label: `laying out ${p.cards} cards (UMAP + clustering)…` });
-      else if (p.stage === "regions") onStatus({ phase: "regions", label: `${llm ? "naming" : "labeling"} regions ${p.done}/${p.total}`, done: p.done, total: p.total });
-    },
-  });
+// One worker + its in-flight requests. terminate() rejects everything and discards the worker; any
+// signal that its health is unknown (onerror / onmessageerror / clone failure) does the same — a
+// possibly-dead worker is never reused.
+class Bridge {
+  private w: Worker;
+  private pending = new Map<number, Pending>();
+  dead = false;
+  constructor() {
+    this.w = new EngineWorker();
+    this.w.onmessage = (ev: MessageEvent<WorkerRes>) => {
+      const m = ev.data, p = this.pending.get(m.id);
+      if (!p) return;
+      if (m.t === "status") p.onStatus?.(m.s);
+      else if (m.t === "embed-status") p.onEmbed?.(m.p);
+      else if (m.t === "err") { this.pending.delete(m.id); p.reject(new Error(m.message)); }
+      else { this.pending.delete(m.id); p.resolve(m); }
+    };
+    this.w.onerror = (e: any) => this.terminate(new Error("engine worker error: " + (e?.message ?? e)));
+    this.w.onmessageerror = () => this.terminate(new Error("engine worker message could not be deserialized"));
+  }
+  call<T>(req: WorkerOp, hooks: Omit<Pending, "resolve" | "reject"> = {}, transfer?: Transferable[]): Promise<T> {
+    if (this.dead) return Promise.reject(new Error("engine worker is gone — retry to spawn a fresh one"));
+    const id = ++seq;
+    return new Promise<T>((resolve, reject) => {
+      this.pending.set(id, { resolve, reject, ...hooks });
+      // a send/clone failure means the bridge's health is unknown — recycle it (terminate rejects every
+      // pending request, INCLUDING this one, which is already registered above), never reuse it
+      try { this.w.postMessage({ ...req, id, seams: seams() } as WorkerReq, transfer ?? []); }
+      catch (e: any) { this.terminate(new Error("could not send to the engine worker — recycled it: " + (e?.message ?? e))); }
+    });
+  }
+  terminate(err: Error = new CancelledError()) {
+    if (this.dead) return;
+    this.dead = true;
+    this.w.terminate();
+    const ps = [...this.pending.values()]; this.pending.clear();
+    ps.forEach((p) => p.reject(err));
+  }
+  // graceful shutdown for an IDLE worker: the worker closes ITSELF (self.close()), so the teardown of
+  // its (potentially huge) wasm heap runs on its own thread. Measured: main-thread terminate() of a
+  // warmed engine worker blocked the page ~1.3s — exactly the freeze this architecture exists to kill.
+  dispose() {
+    if (this.dead) return;
+    this.dead = true;
+    try { this.w.postMessage({ op: "dispose", id: ++seq } as WorkerReq); } catch { this.w.terminate(); }
+    const ps = [...this.pending.values()]; this.pending.clear();
+    ps.forEach((p) => p.reject(new CancelledError()));
+  }
 }
 
-// One ingest of one folder. `start(key)` runs as far as it honestly can — with no key it stops after
-// the axes stage (the card is the bottleneck AND the point: without a key there are no cards, so no
-// map; we say so instead of shipping a cardless fake). Calling start again (same run) RESUMES: the
-// full-text embeddings, discovered geometry and every already-written card are kept in session caches,
-// so only failures and the not-yet-done stages spend anything.
-export class IngestRun {
-  status: IngestStatus = { phase: "read", label: "reading files…" };
-  private docs: Doc[] | null = null;
-  private embeddings: number[][] | null = null;
-  private axesNamedWithLLM = false;
-  private axes: { axes: Axis[]; realDims: number; projections: number[][] } | null = null;
-  // The caches, OPFS-persisted when the browser can (viewer/src/opfs.ts), session-memory when it
-  // can't. Keys are content-addressed (doc text + axis geometry for cards; distinctive terms for
-  // regions; chunk hash for embeddings), so the files are shared across corpora and sessions exactly
-  // like the node cache dir — a reopened tab reloads instead of re-spending. Opened lazily (OPFS
-  // handles are async) on first start().
-  private cardCache: Store | null = null;
-  private regionCache: Store | null = null;
-  private embCache: Store | null = null;
-  private async openCaches(): Promise<void> {
-    if (this.cardCache) return;
-    [this.cardCache, this.regionCache, this.embCache] = await Promise.all([
-      opfsStore(cacheFileName("cards")),
-      opfsStore(cacheFileName("regions")),
-      opfsStore(cacheFileName("emb", DEFAULT_EMBED_MODEL)),
-    ]);
-  }
-  cardsFailed = 0;                     // failures in the LAST carding pass (a retry re-runs only these)
-  running = false;
+// decode COOPERATIVELY: the container expansion yields to the event loop between chunks, so a large
+// result never lands as one long main-thread task at completion (review round 2, finding 3).
+const decode = async (bytes: Uint8Array): Promise<MapStore> => new EmbeddedStore(await decodeContainerAsync(bytes));
 
-  constructor(
-    public files: IngestFile[],
-    public name: string,
-    private onStatus: (s: IngestStatus) => void,
-  ) {}
+// Deep-materialize before postMessage: the app hands svelte $state proxies (structured clone throws
+// "could not be cloned" on them); plain property reads unwrap every proxy while typed arrays pass
+// through untouched (svelte never proxies them, and clone handles them natively).
+const toPlain = (v: any): any => {
+  if (v == null || typeof v !== "object" || ArrayBuffer.isView(v) || v instanceof ArrayBuffer) return v;
+  if (Array.isArray(v)) return v.map(toPlain);
+  const o: any = {};
+  for (const k of Object.keys(v)) o[k] = toPlain(v[k]);
+  return o;
+};
 
-  private set(s: IngestStatus) { this.status = s; this.onStatus(s); }
+export type IngestResult = { store: MapStore | null; cardsFailed: number; warnings: string[] };
+type DoneMsg = { bytes: Uint8Array | null; cardsFailed: number; warnings: string[] };
 
-  // Read + parse + envelope-check the corpus (no models involved). Throws EnvelopeError past the limit.
-  private parse(): Doc[] {
-    if (this.docs) return this.docs;
-    const warns: string[] = [];
-    const manifest = this.files.find((f) => f.name === "eidoscope-vault.json");
-    const title = manifest ? parseVaultManifest(manifest.text)?.title : undefined;
-    if (title) this.name = title;
-    let docs = docsFromFiles(this.files, { warn: (l) => warns.push(l.trim()) });
-    const sp = splitOversized(docs, DEFAULT_MAX_DOC_CHARS);
-    docs = sp.docs;
-    if (!docs.length) throw new Error("no documents found — the folder has no .md/.txt files with at least 200 characters of text");
-    // Envelope guard (docs/ARCHITECTURE.md): in-page is comfortable to ~2–5k docs (measured: the 5k-doc
-    // layout itself is 2.9s in-browser; the wall is embed+card time). Past that, refuse honestly.
-    if (docs.length > INPAGE_ENVELOPE_DOCS) throw new EnvelopeError(
-      `${docs.length.toLocaleString()} documents is past the in-page envelope (~${INPAGE_ENVELOPE_DOCS.toLocaleString()}). ` +
-      `Build this one with the CLI twin — \`eidoscope <folder>\` — and open the .eido it emits here; same engine, same file.`);
-    this.docs = docs;
-    this.warnings = warns;
-    return docs;
-  }
-  warnings: string[] = [];
+const ingestBridges = new Map<string, Bridge>();
+let embedBridge: Bridge | null = null;
 
-  // Run (or resume) as far as honesty allows. Returns the finished map, or null when stopped at the
-  // axes stage for want of a key.
-  async start(key: string): Promise<MapContract | null> {
-    if (this.running) return null;
-    this.running = true;
+export const engine = {
+  // Run (or resume — same runId, same worker, warm state) one folder's ingest. Resolves a null store
+  // at the key gate. The run's worker dies on clean completion or error (OPFS is the durable resume
+  // state); it survives need-key and failed-cards partials, which the panel resumes in place.
+  // `source` = which connector this corpus truthfully came through (connectors/types.ts, from main's
+  // HF connector) — rides to the worker's IngestRun and lands in provenance.source.
+  async ingest(runId: string, files: IngestFile[], name: string, key: string, onStatus: (s: IngestStatus) => void, source?: string): Promise<IngestResult> {
+    let b = ingestBridges.get(runId);
+    if (!b || b.dead) { b = new Bridge(); ingestBridges.set(runId, b); }
     try {
-      const docs = this.parse();
-      this.cardsFailed = 0;
-      await this.openCaches();
-      const llm = key ? pageLLM(key) : undefined;
-
-      // full-text embeddings (chunk-pooled, exactly like the CLI's embedDocs) — computed once, kept
-      // in-session AND in the persistent chunk cache (content+model addressed, like map.ts poolEmbed)
-      const embedChunks = (label: string) => (items: { id: string; text: string }[]) =>
-        embedItems(items, DEFAULT_EMBED_MODEL,
-          (done, total) => this.set({ phase: "embed", label: `${label} ${done}/${total} chunks`, done, total }),
-          16,
-          (p: EmbedProgress) => this.set({ phase: "model", label: p.label, pct: p.pct }),
-          this.embCache!);
-      if (!this.embeddings) {
-        this.set({ phase: "model", label: "loading the embedding model…" });
-        this.embeddings = await poolEmbedWith(docs.map((d) => (d.title ? d.title + ". " : "") + d.body), embedChunks("embedding documents"));
-      }
-
-      // axes: deterministic PCA + parallel analysis; the LLM only names the poles. Discovered without a
-      // key the axes exist but wear PC names — re-discover WITH the llm on resume so they get named
-      // (projections are seeded and identical; card cache keys use geometry, not names, so nothing re-cards).
-      if (!this.axes || (llm && !this.axesNamedWithLLM)) {
-        this.set({ phase: "axes", label: "discovering axes (PCA + parallel analysis)…" });
-        this.axes = await discoverAxes(this.embeddings, docs.map((d) => d.title.slice(0, 64)), { llm });
-        this.axesNamedWithLLM = !!llm;
-      }
-      if (!llm) {
-        this.set({
-          phase: "need-key",
-          label: `${this.axes.axes.length} axes discovered (${this.axes.realDims} dimensions above the noise floor) from ${docs.length} documents. ` +
-            `Carding needs an LLM key: the cards — one readable restatement + placements per document — are what the map is built from. ` +
-            `Enter an OpenRouter API key to continue; it stays in this browser and is never written into any file.`,
-        });
-        return null;
-      }
-
-      const D = (await buildMap(docs, this.embeddings, {
-        llm, knn: pageKnn,
-        discovered: this.axes,   // discovery already ran above (deterministic) — not re-spent
-        embedCardTexts: (texts) => poolEmbedWith(texts, embedChunks("embedding cards")),
-        cardCache: this.cardCache!, regionCache: this.regionCache!,
-        concurrency: 8,
-        name: this.name,
-        source: `folder (in-page ingest) · ${this.files.length} files`,
-        cardModel: DEFAULT_MODEL, embedderId: DEFAULT_EMBED_MODEL,
-        onProgress: (p: EngineProgress) => {
-          if (p.stage === "cards") { this.cardsFailed = p.failed; this.set({ phase: "cards", label: `writing cards ${p.done}/${p.total}${p.failed ? ` · ${p.failed} failed` : ""}`, done: p.done, total: p.total, failed: p.failed }); }
-          else if (p.stage === "layout") this.set({ phase: "layout", label: `laying out ${p.cards} cards (UMAP + clustering)…` });
-          else if (p.stage === "regions") this.set({ phase: "regions", label: `naming regions ${p.done}/${p.total}`, done: p.done, total: p.total });
-        },
-      })).D;
-      // a partial pass is REPORTED, not silently mounted: the UI offers retry (session caches keep every
-      // written card, so a retry re-spends only the failures) or an explicit open-without-them.
-      this.set({ phase: "done", label: `${D.ids.length} cards · ${D.axes.length} axes · ${D.k} regions`, failed: this.cardsFailed || undefined });
-      return D;
-    } finally { this.running = false; }
-  }
-}
+      const r = await b.call<DoneMsg>({ op: "ingest", runId, files: toPlain(files), name, key, source }, { onStatus });
+      const complete = !!r.bytes && r.cardsFailed === 0;
+      if (complete) { b.dispose(); ingestBridges.delete(runId); }
+      return { store: r.bytes ? await decode(r.bytes) : null, cardsFailed: r.cardsFailed, warnings: r.warnings };
+    } catch (e) {
+      if (!(e instanceof CancelledError)) { b.terminate(e as Error); ingestBridges.delete(runId); }
+      throw e;
+    }
+  },
+  // CANCEL exactly this run: terminate ITS worker (preempts wasm/GPU inference and tight math loops —
+  // nothing in that stack polls an abort signal). Cache lines already flushed to OPFS survive, so a
+  // re-run of the same folder resumes instead of re-spending.
+  cancelIngest(runId: string): void {
+    const b = ingestBridges.get(runId);
+    if (b) { b.terminate(); ingestBridges.delete(runId); }
+  },
+  // DESCEND the held set into its own map — a fresh worker per call, gone when the call settles.
+  // Inbound crosses ONLY what descend reads (engine.ts DescendParent): identity, cards, metadata and
+  // one copied vectors buffer (transferred) — the parent's heavy geometry never crosses at all.
+  async descend(map: MapContract, selIds: string[], key: string, onStatus: (s: IngestStatus) => void): Promise<MapStore> {
+    const parent: DescendParent = {
+      ids: toPlain(map.ids), titles: toPlain(map.titles), cores: toPlain(map.cores),
+      vectors: map.vectors ? { data: new Float32Array(map.vectors.data), dim: map.vectors.dim } : undefined,
+      cite: toPlain(map.cite), citec: toPlain(map.citec),
+      urls: toPlain(map.urls), sources: toPlain(map.sources), siteNames: toPlain(map.siteNames),
+      authors: toPlain(map.authors), tags: toPlain(map.tags), dates: toPlain(map.dates),
+      read: toPlain(map.read), folders: toPlain(map.folders),
+      provenance: toPlain(map.provenance), derivedBy: toPlain(map.derivedBy),
+    };
+    const b = new Bridge();
+    try {
+      const r = await b.call<DoneMsg>({ op: "descend", map: parent, selIds: toPlain(selIds), key }, { onStatus },
+        parent.vectors ? [parent.vectors.data.buffer as ArrayBuffer] : []);
+      b.dispose();   // graceful: the worker closes itself (its heap teardown never blocks the page)
+      return await decode(r.bytes!);
+    } catch (e) { b.terminate(e as Error); throw e; }
+  },
+  // Embed one semantic query on the persistent embed worker (it keeps the warmed model between queries).
+  embedQuery(text: string, embedderId: string | undefined, onEmbed: (p: EmbedProgress) => void): Promise<Float32Array> {
+    if (!embedBridge || embedBridge.dead) embedBridge = new Bridge();
+    return embedBridge.call<{ vec: Float32Array }>({ op: "embed-query", text, embedderId }, { onEmbed }).then((r) => r.vec);
+  },
+  // A stalled/poisoned embed: terminate the embed worker (aborting its hung download for real) — the
+  // next query spawns a clean one. Exact ownership: ingest and descend workers are untouched.
+  resetEmbedder(): void {
+    if (embedBridge) { embedBridge.terminate(); embedBridge = null; }
+  },
+};

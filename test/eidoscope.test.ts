@@ -216,8 +216,37 @@ test("mapbin: binary codec round-trips the contract losslessly and is much small
   expect(back.siteNames).toEqual(D.siteNames);                      // and their labels
   expect(back.provenance).toEqual(D.provenance);                    // provenance (so a file introduces itself) survives
   expect(back.xyzAgree).toBe(2.7);                                  // the 2D↔3D neighbor-agreement honesty number (eid-ovo7)
-  expect(bin.byteLength).toBeLessThan(JSON.stringify(D).length);    // smaller than the JSON form
+  // (the smaller-than-JSON size guard lives in the 1200-doc v2.1 test below — at THIS 3-doc toy scale
+  // the v2.2 per-row offsets are pure constant overhead and the comparison measures nothing real)
   expect(back.rawScores).toBeUndefined();                          // absent when the map carries no raw projections
+});
+
+test("mapbin v2.2: optional EMPTY states round-trip losslessly — [] stays [], blurbs survive without labels", () => {
+  const base: MapContract = {
+    ids: ["a", "b"], titles: ["A", "B"], cores: ["c", "c"], notes: [{}, {}],
+    axes: [{ key: "x", name: "X", low: "lo", high: "hi" }], scores: { x: [0, 100] },
+    xy: [[0, 0], [1, 1]], xyz: [[0, 0, 0], [1, 1, 1]],
+    cluster: [0, 0], k: 1, hub: [1, 1], nbr: [[1], [0]],
+    clusters: [{ c: 0, n: 2, label: "p" }],
+  };
+  // empty-but-present optionals must come back as [] (present), not undefined (absent)
+  const e1 = decodeMap(encodeMap({ ...base, ghosts: [], levelLabels: [], views: [] }));
+  expect(e1.ghosts).toEqual([]); expect(e1.levelLabels).toEqual([]); expect(e1.views).toEqual([]);
+  // and absent stays absent
+  const e2 = decodeMap(encodeMap(base));
+  expect(e2.ghosts).toBeUndefined(); expect(e2.levelLabels).toBeUndefined(); expect(e2.views).toBeUndefined();
+  // blurbs serialize INDEPENDENTLY of labels — a blurb ladder without labels survives intact
+  const e3 = decodeMap(encodeMap({ ...base, levelBlurbs: [["only blurb"]] }));
+  expect(e3.levelLabels).toBeUndefined();
+  expect(e3.levelBlurbs).toEqual([["only blurb"]]);
+  // view id lists ride in vid_* (round 5) — selection, derived ids, and empty/absent all exact
+  const views = [
+    { name: "v1", created: 1, state: { layout: "mde", selection: ["a", "b"], derived: [{ label: "d", key: "k", ids: ["b"] }, { label: "e", key: "k2", ids: [] }] } },
+    { name: "v2", created: 2, state: { find: "x", selection: [] } },
+    { name: "v3", created: 3, state: { grain: 1 } },
+  ] as any;
+  const e4 = decodeMap(encodeMap({ ...base, views }));
+  expect(e4.views).toEqual(views);
 });
 
 test("mapbin v2.1: notes ride as lazy gzip blocks — exact across block boundaries, and old files still read", () => {
@@ -233,28 +262,18 @@ test("mapbin v2.1: notes ride as lazy gzip blocks — exact across block boundar
     hub: Array.from({ length: n }, () => 1), nbr: Array.from({ length: n }, (_, i) => [(i + 1) % n]),
   };
   const back = decodeMap(encodeMap(D));
+  expect(encodeMap(D).byteLength).toBeLessThan(JSON.stringify(D).length);  // the binary form beats JSON at real scale
   expect(back.notes.length).toBe(n);
   // exact round-trip on EVERY row, including the first/last card of each block and the ragged tail
   for (let i = 0; i < n; i++) expect(back.notes[i]).toEqual(D.notes[i]);
-  // a pre-v2.1 file (notes still in the JSON meta, no notes_z blocks) must decode exactly as before:
-  // rebuild the container with meta.notes restored — decodeContainer must prefer it over the lazy path.
-  const { gunzipSync: gz, gzipSync: rezip } = require("node:zlib");
+  // (the codec reads exactly ONE format — v2.2; every shipping/fixture .eido was regenerated, so
+  // there is no meta-borne-notes path to test. Owner ruling 2026-08-09: no backward compatibility.)
+  const { gunzipSync: gz } = require("node:zlib");
   const raw = gz(encodeMap(D));
-  const dv = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
-  const metaLen = dv.getUint32(8, true);
+  const metaLen = new DataView(raw.buffer, raw.byteOffset, raw.byteLength).getUint32(8, true);
   const meta = JSON.parse(new TextDecoder().decode(raw.subarray(12, 12 + metaLen)));
-  expect(meta.notes).toBeUndefined();               // new files carry NO notes in meta …
+  expect(meta.notes).toBeUndefined();               // files carry NO notes in meta …
   expect(meta.buffers.map((b: any) => b.key)).toContain("notes_z");  // … only the gzip blocks
-  meta.notes = D.notes;                             // now forge the OLD layout (meta-borne notes)
-  const metaBytes = new TextEncoder().encode(JSON.stringify(meta));
-  const pad = (4 - (metaBytes.byteLength % 4)) % 4, oldPad = (4 - (metaLen % 4)) % 4;
-  const body = raw.subarray(12 + metaLen + oldPad);
-  const forged = new Uint8Array(12 + metaBytes.byteLength + pad + body.byteLength);
-  forged.set(raw.subarray(0, 8), 0);
-  new DataView(forged.buffer).setUint32(8, metaBytes.byteLength, true);
-  forged.set(metaBytes, 12); forged.set(body, 12 + metaBytes.byteLength + pad);
-  const old = decodeMap(rezip(forged));
-  for (let i = 0; i < n; i++) expect(old.notes[i]).toEqual(D.notes[i]);
 });
 
 test("mapbin: OPTIONAL rawScores (raw PCA projection) round-trips per axis — the honest-view substrate", () => {

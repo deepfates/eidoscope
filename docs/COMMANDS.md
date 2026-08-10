@@ -377,8 +377,11 @@ files, the LLM mocked at the network edge, all other network aborted):
 | `ingest.resume` | *continue* a stopped run · view | the same start button ("continue with this key" / "resume") | with no key the run STOPS after the axes stage and says plainly that cards need a key (the card is the bottleneck and the point — no cardless map); entering the key resumes: embeddings + geometry are kept, axes are re-named, only carding spends |
 | `ingest.retry` | *re-run* failed cards · view | "retry N failed" in the partial panel | a pass with failed cards is never auto-mounted: retry re-spends only the failures (session caches hold every written card), or "open without them" mounts the partial map explicitly |
 
-Envelope: past ~5,000 docs (`INPAGE_ENVELOPE_DOCS`, src/defaults.ts) the panel refuses honestly and
-points at the CLI twin — same engine (src/engine.ts is the ONE implementation both hosts run; parity
+The whole run executes in the engine Web Worker (viewer/src/engine.worker.ts): the page never
+freezes, the current map stays pannable while the next one cooks, and the panel's cancel really
+terminates the work (OPFS cache lines already flushed survive, so a re-run resumes). There is no
+doc-count refusal — the panel shows a time-estimate line measured from the run's own rates instead.
+The CLI remains the same engine (src/engine.ts is the ONE implementation both hosts run; parity
 proven numerically in test/ingest.test.ts on the 24-doc example corpus), same file. `corpus.open`
 gains an empty-state binding: with no bundled map, the app shows the open-a-corpus panel (open a
 `.eido` / open a folder / drag either) instead of a failure screen.

@@ -127,10 +127,18 @@ function shuffleColumns(X: number[][], rnd: () => number): number[][] {
 }
 const slug = (s: string) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 40);
 
-export async function discoverAxes(embeddings: number[][], titles: string[], opts: { topN?: number; minCoherence?: number; llm?: any; seed?: number } = {}) {
+// Granular discovery progress, so a UI can narrate the real work instead of one static label through
+// minutes: the main PCA, each parallel-analysis shuffle replicate (the deterministic time sink at
+// scale), and the single naming call (one call for ALL axes ON PURPOSE — see below — so per-axis
+// naming ticks cannot honestly exist; the narrator shows the call with elapsed time instead).
+export type AxesProgress = { step: "pca" } | { step: "noise"; rep: number; of: number } | { step: "naming"; axes: number };
+
+export async function discoverAxes(embeddings: number[][], titles: string[], opts: { topN?: number; minCoherence?: number; llm?: any; seed?: number; onProgress?: (p: AxesProgress) => void } = {}) {
   const NC = 60;
+  const on = opts.onProgress ?? (() => {});
   const X = embeddings.map(unit);
   const seed = opts.seed ?? SEED;
+  on({ step: "pca" });
   const pca = truncatedPCA(X, NC, { seed });
   const variance = pca.explainedVariance;
   const scores = pca.project(X); // n x kept components
@@ -139,7 +147,7 @@ export async function discoverAxes(embeddings: number[][], titles: string[], opt
   // top-NC variance spectrum of each shuffle, so the truncated SVD is exactly enough here too.
   const REP = 8, noise: number[][] = [];
   const rnd = mulberry32(seed);
-  for (let r = 0; r < REP; r++) noise.push(evr(shuffleColumns(X, rnd), NC, seed));
+  for (let r = 0; r < REP; r++) { on({ step: "noise", rep: r + 1, of: REP }); noise.push(evr(shuffleColumns(X, rnd), NC, seed)); await new Promise((res) => setTimeout(res, 0)); /* let the progress message pump between replicates */ }
   const n95 = (k: number) => { const c = noise.map((row) => row[k]).sort((a, b) => a - b); return c[Math.floor(0.95 * (REP - 1))]; };
   let realDims = 0; for (let k = 0; k < Math.min(NC, variance.length); k++) { if (variance[k] > n95(k)) realDims++; else break; }
 
@@ -160,6 +168,7 @@ export async function discoverAxes(embeddings: number[][], titles: string[], opt
     const high = order.slice(-14).map(([, i]) => titles[i]).join("; ");
     return `AXIS ${k + 1}\n HIGH: ${high}\n LOW: ${low}`;
   }).join("\n\n");
+  if (llm) on({ step: "naming", axes: topN });
   const r: any = llm ? await Promise.resolve().then(() => labelAxes.forward(llm, { axesPoles: poleBlock })).catch(() => ({})) : {};
   const all: Axis[] = Array.from({ length: topN }, (_, k) => {
     const name = r.axisNames?.[k] || `PC${k + 1}`;

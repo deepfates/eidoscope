@@ -1,6 +1,5 @@
-import { decodeContainer } from "../../src/eido-container";
+import { decodeContainerAsync } from "../../src/eido-container";
 import { EmbeddedStore, type Store } from "../../src/store";
-export { decodeContainer };   // the ONE shared container parser (was hand-copied here — now src/eido-container.ts)
 export type { Store };
 
 // Browser side of the wire format (src/mapbin.ts). Same container, but gzip via the native
@@ -36,15 +35,19 @@ export function mapUrl(defaultUrl = "./map.eido"): string {
 export async function loadMap(url = "./map.eido"): Promise<Store> {
   const embedded = (globalThis as any).__EIDO_DATA__;
   if (typeof embedded === "string") {
-    const bin = Uint8Array.from(atob(embedded), (c) => c.charCodeAt(0));
-    return new EmbeddedStore(decodeContainer(await gunzip(bin)));
+    // base64 → bytes via fetch(data:) — the engine's native decoder, off the JS main loop, instead of
+    // a synchronous whole-file atob + per-char Uint8Array.from. MEASURED (round-5 probe, pathfinder
+    // 20.1MB payload): the atob pair was ONE 607ms main-thread long task; this path produced zero
+    // ≥50ms tasks (91ms wall, async) with byte-identical output.
+    const bin = new Uint8Array(await (await fetch("data:application/octet-stream;base64," + embedded)).arrayBuffer());
+    return new EmbeddedStore(await decodeContainerAsync(await gunzip(bin)));
   }
   const res = await fetch(url);
   if (!res.ok) throw new Error(`eidoscope: could not load ${url} (${res.status})`);
-  return new EmbeddedStore(decodeContainer(await gunzip(new Uint8Array(await res.arrayBuffer()))));
+  return new EmbeddedStore(await decodeContainerAsync(await gunzip(new Uint8Array(await res.arrayBuffer()))));
 }
 
 // Decode a .eido the user dropped in / opened locally (browser File → bytes). Same container, no network.
 export async function decodeEido(bytes: Uint8Array): Promise<Store> {
-  return new EmbeddedStore(decodeContainer(await gunzip(bytes)));
+  return new EmbeddedStore(await decodeContainerAsync(await gunzip(bytes)));
 }

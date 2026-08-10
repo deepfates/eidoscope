@@ -31,6 +31,13 @@ try {
   // key gate appears after axes (or immediately if remembered) — fill it whenever it shows
   const deadline = Date.now() + 8 * 60_000;
   let mounted = 0;
+  // the measured-rate estimate line (eid-yhj7): record it as it appears/updates during the real run
+  const estimates: string[] = [];
+  const sampleEst = async () => {
+    const e = await p.evaluate(() => document.querySelector("[data-testid=ingest-estimate]")?.textContent?.trim() ?? "").catch(() => "");
+    if (e && estimates[estimates.length - 1] !== e) { estimates.push(e); console.log(`  · estimate: ${e}`); }
+  };
+  const estTimer = setInterval(sampleEst, 1000);
   while (Date.now() < deadline && !mounted) {
     const key = p.locator("input[type=password]").first();
     if ((await key.count()) && (await key.isVisible().catch(() => false)) && !(await key.inputValue().catch(() => "x"))) {
@@ -39,8 +46,9 @@ try {
     mounted = await p.evaluate(() => { try { return (window as any).__eido?.()?.regions ?? 0; } catch { return 0; } });
     if (!mounted) await p.waitForTimeout(4000);
   }
+  clearInterval(estTimer);
   const st = await p.evaluate(() => (window as any).__eido?.() ?? null);
   const mins = Math.round((Date.now() - t0) / 6000) / 10;
   if (!st?.regions || !st?.visible) { console.error(`✗ real-smoke: no map mounted after ${mins}min`); process.exit(1); }
-  console.log(`✅ real-smoke: ${st.visible} cards · ${st.regions} regions · ${mins}min · real key, real calls, no mocks`);
+  console.log(`✅ real-smoke: ${st.visible} cards · ${st.regions} regions · ${mins}min · ${estimates.length} estimate-line updates · real key, real calls, no mocks`);
 } finally { await b.close(); srv.stop(); }
