@@ -77,5 +77,7 @@ ROADMAP.md      the plan, mirroring tk epic eid-caza
 test/ e2e/      the gate — `bun run qa`
 ```
 
-The pipeline and the viewer are coupled by exactly one thing: the `MapContract` in `src/schema.ts`.
-Either side may change freely as long as both honor it.
+The engine is host-free (`src/engine.ts`); the CLI and the page are two bindings of the same
+engine. What couples them is the contract: the `MapContract` in `src/schema.ts` and the `.eido`
+codec that carries it. Either binding may change freely as long as engine parity holds — a test
+pins the two hosts float-for-float.
