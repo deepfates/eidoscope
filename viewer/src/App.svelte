@@ -982,7 +982,10 @@
                 {#if d.wide}
                   <!-- too many values for colour to say anything (eid-ml88) — the dimension is still
                        here to ISOLATE by, and still available on sort/find/window; colour just declines -->
-                  <span class="min-w-0 flex-1 px-3 py-1.5 text-sm opacity-50" data-wide="{scope}:{d.key}"><span class="w-3 inline-block"></span><span class="truncate">{d.name}</span> <span class="font-mono text-[10px]">· {d.ord?.length} values, too many to colour</span></span>
+                  <span class="flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-sm opacity-50" data-wide="{scope}:{d.key}" title="{d.ord?.length} distinct values — more than colour can distinguish; isolate, sort and find still use it">
+                    <span class="w-3 flex-none"></span><span class="min-w-0 flex-1 truncate">{d.name}</span>
+                    <span class="ml-auto flex-none font-mono text-[10px]">{d.ord?.length} values</span>
+                  </span>
                 {:else}
                   <button class="min-w-0 flex-1" data-opt="{scope}:color:{d.key}" aria-pressed={m.channels.color === d.key} onclick={() => (m.channels.color = d.key)}><span class="w-3">{m.channels.color === d.key ? "✓" : ""}</span><span class="truncate">{d.name}</span></button>
                 {/if}
