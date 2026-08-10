@@ -6,8 +6,8 @@
   import { IngestRun, EnvelopeError, getKey, setKey, type IngestFile, type IngestStatus } from "./ingest";
   import type { MapContract } from "../../src/schema";
 
-  let { files, name, onDone, onCancel }: {
-    files: IngestFile[]; name: string;
+  let { files, name, source, onDone, onCancel }: {
+    files: IngestFile[]; name: string; source?: string;
     onDone: (D: MapContract) => void; onCancel: () => void;
   } = $props();
 
@@ -20,7 +20,7 @@
   // retry (session caches make it cheap: only failures re-spend) or an explicit open-without-them.
   let partial = $state<MapContract | null>(null);
 
-  const run = new IngestRun(files, name, (s) => (status = s));
+  const run = new IngestRun(files, name, (s) => (status = s), source);
 
   async function go() {
     started = true; error = ""; partial = null;
