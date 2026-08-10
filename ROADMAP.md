@@ -59,9 +59,17 @@ from any app state (`eid-9rdy`), and the similarity-arranged theme-derived color
 (`eid-zsij` — engine-minted per-card color coordinates carried in the `.eido`; region/categorical
 hues from member centroids with exact order-preserving separation; theme-derived scalar/diverging
 ramps; tree hues, the spread-k region path, and the Viridis carve-out deleted).
-Queued next: arbitrary per-row metadata columns (`eid-xmf0`, acceptance = the Pitchfork corpus
-carded once with its columns riding), the matklad QA gate rework (`eid-6egl`), then the micro-UX
-live items (`eid-kzv2`).
+Also landed: arbitrary per-row metadata columns (`eid-xmf0` — one generic typed store in the
+contract and the v2.2 container, threaded ingest → `cols` → dimensions in the `mcol:` namespace;
+the HuggingFace connector carries every non-text column; its full-corpus acceptance run is still
+outstanding) and the deletion of the last size-refusal (the page states honest estimates and
+proceeds at any corpus size, never refuses).
+Queued next, in triage order: run durability (`eid-ext6` — a long paid ingest must survive a crash;
+prove cache survival free before spending again), folder-side metadata extraction (`eid-ovsw`, so
+metadata isn't a HuggingFace-only privilege), the Pitchfork acceptance run (`eid-xmf0`/`eid-6bd2`),
+the matklad QA gate rework (`eid-6egl`), then the micro-UX live items (`eid-kzv2`). The interface
+era's brief lives on `eid-rcm8` (ingest as workspace; provider/compute as user choices) and
+`eid-ef7e` (tools not buttons; the analogy field).
 
 Recovered from the full conversation history and now tracked (things asked for that had fallen out
 of the record): the micro-UX inventory (`eid-kzv2` — multiple filter slicers, a real status bar,
