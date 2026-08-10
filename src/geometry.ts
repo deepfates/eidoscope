@@ -26,14 +26,16 @@ export function buildMetaFields(D: Partial<MapContract> & { axes: MapContract["a
   f.push({ key: "hub", label: "connections", type: "scalar", source: "col:hub" });
   if (has(D.citec)) f.push({ key: "citec", label: "citation impact", type: "scalar", source: "col:citec" });
   f.push({ key: "length", label: "length", type: "scalar", source: "derived:length" });
-  // the GENERIC column store (eid-xmf0): every carried column becomes a declared dimension. The viewer's
-  // resolver reads `col:<key>` from D.cols first, so these coexist with the hand-declared fields above;
-  // a key collision (a source column literally named like a hand field's key) defers to the hand field.
+  // the GENERIC column store (eid-xmf0): every carried column becomes a declared dimension, under its
+  // OWN source namespace — `mcol:<key>` reads ONLY D.cols, `col:<field>` reads ONLY the hand-declared
+  // top-level fields, no fallthrough. So an incoming column named `authors`/`tags`/`dates` can never
+  // shadow (or be shadowed by) a native dimension: both exist, each resolving its own data. Only the
+  // DISPLAY key is deduplicated on collision (the key is UI identity — channel slots, URLs).
   const taken = new Set(f.map((x) => x.key));
   for (const c of D.cols ?? []) {
     const key = taken.has(c.key) ? c.key + "·col" : c.key;
     taken.add(key);
-    f.push({ key, label: c.label, type: c.type, ...(c.multi ? { multi: true } : {}), source: "col:" + c.key });
+    f.push({ key, label: c.label, type: c.type, ...(c.multi ? { multi: true } : {}), source: "mcol:" + c.key });
   }
   for (const a of D.axes) f.push({ key: "axis:" + a.key, label: a.name, type: "scalar", source: "axis:" + a.key });
   return f;

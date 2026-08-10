@@ -117,7 +117,7 @@ Stratum letters: **S** = source truth, **C** = cache, **W** = work, **F** = file
 | `n` | number | yes | F | document count; every per-node array/buffer has this many rows |
 | `provenance` | object | no | S | `{title?, source?, generated?, count?}` — what corpus, from where, when, how big |
 | `derivedBy` | object | no | C | `{cardModel?, embedder?: {id, dim, pooling?, normalized?}, geometryBasis?: "card"\|"raw", pipelineVersion?, generated?}` — how the map was made; `embedder` lets a tool embed a query into the same space as `vectors` |
-| `metaFields` | array | no | S | typed dimension manifest: `{key, label, type: "categorical"\|"scalar"\|"temporal"\|"boolean", multi?, source}` where `source` is `col:<field>`, `axis:<key>`, or `derived:<k>` |
+| `metaFields` | array | no | S | typed dimension manifest: `{key, label, type: "categorical"\|"scalar"\|"temporal"\|"boolean", multi?, source}` where `source` is `col:<field>` (a hand-declared top-level column), `mcol:<key>` (the generic column store — a disjoint namespace, so a source column named like a native field never shadows it), `axis:<key>`, or `derived:<k>` |
 | `axes` | array | yes | C | `{key, name, low, high, variance?, weak?}` per discovered axis; order defines the row order of the `scores`/`rawScores` buffers |
 | `k` | number | yes | C | region count at the default cluster grain |
 | `di` | number | no | C | default level index into `levels`/`counts` |

@@ -112,3 +112,33 @@ describe("row metadata → the generic column store", () => {
     expect(cols[0].values).toEqual([1, undefined, 3]);
   });
 });
+
+// ── NAMESPACE COLLISION (codex finding): a generic column named like a native field must NOT shadow it ──
+import { buildMetaFields } from "../src/geometry";
+import { buildDimensions } from "../viewer/src/dimensions";
+import { synthMap } from "../e2e/synth";
+
+describe("mcol: vs col: — disjoint source namespaces", () => {
+  test("an incoming `author` column yields BOTH dimensions, native intact, each resolving its own data", () => {
+    const D = synthMap();                       // carries native authors ("Author 0..3")
+    const n = D.ids.length;
+    D.cols = [
+      // deliberately collides with the native author dimension's minted key AND the authors field's name
+      { key: "author", label: "author", type: "categorical", values: Array.from({ length: n }, (_, i) => "gen-" + (i % 2)) },
+      { key: "authors", label: "authors", type: "categorical", values: Array.from({ length: n }, (_, i) => "col-" + (i % 3)) },
+    ];
+    D.metaFields = buildMetaFields(D);
+    // sources are unambiguous: native reads col:authors, generic reads mcol:<key> — never each other
+    const native = D.metaFields.find((f) => f.key === "author")!;
+    const genA = D.metaFields.find((f) => f.source === "mcol:author")!;
+    const genB = D.metaFields.find((f) => f.source === "mcol:authors")!;
+    expect(native.source).toBe("col:authors");
+    expect(genA.key).toBe("author·col");        // display key deduped; source untouched
+    expect(genB.key).toBe("authors");
+    const dims = buildDimensions(D);
+    const dim = (k: string) => dims.find((d) => d.key === k)!;
+    expect(dim("author").cat!(0)).toBe("Author 0");       // native values, reachable, un-shadowed
+    expect(dim("author·col").cat!(0)).toBe("gen-0");      // generic values under the deduped key
+    expect(dim("authors").cat!(1)).toBe("col-1");
+  });
+});
