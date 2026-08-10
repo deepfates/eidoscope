@@ -34,23 +34,29 @@ const base = `http://localhost:${server.port}`;
 
 // ── the canned dataset: 12 long rows (3 topics × 4) + 1 short row the 200-char floor must drop ──────
 const DATASET = "eido/test-corpus";
+// Each topic carries METADATA COLUMNS (eid-xmf0): a comma-multivalue genre, a categorical author and
+// a float score — the acceptance case's shape (genre/author/score) at e2e scale. They must arrive as
+// placeable dimensions on the mounted map, not be dropped with the row.
 const TOPICS = [
-  { name: "volcano", words: "magma lava eruption caldera basalt pyroclastic vent fissure tephra stratovolcano" },
-  { name: "pastry", words: "croissant laminated butter dough proofing viennoiserie ganache choux tart glaze" },
-  { name: "sailing", words: "spinnaker halyard jib tack gybe keel windward leeward mainsail rigging" },
+  { name: "volcano", genre: "geology, fire", author: "kim", words: "magma lava eruption caldera basalt pyroclastic vent fissure tephra stratovolcano" },
+  { name: "pastry", genre: "baking, butter", author: "lee", words: "croissant laminated butter dough proofing viennoiserie ganache choux tart glaze" },
+  { name: "sailing", genre: "sea, wind", author: "ana", words: "spinnaker halyard jib tack gybe keel windward leeward mainsail rigging" },
 ];
 type Row = { row_idx: number; row: Record<string, unknown>; truncated_cells: string[] };
 const ROWS: Row[] = [];
 let idx = 0;
 for (const t of TOPICS) for (let i = 0; i < 4; i++) {
   const text = Array.from({ length: 8 }, (_, s) => `Notes on ${t.name} session ${i} part ${s}: ${t.words} — observed in study ${i}.${s}.`).join("\n\n");
-  ROWS.push({ row_idx: idx++, row: { title: `${t.name} study ${i}`, text, label: TOPICS.indexOf(t) }, truncated_cells: [] });
+  ROWS.push({ row_idx: idx++, row: { title: `${t.name} study ${i}`, text, label: TOPICS.indexOf(t), genre: t.genre, author: t.author, score: 5 + idx * 0.3 }, truncated_cells: [] });
 }
-ROWS.push({ row_idx: idx++, row: { title: "stub", text: "too short", label: 0 }, truncated_cells: [] });
+ROWS.push({ row_idx: idx++, row: { title: "stub", text: "too short", label: 0, genre: "stub", author: "kim", score: 0.1 }, truncated_cells: [] });
 const FEATURES = [
   { feature_idx: 0, name: "title", type: { dtype: "string", _type: "Value" } },
   { feature_idx: 1, name: "text", type: { dtype: "string", _type: "Value" } },
   { feature_idx: 2, name: "label", type: { names: ["a", "b", "c"], _type: "ClassLabel" } },
+  { feature_idx: 3, name: "genre", type: { dtype: "string", _type: "Value" } },
+  { feature_idx: 4, name: "author", type: { dtype: "string", _type: "Value" } },
+  { feature_idx: 5, name: "score", type: { dtype: "float64", _type: "Value" } },
 ];
 const PAGE = 5;                                   // small page → the /rows pagination is really exercised
 let rowsCalls: { offset: number; length: number }[] = [];
@@ -155,7 +161,7 @@ try {
   const prev = await p.locator("[data-testid=hf-preview]").textContent();
   ok(new RegExp(`${DATASET} · default/train · 13 rows`).test(prev ?? ""), `the preview names the dataset and its honest row count — "${prev?.trim()}"`);
   const options = await p.locator("[data-testid=hf-column] option").allTextContents();
-  ok(options.join(",") === "title,text", `only string columns are offered as the text column — [${options.join(", ")}]`);
+  ok(options.join(",") === "title,text,genre,author", `only string columns are offered as the text column — [${options.join(", ")}]`);
   await p.selectOption("[data-testid=hf-column]", "text");
   const sample = await p.locator("[data-testid=hf-sample]").textContent();
   ok(/volcano session 0/.test(sample ?? ""), "the chosen column previews a real sample row");
@@ -169,7 +175,7 @@ try {
   await p.click("[data-testid=ingest-start]");
   await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 180000 });
   await p.waitForTimeout(400);
-  const s = await p.evaluate(() => (window as any).__eido());
+  let s = await p.evaluate(() => (window as any).__eido());
   ok(s.visible === 12, `the mounted map shows the 12 real rows (the short row dropped by the floor) — visible=${s.visible}`);
   ok(llmCalls.card === 12, `exactly one card call per row — ${llmCalls.card}`);
 
@@ -182,6 +188,30 @@ try {
   ok(/MOCKCORE/.test(deck ?? ""), "cards traversed the (mocked) bottleneck like any other corpus");
   const anyTitle = await p.evaluate(() => document.body.textContent?.includes("volcano study 0"));
   ok(!!anyTitle, "row titles come from the dataset's title column");
+
+  // 7. METADATA COLUMNS (eid-xmf0): the non-text columns arrived as PLACEABLE dimensions.
+  await p.keyboard.press("Escape"); await p.waitForTimeout(300);   // close the deck from step 6
+  //    genre (comma-multivalue → categorical multi), author (categorical), score (float → scalar).
+  ok(["genre", "author", "score"].every((k) => s.dims.includes(k)), `genre/author/score are registered dimensions — dims=[${s.dims.join(",")}]`);
+  // colour by genre — the comma-multivalue column drives the colour channel
+  await p.click('[data-menu="bar:color"]'); await p.waitForTimeout(200);
+  ok((await p.locator('[data-opt="bar:color:genre"]').count()) === 1, "the colour menu offers the genre column");
+  await p.click('[data-opt="bar:color:genre"]'); await p.waitForTimeout(250);
+  s = await p.evaluate(() => (window as any).__eido());
+  ok(s.color === "genre", `colour places on genre — color=${s.color}`);
+  // …and the multi value split on the comma: first genre token, not the raw "geology, fire" string
+  const genreRow = p.locator('button[aria-label="isolate genre geology"]').first();
+  ok((await genreRow.count()) === 1, 'the legend shows the SPLIT genre token ("geology"), not the raw comma string');
+  // facet-isolate one genre value: 4 volcano docs remain visible
+  await genreRow.click(); await p.waitForTimeout(300);
+  s = await p.evaluate(() => (window as any).__eido());
+  ok(s.facetPin != null && s.visible === 4, `facet-isolating genre=geology leaves the 4 volcano docs — facetPin=${JSON.stringify(s.facetPin)} visible=${s.visible}`);
+  await genreRow.click(); await p.waitForTimeout(250);   // release
+  // score: the float column is a scalar dimension the colour channel accepts too
+  await p.click('[data-opt="bar:color:score"]'); await p.waitForTimeout(250);
+  s = await p.evaluate(() => (window as any).__eido());
+  ok(s.color === "score" && s.visible === 12, `the float score column colours the map as a scalar — color=${s.color} visible=${s.visible}`);
+  await p.keyboard.press("Escape"); await p.waitForTimeout(150);
 
   ok(pageErrs.length === 0, "no page errors end to end" + (pageErrs.length ? " — " + pageErrs[0] : ""));
   ok(blocked.length === 0, "hermetic — nothing needed the real network" + (blocked.length ? ` — blocked: ${blocked[0]}` : ""));
