@@ -59,3 +59,56 @@ describe("rowsToFiles", () => {
     expect(docs.length).toBe(0);
   });
 });
+
+// ── METADATA COLUMNS (eid-xmf0): every non-text column rides IngestFile.meta → Doc.meta → buildCols ──
+import { buildCols } from "../src/geometry";
+
+describe("row metadata → the generic column store", () => {
+  const p = { dataset: "user/ds", config: "default", split: "train", idColumn: undefined as string | undefined };
+  const long = "x".repeat(300);
+
+  test("rowsToFiles carries every non-text primitive column; blobs/objects are skipped", () => {
+    const files = rowsToFiles(p, [{ row_idx: 0, row: { text: long, score: 7.3, artist: "Pixies", genre: "rock, indie", ok: true, blob: { deep: 1 } } }], "text");
+    expect(files[0].meta).toEqual({ score: 7.3, artist: "Pixies", genre: "rock, indie", ok: true });
+    const docs = docsFromFiles(files, { warn: () => {} });
+    expect(docs[0].meta).toEqual({ score: 7.3, artist: "Pixies", genre: "rock, indie", ok: true });
+  });
+
+  test("buildCols infers types by looking at the values: number→scalar, boolean→boolean, ISO date→temporal, string→categorical", () => {
+    const metas = Array.from({ length: 10 }, (_, i) => ({
+      score: i * 1.5,
+      ok: i % 2 === 0,
+      published: `2020-0${(i % 9) + 1}-01T00:00:00Z`,
+      artist: "artist-" + (i % 3),
+    }));
+    const cols = buildCols(metas);
+    const by = Object.fromEntries(cols.map((c) => [c.key, c]));
+    expect(by.score.type).toBe("scalar");
+    expect(by.score.values[2]).toBe(3);
+    expect(by.ok.type).toBe("boolean");
+    expect(by.published.type).toBe("temporal");
+    expect(by.published.values[0]).toBe(Date.parse("2020-01-01T00:00:00Z"));
+    expect(by.artist.type).toBe("categorical");
+  });
+
+  test("comma-multivalue is detected by sampling, not by name: label-like tokens split, prose does not", () => {
+    const metas = Array.from({ length: 20 }, (_, i) => ({
+      genre: i % 2 === 0 ? "rock, indie" : "pop",
+      blurb: `a long descriptive sentence, with a comma, that keeps rambling on about topic ${i} in a way no genre tag ever would because these clauses run far past any label length`,
+    }));
+    const cols = buildCols(metas);
+    const by = Object.fromEntries(cols.map((c) => [c.key, c]));
+    expect(by.genre.multi).toBe(true);
+    expect(by.genre.values[0]).toEqual(["rock", "indie"]);
+    expect(by.genre.values[1]).toEqual(["pop"]);
+    expect(by.blurb.multi).toBeUndefined();
+    expect(typeof by.blurb.values[0]).toBe("string");
+  });
+
+  test("holes and empty columns: missing values stay undefined; an all-empty key builds no column", () => {
+    const metas: (Record<string, unknown> | undefined)[] = [{ score: 1 }, undefined, { score: 3, ghost: null }];
+    const cols = buildCols(metas);
+    expect(cols.length).toBe(1);
+    expect(cols[0].values).toEqual([1, undefined, 3]);
+  });
+});

@@ -55,6 +55,12 @@ function fullMap(): MapContract {
     read: [true, undefined, undefined], folders: ["f", undefined, undefined],
     ghosts: [{ title: "g", arxiv: "1", url: "u", n: 1, core: "c", xy: [0, 0], sim: 0.5 }],
     views: [{ name: "v", created: 1, state: { layout: "mde" } }],
+    cols: [
+      { key: "score", label: "score", type: "scalar", values: [7.1, undefined, 3] },
+      { key: "published", label: "published", type: "temporal", values: [1700000000001, undefined, 1700000060002] },
+      { key: "genre", label: "genre", type: "categorical", multi: true, values: [["rock", "pop"], undefined, ["jazz"]] },
+      { key: "verified", label: "verified", type: "boolean", values: [true, false, undefined] },
+    ],
   };
 }
 

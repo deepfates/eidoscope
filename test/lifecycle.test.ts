@@ -38,6 +38,34 @@ test("save payload: the browser's exact byte path (fflate gzip ∘ encodeContain
   expect(back.views![0].state.derived![0].ids.length).toBe(30);
 });
 
+test("generic column store (eid-xmf0): every column type round-trips exactly, holes and all", () => {
+  const D = synthMap();
+  const n = D.ids.length;
+  const seq = <T>(f: (i: number) => T) => Array.from({ length: n }, (_, i) => f(i));
+  D.cols = [
+    // scalar with holes
+    { key: "score", label: "score", type: "scalar", values: seq((i) => (i % 7 === 0 ? undefined : i * 0.31)) },
+    // temporal: epoch ms must survive EXACTLY (f64 — f32 would round by minutes)
+    { key: "published", label: "published", type: "temporal", values: seq((i) => (i % 5 === 0 ? undefined : 1700000000001 + i * 86400000)) },
+    // categorical single + comma-multi + boolean
+    { key: "author", label: "author", type: "categorical", values: seq((i) => (i % 3 === 0 ? undefined : "author-" + (i % 4))) },
+    { key: "genre", label: "genre", type: "categorical", multi: true, values: seq((i) => (i % 4 === 0 ? undefined : ["g" + (i % 3), "g" + (i % 5)])) },
+    { key: "verified", label: "verified", type: "boolean", values: seq((i) => (i % 6 === 0 ? undefined : i % 2 === 0)) },
+  ];
+  const back = decodeContainer(gunzipSync(gzipSync(encodeContainer(D))));
+  expect(back.cols).toEqual(D.cols);
+});
+
+test("generic column store: cols [] round-trips as [], absent stays absent", () => {
+  const D = synthMap();
+  expect(D.cols).toBeUndefined();
+  const backAbsent = decodeContainer(gunzipSync(gzipSync(encodeContainer(D))));
+  expect(backAbsent.cols).toBeUndefined();
+  D.cols = [];
+  const backEmpty = decodeContainer(gunzipSync(gzipSync(encodeContainer(D))));
+  expect(backEmpty.cols).toEqual([]);
+});
+
 test("vault zip: the app's client-side zip carries one .md per card plus the manifest", () => {
   const D = synthMap();
   const { manifest, cards } = vaultEntries(D);
