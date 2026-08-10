@@ -7,8 +7,8 @@
   import { engine, CancelledError, getKey, setKey, type IngestFile, type IngestStatus } from "./ingest";
   import type { Store } from "../../src/store";
 
-  let { files, name, onDone, onCancel }: {
-    files: IngestFile[]; name: string;
+  let { files, name, source, onDone, onCancel }: {
+    files: IngestFile[]; name: string; source?: string;
     onDone: (store: Store) => void; onCancel: () => void;
   } = $props();
 
@@ -33,7 +33,7 @@
     started = true; error = ""; partial = null; inFlight = true;
     setKey(key.trim());
     try {
-      const r = await engine.ingest(runId, files, name, key.trim(), (s) => (status = s));
+      const r = await engine.ingest(runId, files, name, key.trim(), (s) => (status = s), source);
       warnings = r.warnings; cardsFailed = r.cardsFailed;
       if (r.store && r.cardsFailed > 0) partial = r.store;
       else if (r.store) onDone(r.store);

@@ -22,6 +22,9 @@ import type { WorkerOp, WorkerReq, WorkerRes, Seams } from "./engine.worker";
 import EngineWorker from "./engine.worker?worker&inline";
 
 export type { IngestFile, IngestStatus };
+// the connectors' pre-download guard (see src/defaults.ts — the ingest-RUN refusal is dead, this
+// bounds only what a connector will pull into the page when the row count is known up front)
+export { INPAGE_ENVELOPE_DOCS } from "../../src/defaults";
 
 // ── the user-held LLM key: a field the user fills, kept in localStorage, never in any file ───────────
 export const KEY_STORAGE = "eido-llm-key";
@@ -157,11 +160,13 @@ export const engine = {
   // Run (or resume — same runId, same worker, warm state) one folder's ingest. Resolves a null store
   // at the key gate. The run's worker dies on clean completion or error (OPFS is the durable resume
   // state); it survives need-key and failed-cards partials, which the panel resumes in place.
-  async ingest(runId: string, files: IngestFile[], name: string, key: string, onStatus: (s: IngestStatus) => void): Promise<IngestResult> {
+  // `source` = which connector this corpus truthfully came through (connectors/types.ts, from main's
+  // HF connector) — rides to the worker's IngestRun and lands in provenance.source.
+  async ingest(runId: string, files: IngestFile[], name: string, key: string, onStatus: (s: IngestStatus) => void, source?: string): Promise<IngestResult> {
     let b = ingestBridges.get(runId);
     if (!b || b.dead) { b = new Bridge(); ingestBridges.set(runId, b); }
     try {
-      const r = await b.call<DoneMsg>({ op: "ingest", runId, files: toPlain(files), name, key }, { onStatus });
+      const r = await b.call<DoneMsg>({ op: "ingest", runId, files: toPlain(files), name, key, source }, { onStatus });
       const complete = !!r.bytes && r.cardsFailed === 0;
       if (complete) { b.dispose(); ingestBridges.delete(runId); }
       return { store: r.bytes ? await decode(r.bytes) : null, cardsFailed: r.cardsFailed, warnings: r.warnings };

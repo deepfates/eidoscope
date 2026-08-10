@@ -8,6 +8,9 @@ export const DEFAULT_EMBED_MODEL = "Xenova/all-MiniLM-L6-v2";
 // both hosts or the two faces would embed the same corpus into different vectors.
 export const EMBED_PARAMS = { chunkWords: 220, maxChunks: 50 };
 export const DEFAULT_MAX_DOC_CHARS = 1_000_000;
-// (The old INPAGE_ENVELOPE_DOCS refusal is gone: the in-page engine runs in a Web Worker, so any
-// corpus size runs without freezing the tab — the ingest panel narrates a measured time estimate
-// instead of refusing at a doc-count constant, and cancel is always live.)
+// The INGEST-RUN refusal at this constant is gone (eid-yhj7): the engine runs in a Web Worker, so any
+// corpus size runs without freezing the tab — the panel narrates a measured time estimate instead,
+// and cancel is always live. The constant survives for CONNECTORS only: when a remote dataset's row
+// count is known up front (HuggingFace), pulling a million rows into the page just to start a
+// multi-hour LLM spend is refused BEFORE download with a pointer at the CLI twin.
+export const INPAGE_ENVELOPE_DOCS = 5000;

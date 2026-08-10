@@ -4,7 +4,7 @@
   import { DropdownMenu, Popover } from "bits-ui";
   import { loadMap, mapUrl, decodeEido, type Store } from "./loader";
   import { createMap, type MapHandle } from "./deckmap";
-  import { col, axisColor, setActiveTheme } from "./encode";
+  import { col, setPaletteK, setColorRegion, setRegionTree, axisColor, setActiveTheme } from "./encode";
   import { themePalette } from "./palette";
   import { buildDimensions, scores01, type Dimension } from "./dimensions";
   import { ViewModel, parseUrl, type CameraOp, type StatePatch } from "./model.svelte";
@@ -15,6 +15,8 @@
   import { encodeContainer } from "../../src/eido-container";
   import { gzipSync, zipSync, strToU8 } from "fflate";
   import Ingest from "./Ingest.svelte";
+  import HuggingFace from "./connectors/HuggingFace.svelte";
+  import type { CorpusPayload } from "./connectors/types";
   import { engine, filesFromFileList, filesFromDataTransfer, getKey, type IngestFile, type IngestStatus } from "./ingest";
   import type { MapContract } from "../../src/schema";
   import { injectEido, vaultEntries, deckJSONL } from "../../src/export";
@@ -111,6 +113,20 @@
   let palVer = $state(0);
   const theme = $derived.by(() => { void palVer; return (themePalette(themeName)?.dark ?? modeOf(themeName) === "dark") ? "dark" : "light"; });
   const colOf = $derived.by(() => { void palVer; return (c: number) => col(c); });
+  // The palette is sized to what the colour channel actually shows: the region count at this grain,
+  // or a categorical dimension's value count (deepfates' ruling 2026-08-10 — no fixed colour count,
+  // no modulo recycling; coarse maps get few well-separated colours, fine maps get exactly as many
+  // as there are regions).
+  // Region colours follow the GRAIN TREE (deepfates' ruling 2026-08-10): the map's nested ladder is
+  // handed to the colour engine once per map, and the region palette at any grain draws its hues from
+  // ancestry — sliding the grain REFINES colour instead of rerolling it. Categorical dimensions have
+  // no tree and keep the spread-k path; old files without a ladder fall back to spread-k too.
+  $effect(() => {
+    setRegionTree(data?.levels);
+    palVer = m.channels.color === "region"
+      ? setColorRegion(m.grain, curCount)
+      : setPaletteK(colorDim?.kind === "categorical" ? (colorDim.ord?.length ?? 24) : 24);
+  });
 
   // read-only views onto the model, so the markup below reads as plainly as it did when the state was inline
   const data = $derived(m.data);
@@ -585,11 +601,15 @@
   // app's front door, not an error.
   let noMap = $state(false);           // true → show the open-a-corpus panel (empty state)
   let noMapHint = $state("");          // why there is no map yet (a fetch error, subdued — not a failure)
-  let ingest = $state<{ files: IngestFile[]; name: string } | null>(null);
-  function startIngest(files: IngestFile[], name: string) {
+  let ingest = $state<{ files: IngestFile[]; name: string; source?: string } | null>(null);
+  // hfOpen: the HuggingFace connector's dialog (connectors/HuggingFace.svelte). Any connector ends
+  // the same way — a CorpusPayload fed to startIngest, into the one Ingest panel.
+  let hfOpen = $state(false);
+  function startIngest(files: IngestFile[], name: string, source?: string) {
     if (!files.length) { noMapHint = "no .md/.txt files in that folder"; return; }
-    ingest = { files, name };
+    ingest = { files, name, source };
   }
+  function connectorReady(p: CorpusPayload) { hfOpen = false; startIngest(p.files, p.name, p.source); }
   async function pickFolder(e: Event) {
     const input = e.currentTarget as HTMLInputElement;
     const list = input.files; if (!list?.length) return;
@@ -1401,6 +1421,9 @@
             <span>open a folder of .md / .txt</span>
             <input type="file" webkitdirectory multiple class="hidden" data-testid="open-folder" onchange={pickFolder} aria-label="open a folder of markdown or text files" />
           </label>
+          <button class="btn justify-start gap-2 normal-case" data-testid="open-hf" onclick={() => (hfOpen = true)} aria-label="load a HuggingFace dataset">
+            <span>map a HuggingFace dataset</span>
+          </button>
           <label class="btn justify-start gap-2 normal-case">
             <span>open a .eido map</span>
             <input type="file" accept=".eido" class="hidden" data-testid="open-eido" onchange={(e) => { const f = (e.currentTarget as HTMLInputElement).files?.[0]; if (f) { noMap = false; openFile(f); } }} aria-label="open a .eido map file" />
@@ -1412,8 +1435,12 @@
     </div>
   {/if}
 
+  {#if hfOpen && !ingest}
+    <HuggingFace onReady={connectorReady} onCancel={() => (hfOpen = false)} />
+  {/if}
+
   {#if ingest}
-    <Ingest files={ingest.files} name={ingest.name} onDone={ingestDone} onCancel={() => (ingest = null)} />
+    <Ingest files={ingest.files} name={ingest.name} source={ingest.source} onDone={ingestDone} onCancel={() => (ingest = null)} />
   {/if}
 
   {#if status}

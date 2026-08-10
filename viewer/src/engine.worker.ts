@@ -32,7 +32,7 @@ const applySeams = (s?: Seams) => {
 };
 
 export type WorkerOp =
-  | { op: "ingest"; runId: string; files: IngestFile[]; name: string; key: string }
+  | { op: "ingest"; runId: string; files: IngestFile[]; name: string; key: string; source?: string }
   | { op: "descend"; map: DescendParent; selIds: string[]; key: string }
   | { op: "embed-query"; text: string; embedderId?: string }
   | { op: "dispose" };   // graceful shutdown: self.close() tears the (large wasm) heap down ON THIS thread
@@ -71,7 +71,7 @@ self.onmessage = async (ev: MessageEvent<WorkerReq>) => {
       (self as any).close();
     } else if (m.op === "ingest") {
       let run = runs.get(m.runId);
-      if (!run) { run = new IngestRun(m.files, m.name, (s) => post({ id: m.id, t: "status", s })); runs.set(m.runId, run); }
+      if (!run) { run = new IngestRun(m.files, m.name, (s) => post({ id: m.id, t: "status", s }), m.source); runs.set(m.runId, run); }
       else run.onStatus = (s: IngestStatus) => post({ id: m.id, t: "status", s });
       try {
         const D = await run.start(m.key);

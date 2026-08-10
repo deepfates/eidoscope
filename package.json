@@ -1,7 +1,7 @@
 {
   "name": "eidoscope",
   "version": "0.0.1",
-  "description": "An instrument for seeing the forms in a corpus \u2014 turn documents into interpretable cards on data-discovered axes, then look at their shape from every angle at once.",
+  "description": "An instrument for seeing the forms in a corpus — turn documents into interpretable cards on data-discovered axes, then look at their shape from every angle at once.",
   "type": "module",
   "license": "MIT",
   "author": "deepfates (with Claude)",
@@ -15,13 +15,14 @@
     "check:viewer": "cd viewer && bunx svelte-check --tsconfig ./tsconfig.json --threshold error",
     "e2e": "bun run e2e/viewer.e2e.ts",
     "build:viewer": "cd viewer && bun run build",
-    "qa": "tsc --noEmit && bun run typecheck:viewer && bun run check:viewer && bun test && bun run build:viewer && bun run e2e/viewer.e2e.ts && bun run e2e/ingest.e2e.ts && bun run e2e/opfs.e2e.ts && bun run e2e/descend.e2e.ts && bun run e2e/offline.ts",
+    "qa": "tsc --noEmit && bun run typecheck:viewer && bun run check:viewer && bun test && bun run build:viewer && bun run e2e/viewer.e2e.ts && bun run e2e/ingest.e2e.ts && bun run e2e/hf.e2e.ts && bun run e2e/opfs.e2e.ts && bun run e2e/descend.e2e.ts && bun run e2e/offline.ts",
     "check:redundancy": "bun run src/redundancy.ts",
     "gallery": "bun run e2e/gallery.ts",
     "singlefile": "bun bin/build-singlefile.ts",
     "predeploy-check": "bun bin/check-shipping-maps.ts",
     "deploy": "bun bin/check-shipping-maps.ts && cp viewer/dist/index.html viewer/dist-pathfinder/ && cp viewer/public/pathfinder.eido viewer/dist-pathfinder/map.eido && cp viewer/public/map.eido viewer/dist-pathfinder/readwise.eido && cp viewer/public/tldr.eido viewer/dist-pathfinder/tldr.eido && cd viewer/dist-pathfinder && npx -y vercel@latest deploy --prod --yes",
-    "smoke:real": "bun bin/real-smoke.ts"
+    "smoke:real": "bun bin/real-smoke.ts",
+    "ship": "bun run qa && bun run smoke:real && bun run deploy"
   },
   "dependencies": {
     "@ax-llm/ax": "^23.0.5",
@@ -38,6 +39,8 @@
   },
   "devDependencies": {
     "@types/bun": "^1.3.14",
+    "@types/culori": "^4.0.1",
+    "culori": "^4.0.2",
     "playwright": "^1.62.0",
     "typescript": "^7.0.2"
   },
