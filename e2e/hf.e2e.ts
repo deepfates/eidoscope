@@ -116,9 +116,17 @@ const blocked: string[] = [];
 
 await p.route("https://openrouter.ai/**", (route) =>
   route.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: mockLLM(route.request().postData() ?? "{}") }));
-// the datasets-server API, mocked at the edge — the page's REAL connector code runs against it
+// the datasets-server API, mocked at the edge — the page's REAL connector code runs against it.
+// ONE /rows page answers 429 first (WITHOUT CORS headers, exactly how the real server rate-limits —
+// the page sees an opaque "Failed to fetch"): the connector's bounded backoff must retry through it.
+let flaky429Left = 1; let sawRetryAfter429 = false;
 await p.route("https://datasets-server.huggingface.co/**", (route) => {
-  const body = dsApi(new URL(route.request().url()));
+  const url = new URL(route.request().url());
+  if (url.pathname === "/rows" && url.searchParams.get("dataset") === DATASET && url.searchParams.get("offset") === "5") {
+    if (flaky429Left > 0) { flaky429Left--; return route.fulfill({ status: 429, body: "" }); }   // no CORS on purpose
+    sawRetryAfter429 = true;
+  }
+  const body = dsApi(url);
   if (body) route.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify(body) });
   else route.fulfill({ status: 404, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify({ error: "dataset not found (mock)" }) });
 });
@@ -173,6 +181,7 @@ try {
   const corpusLine = await p.locator("[data-testid=ingest-corpus]").textContent();
   ok(new RegExp(`${DATASET} · 13 files`).test(corpusLine ?? ""), `the shared ingest panel receives the connector's corpus — "${corpusLine?.trim()}"`);
   ok(rowsCalls.length >= 3, `rows were paged lazily (${rowsCalls.length} /rows calls of ${PAGE})`);
+  ok(sawRetryAfter429, "the rate-limited page (429, no CORS — an opaque browser failure) was retried and recovered");
   await p.click("[data-testid=ingest-start]");
   await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 180000 });
   await p.waitForTimeout(400);

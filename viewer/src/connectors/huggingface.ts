@@ -28,9 +28,41 @@ async function getJSON(path: string): Promise<any> {
   if (!r.ok) {
     let msg = `HTTP ${r.status}`;
     try { const j = await r.json(); if (j?.error) msg = j.error; } catch {}
-    throw new Error(msg);
+    throw Object.assign(new Error(msg), { status: r.status });
   }
   return r.json();
+}
+
+// Page fetch with bounded retries (measured 2026-08-10: the datasets-server rate-limits a ~19k-row
+// split's ~190 sequential /rows pages after ~65 requests, answering 429 WITHOUT CORS headers — the
+// browser sees an opaque "Failed to fetch", so a single blip used to kill the whole download).
+// Retry on thrown network errors, 429 and 5xx; exponential backoff capped at 60s (the observed
+// rate-limit window is under a minute), honoring Retry-After when present. Aborts stay honest:
+// the signal cancels mid-wait, and a real 4xx (404, 422…) still fails fast.
+const sleep = (ms: number, signal?: AbortSignal) => new Promise<void>((res, rej) => {
+  const t = setTimeout(() => { signal?.removeEventListener("abort", onAbort); res(); }, ms);
+  const onAbort = () => { clearTimeout(t); rej(signal!.reason ?? new DOMException("aborted", "AbortError")); };
+  signal?.addEventListener("abort", onAbort, { once: true });
+});
+export const RETRY_ATTEMPTS = 8;
+async function getJSONRetry(path: string, signal?: AbortSignal): Promise<any> {
+  for (let attempt = 0; ; attempt++) {
+    signal?.throwIfAborted();
+    try {
+      const r = await fetch(HF_API + path, { signal });
+      if (r.ok) return r.json();
+      let msg = `HTTP ${r.status}`;
+      try { const j = await r.json(); if (j?.error) msg = j.error; } catch {}
+      if (r.status !== 429 && r.status < 500) throw Object.assign(new Error(msg), { status: r.status, fatal: true });
+      if (attempt >= RETRY_ATTEMPTS) throw Object.assign(new Error(`${msg} — gave up after ${attempt + 1} tries`), { status: r.status });
+      const ra = Number(r.headers.get("retry-after") ?? 0) * 1000;
+      await sleep(Math.min(Math.max(ra, 1000 * 2 ** attempt), 60_000), signal);
+    } catch (e: any) {
+      if (e?.fatal || e?.name === "AbortError" || signal?.aborted) throw e;
+      if (attempt >= RETRY_ATTEMPTS) throw e instanceof Error ? e : new Error(String(e));
+      await sleep(Math.min(1000 * 2 ** attempt, 60_000), signal);
+    }
+  }
 }
 
 export type HFColumn = { name: string; isString: boolean };
@@ -112,7 +144,7 @@ export async function fetchDataset(
   for (let offset = 0; offset < total; offset += page) {
     signal?.throwIfAborted();
     const q = `dataset=${encodeURIComponent(p.dataset)}&config=${encodeURIComponent(p.config)}&split=${encodeURIComponent(p.split)}&offset=${offset}&length=${Math.min(page, total - offset)}`;
-    const j = await getJSON(`/rows?${q}`);
+    const j = await getJSONRetry(`/rows?${q}`, signal);
     files.push(...rowsToFiles(p, j?.rows ?? [], column));
     onProgress?.(files.length, total);
   }
