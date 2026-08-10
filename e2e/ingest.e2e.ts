@@ -24,11 +24,11 @@ if (!existsSync(join(TMODEL, "onnx", "model.onnx"))) { console.error("✗ local 
 const server = Bun.serve({
   port: 0,
   fetch(req) {
-    const path = new URL(req.url).pathname;
+    const path = new URL(req.url).pathname; if (process.env.EIDO_E2E_DEBUG) console.error("[srv]", path);
     if (path === "/map.eido") return new Response("not here", { status: 404 });
-    // the transformers runtime + MiniLM weights, served from the LOCAL package (hermetic ingest e2e)
-    if (path === "/tf") return new Response(Bun.file(join(TDIST, "transformers.min.js")), { headers: { "content-type": "text/javascript" } });
-    if (path.startsWith("/tf/dist/")) { const f = join(TDIST, path.slice("/tf/dist/".length)); return existsSync(f) ? new Response(Bun.file(f)) : new Response("", { status: 404 }); }
+    // the ort wasm binaries + MiniLM weights, served from the LOCAL package (hermetic ingest e2e); the
+    // transformers.js RUNTIME itself is bundled into the app (same npm package as the node pipeline)
+    if (path.startsWith("/tfwasm/")) { const f = join(TDIST, path.slice("/tfwasm/".length)); return existsSync(f) ? new Response(Bun.file(f)) : new Response("", { status: 404 }); }
     const hf = path.match(/^\/hf\/.*all-MiniLM-L6-v2\/resolve\/[^/]+\/(.+)$/);
     if (hf) { const f = hf[1].startsWith("onnx/") ? join(TMODEL, "onnx", "model.onnx") : join(TMODEL, hf[1]); return existsSync(f) ? new Response(Bun.file(f)) : new Response("", { status: 404 }); }
     if (path.startsWith("/hf/")) return new Response("", { status: 404 });
@@ -94,9 +94,10 @@ await p.route("https://openrouter.ai/**", async (route) => {
   const req = route.request();
   route.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: mockLLM(req.postData() ?? "{}") });
 });
-// the runtime + weights come from the LOCAL Bun server (see fetch above), pointed at via the page's
-// test seam — so the only intercepted host is OpenRouter. Everything else non-local is aborted.
-await p.addInitScript(`window.__EIDO_TF_CDN = ${JSON.stringify(base + "/tf")}; window.__EIDO_TF_HOST = ${JSON.stringify(base + "/hf/")};`);
+// the weights + ort wasm come from the LOCAL Bun server (see fetch above), pointed at via the page's
+// test seams (the library's documented env.remoteHost / wasmPaths) — so the only intercepted host is
+// OpenRouter. Everything else non-local is aborted.
+await p.addInitScript(`window.__EIDO_TF_HOST = ${JSON.stringify(base + "/hf/")}; window.__EIDO_TF_WASM = ${JSON.stringify(base + "/tfwasm/")};`);
 // hermetic: nothing else leaves localhost
 await p.route(/^https?:\/\/(?!localhost)/, (route) => {
   const u = route.request().url();

@@ -3,41 +3,63 @@
 // rank the real corpus sensibly — then cosine-rank every card. The per-card scalar becomes a synthetic AXIS,
 // so it flows through the existing channel grammar (color / size / x / y) with no per-channel wiring.
 //
-// The embedder lives in the APP (never the file): transformers.js is lazy-loaded from a CDN on first query
-// (~small js; the MiniLM weights ~23MB stream from the HF hub once, then cache). This matches the architecture
-// — the .eido carries the vectors (the value); the app carries the runtime. The embedder id is pinned to the
-// file's derivedBy.embedder.id so a query lands in the SAME space as the cards.
+// The embedder lives in the APP (never the file): transformers.js is the SAME npm package the node
+// pipeline imports (@huggingface/transformers 3.8.1), lazy-loaded as a code-split chunk on first query
+// so the ~1MB runtime never touches first paint. The MiniLM weights (~23MB) still stream from the HF hub
+// once, then cache (Cache API) — the .eido carries the vectors (the value); the app carries the runtime.
+// The embedder id is pinned to the file's derivedBy.embedder.id so a query lands in the SAME space as the cards.
+//
+// Device: WebGPU when the browser actually has an adapter (the documented `device: "webgpu"` pipeline
+// option). Detection is the standard WebGPU check — `navigator.gpu` plus `requestAdapter()` (MDN: null
+// when no suitable adapter; the library itself detects fp16 support the same way). The adapter check
+// happens BEFORE the first pipeline is created, deliberately: transformers.js caches the first session
+// create as its wasm-init promise (onnx.js `wasmInitPromise ??= sessionPromise`), so a FAILED webgpu
+// attempt poisons every later wasm session in the page — create-then-catch-then-retry cannot work.
 
 import type { CardVectors } from "../../src/schema";
 
-// Test seam (same spirit as window.__eido): the integration suite serves the runtime + weights from
-// localhost so an ingest e2e is hermetic — production never sets these and uses the CDN + HF hub.
-const CDN = (globalThis as any).__EIDO_TF_CDN ?? "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1";
 let extractorP: Promise<any> | null = null;
 
 // Progress the caller can surface while the (one-time) model download runs — so the first query isn't a
 // silent 30s freeze. `pct` is 0..100 during download; `phase` distinguishes the runtime/model fetch from embed.
 export type EmbedProgress = { phase: "runtime" | "download" | "embed"; pct?: number; label: string };
 
+// Which compute backend the live extractor actually initialized on ("webgpu" | "wasm") — set once the
+// pipeline resolves, so callers/tests can verify the honest device rather than trusting the feature check.
+export let embedDevice: "webgpu" | "wasm" | null = null;
+
+// Test seam (same spirit as window.__eido): the integration suite serves the model weights and the ort
+// wasm binaries from localhost so an ingest e2e is hermetic — both knobs are the library's DOCUMENTED
+// env fields (env.remoteHost / env.backends.onnx.wasm.wasmPaths); production never sets these and uses
+// the HF hub + the package's default wasm location.
+function applyTestSeams(t: any): void {
+  const host = (globalThis as any).__EIDO_TF_HOST;
+  if (host && t.env) { t.env.remoteHost = host; t.env.allowLocalModels = false; }
+  const wasm = (globalThis as any).__EIDO_TF_WASM;
+  if (wasm && t.env?.backends?.onnx?.wasm) t.env.backends.onnx.wasm.wasmPaths = wasm;
+}
+
 // Load transformers.js + the model once. `id` should be the file's derivedBy.embedder.id. On ANY failure the
-// cached promise is cleared so a retry starts clean (a throttled/aborted CDN fetch shouldn't poison later tries).
+// cached promise is cleared so a retry starts clean (an aborted weights fetch shouldn't poison later tries).
 async function extractor(id: string, onProgress?: (p: EmbedProgress) => void): Promise<any> {
   if (!extractorP) {
     extractorP = (async () => {
       onProgress?.({ phase: "runtime", label: "loading model runtime…" });
-      const t: any = await import(/* @vite-ignore */ CDN);
-      // let onnxruntime-web fetch its wasm from the same CDN (no local asset wiring needed)
-      if (t.env?.backends?.onnx?.wasm) t.env.backends.onnx.wasm.wasmPaths = CDN + "/dist/";
-      const host = (globalThis as any).__EIDO_TF_HOST;
-      if (host && t.env) { t.env.remoteHost = host; t.env.allowLocalModels = false; }
-      return t.pipeline("feature-extraction", id, {
-        // transformers.js streams {status, file, progress 0..100, loaded, total} while it pulls the ~23MB weights.
-        progress_callback: (e: any) => {
-          if (!onProgress) return;
-          if (e?.status === "progress" && typeof e.progress === "number") onProgress({ phase: "download", pct: Math.round(e.progress), label: `downloading model ${Math.round(e.progress)}%` });
-          else if (e?.status === "done" || e?.status === "ready") onProgress({ phase: "download", pct: 100, label: "model ready" });
-        },
-      });
+      const t: any = await import("@huggingface/transformers");
+      applyTestSeams(t);
+      const progress_callback = (e: any) => {
+        if (!onProgress) return;
+        if (e?.status === "progress" && typeof e.progress === "number") onProgress({ phase: "download", pct: Math.round(e.progress), label: `downloading model ${Math.round(e.progress)}%` });
+        else if (e?.status === "done" || e?.status === "ready") onProgress({ phase: "download", pct: 100, label: "model ready" });
+      };
+      const device = await (async () => {
+        try { return (await (navigator as any).gpu?.requestAdapter()) ? "webgpu" as const : "wasm" as const; }
+        catch { return "wasm" as const; }
+      })();
+      if (device === "wasm" && (navigator as any).gpu) console.warn("eidoscope: navigator.gpu present but no WebGPU adapter — embedding on wasm");
+      const ex = await t.pipeline("feature-extraction", id, { device, progress_callback });
+      embedDevice = device;
+      return ex;
     })().catch((err) => { extractorP = null; throw err; });
   }
   return extractorP;

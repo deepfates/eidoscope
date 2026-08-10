@@ -19,6 +19,7 @@
     "vite-plugin-singlefile": "^2.0.0"
   },
   "dependencies": {
+    "@huggingface/transformers": "3.8.1",
     "@types/culori": "^4.0.1",
     "apache-arrow": "^18.0.0",
     "bits-ui": "^2.18.1",
