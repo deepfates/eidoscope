@@ -10,9 +10,12 @@
 // The generator is pure (tokens in → colours out) so it is unit-testable; readThemeTokens() is the only part
 // that touches the DOM. Callers memoize per data-theme name via themePalette().
 //
-// REGION colours additionally follow the map's GRAIN TREE (buildRegionTree/treeHues/treeThemePalette
-// below): hue = ancestry, so the grain slider refines colour instead of rerolling it. The flat
-// spread-k ring below remains the path for categorical dimensions and ladder-less maps.
+// REGION and CATEGORICAL colours additionally follow the map's COLOR COORDINATES (eid-zsij) when the
+// file carries them: hue = the group's member-centroid angle on the colour disc (similar things wear
+// similar hues, across every view), separated along the ring order-preservingly (separateHues below),
+// then pushed through THIS engine's chroma personality + contrast band + deuteranopia hill-climb via
+// the FixedHues path. The flat spread-k ring below survives as the fallback for files without colour
+// coordinates. Scalar dimensions get theme-derived OKLCH ramps (viewer/src/encode.ts scalarRamp).
 import { converter, clampChroma, wcagContrast, filterDeficiencyDeuter, parse } from "culori";
 import { GRAIN_PALETTE_N } from "../../src/schema";
 
@@ -43,81 +46,60 @@ export type Derived = {
 };
 
 // ---------------------------------------------------------------------------
-// REGION TREE → HUE SPANS (eid-yhj7, ruled 2026-08-10). Region colours follow the GRAIN TREE:
-// the full hue ring [0,360) is owned by the root; each region owns a sub-span of its parent's span,
-// subdivided among siblings proportional to member count; a region's hue is its span's centre. Hue is
-// therefore determined by ANCESTRY — deepening the grain REFINES colour (children are related-but-
-// distinct shades of the parent's neighbourhood) instead of rerolling it, and sibling similarity
-// becomes information. Lightness tiers + the hill-climb (below) separate the hue-adjacent siblings.
+// COLOR-COORDINATE HUES (eid-zsij, approved 2026-08-10). When the file carries per-card colour
+// coordinates (a dedicated projection of the card vectors onto the unit disc), every group of cards
+// — a region at any grain, a categorical value's members — wears the hue of its MEMBER CENTROID's
+// angle on that disc. Similar groups sit near each other in card space, so they wear similar hues,
+// in every view (neighbor map, axis scatter, 3D). Chroma + lightness never come from the disc: they
+// come from THIS file's theme engine (chroma personality, contrast-floor band, deuteranopia
+// hill-climb) through the FixedHues path, so full-strength theme colours are guaranteed.
 
-export type RegionTree = {
-  counts: number[];       // regions per level
-  parents: number[][];    // parents[l][r] = parent region at level l-1 (level 0: -1)
-  sizes: number[][];      // member count per region per level
-  ordinal: number[][];    // position among same-parent siblings (drives the lightness tier)
-  violations: number;     // nodes whose parent was inconsistent — 0 when the ladder truly nests
-};
-
-/** Derive the grain tree from the MapContract `levels` arrays (per level: per-node region id).
- *  The ladder is divisive, so every region at level l+1 sits inside exactly one region at level l;
- *  `violations` counts any node that breaks that (measured 0 on real maps — kept as a canary). */
-export function buildRegionTree(levels: number[][]): RegionTree | null {
-  if (!levels?.length || !levels[0]?.length) return null;
-  const nL = levels.length, n = levels[0].length;
-  const counts: number[] = [], parents: number[][] = [], sizes: number[][] = [];
-  let violations = 0;
-  for (let l = 0; l < nL; l++) {
-    let k = 0; for (let i = 0; i < n; i++) if (levels[l][i] >= k) k = levels[l][i] + 1;
-    counts.push(k);
-    const sz = new Array<number>(k).fill(0), par = new Array<number>(k).fill(-1);
-    for (let i = 0; i < n; i++) {
-      const r = levels[l][i]; sz[r]++;
-      if (l > 0) { const p = levels[l - 1][i]; if (par[r] === -1) par[r] = p; else if (par[r] !== p) violations++; }
-    }
-    sizes.push(sz); parents.push(par);
+/** Per-group centroid angle (degrees, 0..360) of the members' colour coordinates. Groups with no
+ *  members get 0 — they never render, so any value is inert. `assign[i]` < 0 = card in no group. */
+export function centroidHues(coords: number[][], assign: ArrayLike<number>, k: number): number[] {
+  const cx = new Array<number>(k).fill(0), cy = new Array<number>(k).fill(0), cn = new Array<number>(k).fill(0);
+  for (let i = 0; i < coords.length; i++) {
+    const g = assign[i]; if (g == null || g < 0 || g >= k) continue;
+    cx[g] += coords[i][0]; cy[g] += coords[i][1]; cn[g]++;
   }
-  const ordinal = parents.map((par) => { const seen = new Map<number, number>(); return par.map((p) => { const o = seen.get(p) ?? 0; seen.set(p, o + 1); return o; }); });
-  return { counts, parents, sizes, ordinal, violations };
+  return Array.from({ length: k }, (_, g) => (cn[g] ? ((Math.atan2(cy[g] / cn[g], cx[g] / cn[g]) * 180) / Math.PI + 360) % 360 : 0));
 }
 
-// Subdivide a span among siblings proportional to size, each slot shrunk about its centre by
-// s/(s+1) — so the guard gap between adjacent siblings is derived from the span and the sibling
-// count (mean slot width / (s+1)), never an absolute constant. A lone child inherits the parent
-// span exactly, which is what keeps an unsplit region's hue IDENTICAL across grain levels.
-function subdivide(lo: number, width: number, sz: number[]): [number, number][] {
-  const s = sz.length;
-  if (s === 1) return [[lo, width]];
-  const total = sz.reduce((a, b) => a + b, 0) || s;
-  const out: [number, number][] = []; let cur = lo;
-  for (const w of sz) {
-    const slot = (width * (w || 1)) / total;
-    out.push([cur + slot / (2 * (s + 1)), (slot * s) / (s + 1)]);
-    cur += slot;
+/** Order-preserving circular separation: nudge hues along the ring — NEVER reorder them — until
+ *  every adjacent circular gap is ≥ gmin degrees. Similar groups stay adjacent on the ring (the
+ *  similarity signal survives); identical/near-identical centroid angles become distinguishable.
+ *  gmin is bounded by equal spacing (360/k), so the loop always converges. */
+export function separateHues(hues: number[], gmin: number): number[] {
+  const k = hues.length;
+  if (k < 2 || gmin <= 0) return hues.slice();
+  const idx = hues.map((_, i) => i).sort((a, b) => hues[a] - hues[b]);
+  const a = idx.map((i) => hues[i]);   // unwrapped working domain: values may drift <0 or >360; order is what matters
+  for (let pass = 0; pass < 400; pass++) {
+    let moved = false;
+    for (let j = 0; j < k; j++) {
+      const p = (j + 1) % k;
+      const gap = j === k - 1 ? a[p] + 360 - a[j] : a[p] - a[j];
+      if (gap < gmin - 1e-6) { const push = (gmin - gap) / 2; a[j] -= push; a[p] += push; moved = true; }
+    }
+    if (!moved) break;
   }
+  const out = new Array<number>(k);
+  idx.forEach((orig, j) => (out[orig] = ((a[j] % 360) + 360) % 360));
   return out;
 }
 
-/** Ancestry-stable hues per level: span centres, with the whole ring rotated so the largest
- *  top-level region lands on `anchorHue` (the theme's primary token — keeps the theme-derived
- *  personality; deterministic). */
-export function treeHues(tree: RegionTree, anchorHue: number): number[][] {
-  const { counts, parents, sizes } = tree;
-  const spans: [number, number][][] = [subdivide(0, 360, sizes[0])];
-  for (let l = 1; l < counts.length; l++) {
-    const lvl = new Array<[number, number]>(counts[l]);
-    // children grouped per parent, in region-id order (deterministic: divisive ids are stable)
-    const byParent = new Map<number, number[]>();
-    for (let r = 0; r < counts[l]; r++) { const p = parents[l][r]; const a = byParent.get(p); if (a) a.push(r); else byParent.set(p, [r]); }
-    for (const [p, kids] of byParent) {
-      const [plo, pw] = spans[l - 1][p] ?? [0, 360];
-      subdivide(plo, pw, kids.map((r) => sizes[l][r])).forEach((sp, i) => (lvl[kids[i]] = sp));
-    }
-    spans.push(lvl);
-  }
-  let big = 0; sizes[0].forEach((w, r) => { if (w > sizes[0][big]) big = r; });
-  const [blo, bw] = spans[0][big];
-  const delta = anchorHue - (blo + bw / 2);
-  return spans.map((lvl) => lvl.map(([lo, w]) => (((lo + w / 2 + delta) % 360) + 360) % 360));
+/** The full recipe: member-centroid hues → order-preserving separation → the theme engine with hues
+ *  PINNED (FixedHues: chroma personality, contrast band, deuteranopia hill-climb on L only).
+ *  Lightness tiers phase-rotate along the ring's hue ORDER — hue-adjacent groups land on different
+ *  tiers, which is exactly where separation is needed. Null when the theme's tokens are unusable. */
+export function coordPalette(theme: ThemeTokens, coords: number[][], assign: ArrayLike<number>, k: number): Derived | null {
+  const raw = centroidHues(coords, assign, k);
+  // hue-gap floor: 10° of real separation, capped at 80% of equal spacing so it stays achievable
+  const gmin = Math.min(10, 0.8 * (360 / k));
+  const sep = separateHues(raw, gmin);
+  const rank = new Array<number>(k);
+  sep.map((h, g) => [h, g] as const).sort((p, q) => p[0] - q[0]).forEach(([, g], j) => (rank[g] = j));
+  return derivePalette(theme, k, { hues: sep, tiers: rank.map((j) => (j * 2) % 3) });
 }
 
 /** The theme's primary-token hue (falling back through the chromatic tokens; 0 if achromatic). */
@@ -141,22 +123,20 @@ export function derivePalette(theme: ThemeTokens, n = N, fixed?: FixedHues): Der
   const bgc: any = theme["base-100"] ? toOklch(parse(theme["base-100"]) as any) ?? null : null;
   if (!bgc || !Number.isFinite(bgc.l)) return null;
   const inkc: any = theme["base-content"] ? toOklch(parse(theme["base-content"]) as any) ?? null : null;
-  const dark = bgc.l < 0.5;
 
   // 1. anchors: the theme's chromatic tokens, deduped so near-identical hues don't crowd the ring
   const anchors: number[] = [];
-  const chromas: number[] = [];
   for (const k of HUE_KEYS) {
     const raw = theme[k]; if (!raw) continue;
     const p = parse(raw); if (!p) continue;
     const c: any = toOklch(p as any);
     if ((c.c ?? 0) < 0.04 || c.h == null) continue;   // achromatic token carries no hue signal
-    chromas.push(c.c!);
     if (!anchors.some((h) => Math.abs(((h - c.h! + 540) % 360) - 180) > 165)) anchors.push(c.h!);
   }
-  const median = (a: number[]) => (a.length ? [...a].sort((x, y) => x - y)[a.length >> 1] : 0);
-  // 2. theme "personality": its own chroma level, clamped so it never goes muddy or neon-unreadable
-  const C = Math.min(0.19, Math.max(0.085, median(chromas) || 0.14));
+  // 2+4. theme "personality" chroma + the contrast-floor lightness band — ONE implementation,
+  // shared with the scalar ramps (themeGamut below)
+  const g = themeGamut(theme)!;   // bgc parsed above, so this cannot be null
+  const { C, dark } = g;
 
   // 3. hue set. FIXED path (region tree): the hues arrive pre-determined by ancestry — the engine
   //    must not move them. FLAT path (categorical dims, fallback): keep the anchors, fill the rest
@@ -178,13 +158,8 @@ export function derivePalette(theme: ThemeTokens, n = N, fixed?: FixedHues): Der
     hues.length = n;
   }
 
-  // 4. a lightness band that clears the contrast floor against THIS canvas
-  const okAt = (l: number, h: number, c = C) => ({ mode: "oklch" as const, l, c, h });
-  const passes = (l: number, h: number) => wcagContrast(clampChroma(okAt(l, h), "oklch"), bgc as any) >= CONTRAST_FLOOR;
-  let lo = dark ? 0.55 : 0.42, hi = dark ? 0.9 : 0.72;
-  const worstH = dark ? 264 : 100;   // blue is darkest at equal L, yellow lightest
-  for (let g = 0; g < 40 && !passes(dark ? lo : hi, worstH); g++) { if (dark) lo += 0.01; else hi -= 0.01; }
-  if (hi - lo < 0.1) { const m = (hi + lo) / 2; lo = m - 0.05; hi = m + 0.05; }
+  // (band computed by themeGamut above)
+  const { lo, hi } = g;
 
   // 5. three lightness tiers: a lightness channel that survives dichromacy (hue collapses under
   //    deuteranopia, lightness does not). FLAT path: phase-rotated across the hue ring. FIXED path:
@@ -306,28 +281,38 @@ export function themePalette(name: string, tokens?: ThemeTokens, n: number = N):
 }
 export const _resetPaletteMemo = () => memo.clear();   // tests only
 
-// Tree-hue palettes are memoized per (tree, theme, level); trees are per-map objects, so a WeakMap
-// lets an unloaded map's palettes be collected with it. The hue tree itself (spans + anchor rotation)
-// is theme-dependent only through the anchor hue, so it is memoized per (tree, anchor).
-const treeMemo = new WeakMap<RegionTree, Map<string, Derived | null>>();
-const hueMemo = new WeakMap<RegionTree, Map<number, number[][]>>();
-export function treeThemePalette(name: string, tree: RegionTree, level: number, tokens?: ThemeTokens): Derived | null {
-  let m = treeMemo.get(tree); if (!m) treeMemo.set(tree, (m = new Map()));
-  const key = `${name}:${level}`;
-  if (m.has(key)) return m.get(key)!;
-  if (!tokens) { tokens = tokenMemo.get(name) ?? readThemeTokens(); tokenMemo.set(name, tokens); }
-  let d: Derived | null = null;
-  try {
-    const anchor = anchorHueOf(tokens);
-    let hm = hueMemo.get(tree); if (!hm) hueMemo.set(tree, (hm = new Map()));
-    let hues = hm.get(anchor); if (!hues) hm.set(anchor, (hues = treeHues(tree, anchor)));
-    const lh = hues[level];
-    if (lh) d = derivePalette(tokens, lh.length, { hues: lh, tiers: tree.ordinal[level] });
-  } catch { d = null; }
-  m.set(key, d);
-  if (d) {
-    const mm = d.metrics;
-    console.info(`[eido] tree palette "${name}" level ${level} (${d.colors.length} regions): minΔEOK ${mm.minDEok.toFixed(4)} · deuter ${mm.minDEokDeuter.toFixed(4)} · contrast ${mm.worstContrast.toFixed(2)}:1`);
-  }
-  return d;
+/** The live theme's tokens by data-theme name, memoized (read off the DOM once per theme). */
+export function themeTokensOf(name: string): ThemeTokens {
+  let t = tokenMemo.get(name);
+  if (!t) { t = readThemeTokens(); tokenMemo.set(name, t); }
+  return t;
 }
+
+// ---------------------------------------------------------------------------
+// THEME GAMUT for scalar ramps (eid-zsij): the same personality-chroma + contrast-floor lightness
+// band derivePalette computes, exposed as numbers so encode.ts can build monotone-lightness and
+// diverging OKLCH ramps from them (the Viridis carve-out's replacement).
+export type Gamut = { C: number; lo: number; hi: number; dark: boolean; anchor: number };
+export function themeGamut(theme: ThemeTokens): Gamut | null {
+  const bgc: any = theme["base-100"] ? toOklch(parse(theme["base-100"]) as any) ?? null : null;
+  if (!bgc || !Number.isFinite(bgc.l)) return null;
+  const dark = bgc.l < 0.5;
+  const chromas: number[] = [];
+  for (const k of HUE_KEYS) {
+    const raw = theme[k]; if (!raw) continue;
+    const p = parse(raw); if (!p) continue;
+    const c: any = toOklch(p as any);
+    if ((c.c ?? 0) >= 0.04 && c.h != null) chromas.push(c.c!);
+  }
+  const median = (a: number[]) => (a.length ? [...a].sort((x, y) => x - y)[a.length >> 1] : 0);
+  const C = Math.min(0.19, Math.max(0.085, median(chromas) || 0.14));
+  const passes = (l: number, h: number) => wcagContrast(clampChroma({ mode: "oklch" as const, l, c: C, h }, "oklch"), bgc as any) >= CONTRAST_FLOOR;
+  let lo = dark ? 0.55 : 0.42, hi = dark ? 0.9 : 0.72;
+  const worstH = dark ? 264 : 100;
+  for (let g = 0; g < 40 && !passes(dark ? lo : hi, worstH); g++) { if (dark) lo += 0.01; else hi -= 0.01; }
+  if (hi - lo < 0.1) { const m = (hi + lo) / 2; lo = m - 0.05; hi = m + 0.05; }
+  return { C, lo, hi, dark, anchor: anchorHueOf(theme) };
+}
+
+/** One OKLCH colour → 0-255 RGB, chroma-clamped into gamut (the ramp builders' pixel step). */
+export const oklchToRgb = (l: number, c: number, h: number): RGB => rgb255({ mode: "oklch" as const, l, c, h });

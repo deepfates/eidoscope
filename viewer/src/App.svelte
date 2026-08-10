@@ -4,9 +4,9 @@
   import { DropdownMenu, Popover } from "bits-ui";
   import { loadMap, mapUrl, decodeEido, type Store } from "./loader";
   import { createMap, type MapHandle } from "./deckmap";
-  import { col, setPaletteK, setColorRegion, setRegionTree, axisColor, setActiveTheme } from "./encode";
+  import { col, setColorData, setColorGroups, setActiveTheme } from "./encode";
   import { themePalette } from "./palette";
-  import { buildDimensions, scores01, type Dimension } from "./dimensions";
+  import { buildDimensions, scores01, rampFor, type Dimension } from "./dimensions";
   import { ViewModel, parseUrl, type CameraOp, type StatePatch } from "./model.svelte";
   import { cosineAll } from "./semantic";
   import { deriveDirection } from "./derive";
@@ -113,19 +113,28 @@
   let palVer = $state(0);
   const theme = $derived.by(() => { void palVer; return (themePalette(themeName)?.dark ?? modeOf(themeName) === "dark") ? "dark" : "light"; });
   const colOf = $derived.by(() => { void palVer; return (c: number) => col(c); });
+  // the active scalar dimension's theme-derived ramp (legend swatches + gradient pole rows)
+  const rampOf = $derived.by(() => { void palVer; const d = m.colorDim; return d && d.kind !== "categorical" ? rampFor(d, m.propsOf(d)) : null; });
   // The palette is sized to what the colour channel actually shows: the region count at this grain,
   // or a categorical dimension's value count (deepfates' ruling 2026-08-10 — no fixed colour count,
   // no modulo recycling; coarse maps get few well-separated colours, fine maps get exactly as many
   // as there are regions).
-  // Region colours follow the GRAIN TREE (deepfates' ruling 2026-08-10): the map's nested ladder is
-  // handed to the colour engine once per map, and the region palette at any grain draws its hues from
-  // ancestry — sliding the grain REFINES colour instead of rerolling it. Categorical dimensions have
-  // no tree and keep the spread-k path; old files without a ladder fall back to spread-k too.
+  // ONE colour system (eid-zsij): the map's colour coordinates are handed to the engine once per map;
+  // the colour channel's GROUPS (region assignment at the live grain, or a categorical dimension's
+  // per-card value index) get hues from their member centroids on the colour disc — similar groups
+  // wear similar hues, across every view. When a scalar dimension holds the colour channel, `col()`
+  // still serves the REGION palette (hover chips, hulls, region legend rows). Files without colour
+  // coordinates fall back to the spread-k themed ring inside the engine.
+  const catAssign = (d: Dimension): Int32Array => {
+    const n = data?.ids.length ?? 0, out = new Int32Array(n);
+    for (let i = 0; i < n; i++) { const v = d.cat!(i); out[i] = v == null ? -1 : (d.idx![v] ?? -1); }
+    return out;
+  };
   $effect(() => {
-    setRegionTree(data?.levels);
-    palVer = m.channels.color === "region"
-      ? setColorRegion(m.grain, curCount)
-      : setPaletteK(colorDim?.kind === "categorical" ? (colorDim.ord?.length ?? 24) : 24);
+    setColorData(data?.colorCoords);
+    palVer = colorDim?.kind === "categorical"
+      ? setColorGroups(catAssign(colorDim), colorDim.ord?.length ?? 24)
+      : setColorGroups(assignment, curCount);
   });
 
   // read-only views onto the model, so the markup below reads as plainly as it did when the state was inline
@@ -932,7 +941,7 @@
   <Popover.Root>
     <Popover.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case {foldCls(scope, 4)}" data-fold="4" data-menu="{scope}:color" aria-label="color">
       <span class="opacity-60">color</span>
-      <span class="h-2.5 w-2.5 flex-none rounded-xs" style="background:{m.channels.color === 'region' ? rgb(colOf(0)) : colorDim?.kind === 'categorical' ? rgb(colOf(0)) : rgb(axisColor(1))}"></span>
+      <span class="h-2.5 w-2.5 flex-none rounded-xs" style="background:{m.channels.color === 'region' ? rgb(colOf(0)) : colorDim?.kind === 'categorical' ? rgb(colOf(0)) : rgb(rampOf?.(1) ?? colOf(0))}"></span>
       <span class="max-w-[9rem] truncate font-medium">{colorLabel}</span><span class="text-[9px] opacity-50">▾</span>
     </Popover.Trigger>
     <Popover.Portal>
@@ -955,8 +964,8 @@
             {#if colorDim.ord!.length > 16}<li class="px-3 py-1 text-xs opacity-60">+{colorDim.ord!.length - 16} more</li>{/if}
           {:else if colorDim}
             {@const cp = poles(colorDim)}
-            <li class="flex flex-row items-center gap-2 px-3 py-1 text-sm"><span class="h-2.5 w-2.5 flex-none rounded-xs" style="background:{rgb(axisColor(0))}"></span><span class="truncate">{cp[0]}</span></li>
-            <li class="flex flex-row items-center gap-2 px-3 py-1 text-sm"><span class="h-2.5 w-2.5 flex-none rounded-xs" style="background:{rgb(axisColor(1))}"></span><span class="truncate">{cp[1]}</span></li>
+            <li class="flex flex-row items-center gap-2 px-3 py-1 text-sm"><span class="h-2.5 w-2.5 flex-none rounded-xs" style="background:{rgb(rampOf?.(0) ?? colOf(0))}"></span><span class="truncate">{cp[0]}</span></li>
+            <li class="flex flex-row items-center gap-2 px-3 py-1 text-sm"><span class="h-2.5 w-2.5 flex-none rounded-xs" style="background:{rgb(rampOf?.(1) ?? colOf(0))}"></span><span class="truncate">{cp[1]}</span></li>
           {/if}
         </ul>
         <div class="thin-sb max-h-56 flex-none overflow-y-auto border-t border-base-300">

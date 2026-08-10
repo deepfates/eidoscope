@@ -136,6 +136,9 @@ export function encodeContainer(D: MapContract): Uint8Array {
   // new-point placement). Stored f16 (measured lossless for cosine ranking). A "lite" emit omits D.vectors.
   const vdim = D.vectors?.dim ?? 0;
   if (D.vectors && vdim) bufs.push({ key: "vectors", arr: toF16Buf(D.vectors.data), type: "f16" });
+  // v2.2: per-card COLOR COORDINATES (eid-zsij) — the dedicated colour projection on the unit disc,
+  // n × 2 f16 (values in [-1,1]; f16 relative error ~1e-3 is far below any visible hue step).
+  if (D.colorCoords?.length) bufs.push({ key: "color", arr: toF16Buf(flat(D.colorCoords, 2)), type: "f16" });
   // v2.1: the per-card axis notes move OUT of the JSON meta (they were its single largest section — measured
   // 31.8MB of a 42.2MB meta on pathfinder, and living there forced an eager JSON.parse of every note on load)
   // into gzip BLOCKS of NOTES_BLOCK cards: notes_z (concatenated gzipped blocks) + notes_zi (block byte
@@ -245,7 +248,7 @@ export function encodeContainer(D: MapContract): Uint8Array {
     clustersN: D.clusters.length,
     hasGhosts: !!D.ghosts, ghostsN: (D.ghosts ?? []).length,
     hasViews: !!D.views, viewsN: (D.views ?? []).length,
-    hasLevels: !!D.levels, hasCite: !!D.cite, hasVectors: !!(D.vectors && vdim), vdim, notesBlock: NOTES_BLOCK,
+    hasLevels: !!D.levels, hasCite: !!D.cite, hasVectors: !!(D.vectors && vdim), vdim, hasColor: !!D.colorCoords?.length, notesBlock: NOTES_BLOCK,
     buffers: manifest,
   };
   const metaBytes = new TextEncoder().encode(JSON.stringify(meta));
@@ -356,6 +359,12 @@ function* decodeGen(buf: Uint8Array): Generator<void, MapContract> {
     for (let i = 0; i < raw.length; i++) { data[i] = F16_LUT[raw[i]]; if (i % ELEM_CHUNK === ELEM_CHUNK - 1) yield; }
     vectors = { data, dim: meta.vdim };
   }
+  // colour coordinates: n × 2 f16 → number[][] (small: 2 values per card)
+  let colorCoords: number[][] | undefined;
+  if (meta.hasColor) {
+    const raw = (yield* getOptG("color")) as Uint16Array;
+    colorCoords = yield* unflat(fromF16Buf(raw), 2);
+  }
   // notes: a ragged utf8 buffer, decoded LAZILY per card (a card's notes are only parsed when that
   // card is opened, cached after).
   const notes = lazyNotes((yield* getOptG("notes_z")) as Uint8Array, (yield* getOptG("notes_zi")) as Int32Array, (yield* getOptG("notes_o")) as Int32Array, meta.notesBlock);
@@ -432,7 +441,7 @@ function* decodeGen(buf: Uint8Array): Generator<void, MapContract> {
   return {
     version: meta.version, provenance: meta.provenance, derivedBy: meta.derivedBy, metaFields: meta.metaFields, ids, titles, cores, notes,
     axes: meta.axes, scores, rawScores, xy, xyz, xyzAgree: meta.xyzAgree,
-    cluster, k: meta.k, di: meta.di, levels, counts: meta.counts,
+    cluster, k: meta.k, di: meta.di, levels, counts: meta.counts, colorCoords,
     levelLabels, levelBlurbs, clusters,
     hub, nbr, cite, citec, vectors,
     urls, sources, siteNames, authors, tags, dates, read, ghosts, folders,
