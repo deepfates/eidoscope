@@ -52,12 +52,16 @@ contract in `docs/ARCHITECTURE.md`): the viewer became an app (in-tab ingest wit
 connectors, in-app DESCEND, save/open `.eido` incl. FSA in-place, export menu), the `.eido` became a
 pure document (`docs/EIDO-FORMAT.md` + anti-rot test), WebGPU in-page embedding (17× measured), OPFS
 persistent caches, views carried in the file, and the competitive study recorded (`eid-zz8n`, closed).
-In review now: the Web-Worker engine (tab never freezes, one-format v2.2 container) and honest kNN
-(exact WebGPU whenever a GPU exists; calibrated hnswlib-wasm as the no-GPU fallback). Built (in review): the similarity-arranged theme-derived color system (`eid-zsij` — the engine mints
-per-card color coordinates carried in the `.eido`; region/categorical hues from member centroids;
-theme-derived scalar ramps; tree hues, the spread-k region path, and the Viridis carve-out deleted).
-Approved and queued: the matklad QA gate rework (`eid-6egl`), ingest reachable
-from any app state (`eid-9rdy`), and arbitrary per-row metadata columns (`eid-xmf0`).
+Landed through adversarial review (all codex-approved, shipped live): the Web-Worker engine (tab
+never freezes; one-format v2.2 container), honest kNN (exact WebGPU whenever a GPU exists;
+calibrated hnswlib-wasm as the no-GPU fallback; the data-scale crossover deleted), ingest reachable
+from any app state (`eid-9rdy`), and the similarity-arranged theme-derived color system
+(`eid-zsij` — engine-minted per-card color coordinates carried in the `.eido`; region/categorical
+hues from member centroids with exact order-preserving separation; theme-derived scalar/diverging
+ramps; tree hues, the spread-k region path, and the Viridis carve-out deleted).
+Queued next: arbitrary per-row metadata columns (`eid-xmf0`, acceptance = the Pitchfork corpus
+carded once with its columns riding), the matklad QA gate rework (`eid-6egl`), then the micro-UX
+live items (`eid-kzv2`).
 
 Recovered from the full conversation history and now tracked (things asked for that had fallen out
 of the record): the micro-UX inventory (`eid-kzv2` — multiple filter slicers, a real status bar,
