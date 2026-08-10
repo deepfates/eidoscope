@@ -21,8 +21,23 @@ export const KEY_STORAGE = "eido-llm-key";
 export const getKey = (): string => { try { return localStorage.getItem(KEY_STORAGE) ?? ""; } catch { return ""; } };
 export const setKey = (k: string): void => { try { k ? localStorage.setItem(KEY_STORAGE, k) : localStorage.removeItem(KEY_STORAGE); } catch {} };
 
+// ax stamps x-request-id / x-retry-count onto every request. OpenRouter's CORS allow-list doesn't
+// include them, so a browser's preflight rejects the whole call ("Failed to fetch") and ax retries
+// into the void — measured 2026-08-10: a raw fetch to the same endpoint answers in 1.4s while every
+// ax call dies. Fixed through ax's own extension point (AxAIServiceOptions.fetch — "useful for
+// proxies or custom HTTP handling"): a scoped fetch that drops exactly those two headers. Upstream
+// issue to file with ax: browser targets shouldn't send un-allowlisted tracking headers.
+const corsSafeFetch: typeof fetch = (input, init) => {
+  if (init?.headers) {
+    const h = new Headers(init.headers);
+    h.delete("x-request-id"); h.delete("x-retry-count");
+    init = { ...init, headers: h };
+  }
+  return fetch(input, init);
+};
+
 export const pageLLM = (key: string) =>
-  ai({ name: "openai", apiKey: key, apiURL: DEFAULT_API_URL, config: { model: DEFAULT_MODEL, stream: false } } as any);
+  ai({ name: "openai", apiKey: key, apiURL: DEFAULT_API_URL, config: { model: DEFAULT_MODEL, stream: false }, options: { fetch: corsSafeFetch } } as any);
 
 // ── collecting the folder's files (picker or drop) ──────────────────────────────────────────────────
 export type IngestFile = { path: string; name: string; text: string };

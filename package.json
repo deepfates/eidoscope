@@ -1,7 +1,7 @@
 {
   "name": "eidoscope",
   "version": "0.0.1",
-  "description": "An instrument for seeing the forms in a corpus — turn documents into interpretable cards on data-discovered axes, then look at their shape from every angle at once.",
+  "description": "An instrument for seeing the forms in a corpus \u2014 turn documents into interpretable cards on data-discovered axes, then look at their shape from every angle at once.",
   "type": "module",
   "license": "MIT",
   "author": "deepfates (with Claude)",
@@ -20,7 +20,8 @@
     "gallery": "bun run e2e/gallery.ts",
     "singlefile": "bun bin/build-singlefile.ts",
     "predeploy-check": "bun bin/check-shipping-maps.ts",
-    "deploy": "bun bin/check-shipping-maps.ts && cp viewer/dist/index.html viewer/dist-pathfinder/ && cp viewer/public/pathfinder.eido viewer/dist-pathfinder/map.eido && cp viewer/public/map.eido viewer/dist-pathfinder/readwise.eido && cp viewer/public/tldr.eido viewer/dist-pathfinder/tldr.eido && cd viewer/dist-pathfinder && npx -y vercel@latest deploy --prod --yes"
+    "deploy": "bun bin/check-shipping-maps.ts && cp viewer/dist/index.html viewer/dist-pathfinder/ && cp viewer/public/pathfinder.eido viewer/dist-pathfinder/map.eido && cp viewer/public/map.eido viewer/dist-pathfinder/readwise.eido && cp viewer/public/tldr.eido viewer/dist-pathfinder/tldr.eido && cd viewer/dist-pathfinder && npx -y vercel@latest deploy --prod --yes",
+    "smoke:real": "bun bin/real-smoke.ts"
   },
   "dependencies": {
     "@ax-llm/ax": "^23.0.5",
