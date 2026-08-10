@@ -13,6 +13,7 @@ import { Store } from "../../src/llm";
 import { DEFAULT_MODEL, DEFAULT_API_URL, DEFAULT_EMBED_MODEL, DEFAULT_MAX_DOC_CHARS, INPAGE_ENVELOPE_DOCS } from "../../src/defaults";
 import type { MapContract } from "../../src/schema";
 import { embedItems, type EmbedProgress } from "./semantic";
+import { opfsStore, cacheFileName } from "./opfs";
 
 export { INPAGE_ENVELOPE_DOCS };
 
@@ -96,7 +97,7 @@ export class EnvelopeError extends Error {}
 export async function descendInPage(P: MapContract, selIds: string[], key: string, onStatus: (s: IngestStatus) => void): Promise<MapContract> {
   const llm = key ? pageLLM(key) : undefined;
   return descendMap(P, selIds, {
-    llm, regionCache: new Store(),
+    llm, regionCache: await opfsStore(cacheFileName("regions")),
     onProgress: (p: EngineProgress) => {
       if (p.stage === "axes") onStatus({ phase: "axes", label: `discovering local axes over ${p.docs} cards…` });
       else if (p.stage === "axes-done") onStatus({ phase: "axes", label: `${p.axes} local axes (${p.realDims} above the noise floor)` });
@@ -117,8 +118,22 @@ export class IngestRun {
   private embeddings: number[][] | null = null;
   private axesNamedWithLLM = false;
   private axes: { axes: Axis[]; realDims: number; projections: number[][] } | null = null;
-  private cardCache = new Store();     // session-memory: resumability inside the run
-  private regionCache = new Store();
+  // The caches, OPFS-persisted when the browser can (viewer/src/opfs.ts), session-memory when it
+  // can't. Keys are content-addressed (doc text + axis geometry for cards; distinctive terms for
+  // regions; chunk hash for embeddings), so the files are shared across corpora and sessions exactly
+  // like the node cache dir — a reopened tab reloads instead of re-spending. Opened lazily (OPFS
+  // handles are async) on first start().
+  private cardCache: Store | null = null;
+  private regionCache: Store | null = null;
+  private embCache: Store | null = null;
+  private async openCaches(): Promise<void> {
+    if (this.cardCache) return;
+    [this.cardCache, this.regionCache, this.embCache] = await Promise.all([
+      opfsStore(cacheFileName("cards")),
+      opfsStore(cacheFileName("regions")),
+      opfsStore(cacheFileName("emb", DEFAULT_EMBED_MODEL)),
+    ]);
+  }
   cardsFailed = 0;                     // failures in the LAST carding pass (a retry re-runs only these)
   running = false;
 
@@ -160,14 +175,17 @@ export class IngestRun {
     try {
       const docs = this.parse();
       this.cardsFailed = 0;
+      await this.openCaches();
       const llm = key ? pageLLM(key) : undefined;
 
       // full-text embeddings (chunk-pooled, exactly like the CLI's embedDocs) — computed once, kept
+      // in-session AND in the persistent chunk cache (content+model addressed, like map.ts poolEmbed)
       const embedChunks = (label: string) => (items: { id: string; text: string }[]) =>
         embedItems(items, DEFAULT_EMBED_MODEL,
           (done, total) => this.set({ phase: "embed", label: `${label} ${done}/${total} chunks`, done, total }),
           16,
-          (p: EmbedProgress) => this.set({ phase: "model", label: p.label, pct: p.pct }));
+          (p: EmbedProgress) => this.set({ phase: "model", label: p.label, pct: p.pct }),
+          this.embCache!);
       if (!this.embeddings) {
         this.set({ phase: "model", label: "loading the embedding model…" });
         this.embeddings = await poolEmbedWith(docs.map((d) => (d.title ? d.title + ". " : "") + d.body), embedChunks("embedding documents"));
@@ -195,7 +213,7 @@ export class IngestRun {
         llm,
         discovered: this.axes,   // discovery already ran above (deterministic) — not re-spent
         embedCardTexts: (texts) => poolEmbedWith(texts, embedChunks("embedding cards")),
-        cardCache: this.cardCache, regionCache: this.regionCache,
+        cardCache: this.cardCache!, regionCache: this.regionCache!,
         concurrency: 8,
         name: this.name,
         source: `folder (in-page ingest) · ${this.files.length} files`,

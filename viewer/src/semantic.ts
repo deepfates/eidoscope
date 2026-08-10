@@ -72,8 +72,12 @@ export function cosineAll(query: Float32Array, vectors: CardVectors): number[] {
 // ── BATCH EMBEDDING for the in-page ingest (eid-bacg) ────────────────────────────────────────────────
 // The SAME extractor/model as queries, batched — chunk texts arrive from geometry.poolEmbedWith, so the
 // chunking/pooling discipline is the shared implementation, and only the raw "strings → vectors" step
-// lives here. A session-memory cache by content id makes a retried pass (failed cards, resumed run)
-// re-embed nothing it already embedded.
+// lives here. Chunks are content-addressed (geometry hashes text+len into the id), cached in a
+// session-memory map AND, when the caller passes one, a persistent Store (viewer/src/opfs.ts — the
+// browser twin of the node fulltext/card embedding caches, one file per model): a retried pass, a
+// resumed run, or a reopened tab re-embeds nothing it already embedded. When everything hits, the
+// extractor (and its ~23MB model download) is never even loaded.
+type EmbedStore = { get(k: string): any; put(k: string, v: any): void };
 const embCache = new Map<string, number[]>();
 export async function embedItems(
   items: { id: string; text: string }[],
@@ -81,17 +85,19 @@ export async function embedItems(
   onProgress?: (done: number, total: number) => void,
   batch = 16,
   onModel?: (p: EmbedProgress) => void,
+  cache?: EmbedStore,
 ): Promise<number[][]> {
-  const ex = await extractor(embedderId, onModel);
-  const out: (number[] | null)[] = items.map((it) => embCache.get(it.id) ?? null);
+  const out: (number[] | null)[] = items.map((it) => embCache.get(it.id) ?? (cache?.get(it.id) as number[] | undefined) ?? null);
   const misses = items.map((it, i) => ({ it, i })).filter((x) => out[x.i] === null);
   let done = items.length - misses.length;
   onProgress?.(done, items.length);
+  if (!misses.length) return out as number[][];
+  const ex = await extractor(embedderId, onModel);
   for (let b = 0; b < misses.length; b += batch) {
     const chunk = misses.slice(b, b + batch);
     const res: any = await ex(chunk.map((m) => m.it.text || " "), { pooling: "mean", normalize: true });
     const arr: number[][] = res.tolist();
-    chunk.forEach((m, j) => { out[m.i] = arr[j]; embCache.set(m.it.id, arr[j]); });
+    chunk.forEach((m, j) => { out[m.i] = arr[j]; embCache.set(m.it.id, arr[j]); cache?.put(m.it.id, arr[j]); });
     done += chunk.length;
     onProgress?.(done, items.length);
     await new Promise((r) => setTimeout(r, 0));   // yield so the progress UI actually paints
