@@ -44,6 +44,7 @@
   },
   "files": [
     "src",
+    "vendor",
     "viewer/dist/index.html",
     "README.md",
     "ROADMAP.md",

@@ -21,10 +21,22 @@ const clustered = (n: number, d: number, seed = 7) => {
     return v.map((x) => x / s);
   });
 };
-const recall = (got: number[][], truth: number[][]) => {
-  let hit = 0, tot = 0;
-  for (let i = 0; i < got.length; i++) { const t = new Set(truth[i].slice(1)); for (const j of got[i].slice(1)) { tot++; if (t.has(j)) hit++; } }
-  return hit / tot;
+// STRICT recall: the denominator is n×K (a truncated row loses recall, never dodges it), and every
+// row must be exactly K+1 UNIQUE self-inclusive entries first — an implementation returning one good
+// neighbor per row must score ~1/K, not 1.0 (adversarial-review finding, 2026-08).
+const assertRows = (rows: number[][], n: number, K: number) => {
+  expect(rows.length).toBe(n);
+  rows.forEach((row, i) => {
+    expect(row.length).toBe(K + 1);
+    expect(row[0]).toBe(i);
+    expect(new Set(row).size).toBe(K + 1);
+    row.forEach((j) => { expect(j).toBeGreaterThanOrEqual(0); expect(j).toBeLessThan(n); });
+  });
+};
+const recall = (got: number[][], truth: number[][], K: number) => {
+  let hit = 0;
+  for (let i = 0; i < got.length; i++) { const t = new Set(truth[i].slice(1)); for (const j of got[i].slice(1)) if (t.has(j)) hit++; }
+  return hit / (got.length * K);
 };
 
 const K = 14; // eidoscope's UMAP graph K (nNeighbors 15, self-inclusive)
@@ -43,7 +55,8 @@ test("exact-gpu kNN IS the exact answer (recall 1.0 up to f32 ties) and its dist
     const kth = dot(X[i], X[e.idx[i][K]]);
     for (const j of g.idx[i].slice(1)) if (!truth.has(j)) expect(Math.abs(dot(X[i], X[j]) - kth)).toBeLessThan(1e-5);
   }
-  expect(recall(g.idx, e.idx)).toBeGreaterThan(0.9999);
+  assertRows(g.idx, X.length, K);
+  expect(recall(g.idx, e.idx, K)).toBeGreaterThan(0.9999);
   for (let i = 0; i < X.length; i += 97) g.dst[i].forEach((d, m) => expect(Math.abs(d - e.dst[i][m])).toBeLessThan(1e-4));
 }, 60000);
 
@@ -54,11 +67,38 @@ test("hnswlib wasm ≡ hnswlib-node per-row neighbor SETS at identical params, a
   const wasm = await hnswWasmKnn(X, K, SEED);
   // same upstream headers, same seed, same insertion order → same graph; measured: identical rows on
   // uniform data, and on clustered data only ORDER can swap where f32 distances tie (2/4000 rows) —
-  // so the honest invariant is per-row set equality
-  for (let i = 0; i < X.length; i++) { const a = new Set(nat.idx[i]); expect(wasm.idx[i].every((j) => a.has(j))).toBe(true); }
-  expect(recall(nat.idx, e.idx)).toBeGreaterThanOrEqual(0.99);
-  expect(recall(wasm.idx, e.idx)).toBeGreaterThanOrEqual(0.99);
+  // so the honest invariant is per-row SET equality, asserted BOTH ways with equal lengths
+  assertRows(nat.idx, X.length, K);
+  assertRows(wasm.idx, X.length, K);
+  for (let i = 0; i < X.length; i++) {
+    expect(wasm.idx[i].length).toBe(nat.idx[i].length);
+    const a = new Set(nat.idx[i]), b = new Set(wasm.idx[i]);
+    expect(wasm.idx[i].every((j) => a.has(j))).toBe(true);
+    expect(nat.idx[i].every((j) => b.has(j))).toBe(true);
+  }
+  expect(recall(nat.idx, e.idx, K)).toBeGreaterThanOrEqual(0.99);
+  expect(recall(wasm.idx, e.idx, K)).toBeGreaterThanOrEqual(0.99);
 }, 120000);
+
+// THE PRODUCTION-SCALE GATE (adversarial-review P1): at 30k×384 — real corpus scale, real embedding
+// dimension — a fixed ef=64 measured recall 0.933; the per-index ef calibration (src/knn/ef.ts) must
+// bring BOTH hnsw builds back over the 0.99 claim against exact truth. Truth comes from the exact GPU
+// kernel (recall 1.0, itself gated above); without a GPU this receipt cannot run here and says so.
+test("PRODUCTION SCALE: hnsw recall ≥ 0.99 at n=30k, d=384, K=14 (calibrated ef) vs exact truth", async () => {
+  const gpu = await nodeGpu();
+  if (!(await gpuAdapterFor(gpu, 30000, 384))) { console.warn("⚠ no WebGPU adapter — production-scale recall receipt not exercised on this host"); return; }
+  const X = clustered(30000, 384);
+  const truth = await exactGpuKnn(gpu!, X, K);
+  const nat = knnIndex(X, K);
+  assertRows(nat.idx, X.length, K);
+  const rNat = recall(nat.idx, truth.idx, K);
+  const wasm = await hnswWasmKnn(X, K, SEED);
+  assertRows(wasm.idx, X.length, K);
+  const rWasm = recall(wasm.idx, truth.idx, K);
+  console.log(`    production-scale recall @30k×384 K=14: native ${rNat.toFixed(4)} · wasm ${rWasm.toFixed(4)}`);
+  expect(rNat).toBeGreaterThanOrEqual(0.99);
+  expect(rWasm).toBeGreaterThanOrEqual(0.99);
+}, 900000);
 
 test("regime chooser: exact under HNSW_MIN on every host; crossover derived from the measured curves, GPU-variance-proof", async () => {
   // small corpora: always the shared CPU-exact answer (host parity)

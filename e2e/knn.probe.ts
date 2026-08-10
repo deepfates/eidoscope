@@ -50,6 +50,10 @@ const recall = (got: number[][], truth: number[][]) => {
   const seam = await pageKnn(X, K);
   out.seamMs = Math.round(performance.now() - t0);
   out.seamMethod = seam.method;
+  // DETERMINISM RECEIPT: the kernel has a fixed scan/merge order and no atomics — two runs must be
+  // byte-identical in BOTH indices and distances (same-corpus-same-map is a product invariant).
+  const seam2 = await pageKnn(X, K);
+  out.deterministic = JSON.stringify(seam.idx) === JSON.stringify(seam2.idx) && JSON.stringify(seam.dst) === JSON.stringify(seam2.dst);
   t0 = performance.now();
   const truth = await knnExact(X, K);
   out.exactCpuMs = Math.round(performance.now() - t0);

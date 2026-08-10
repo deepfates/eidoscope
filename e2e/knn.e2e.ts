@@ -41,6 +41,7 @@ try {
   const wantMethod = r.gpuSupported ? "exact-gpu" : "exact-cpu";
   ok(r.seamMethod === wantMethod, `above HNSW_MIN the page seam answered with ${wantMethod} (got ${r.seamMethod})`);
   ok(r.seamBadRows === 0, `seam neighbors ≡ exact truth up to f32 ties (${r.seamBadRows} bad rows, recall ${r.seamRecall})`);
+  ok(r.deterministic === true, "two kernel runs are byte-identical (indices AND distances) — deterministic layouts");
   ok(r.wasmRecall >= 0.99, `vendored hnswlib wasm recall ${r.wasmRecall} ≥ 0.99 at eidoscope params (${r.wasmMs}ms @ 6000)`);
   ok(r.neighborsProvenance === wantMethod, `the emitted map's derivedBy.neighbors says which regime built it ("${r.neighborsProvenance}")`);
   ok(r.engineNbrBadRows === 0, `end-to-end in-page engine: emitted nbr ≡ exact truth over the card vectors (${r.engineNbrBadRows} bad rows, recall ${r.engineNbrRecall}, engine ${r.engineMs}ms)`);

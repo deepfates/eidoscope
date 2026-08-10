@@ -3,6 +3,9 @@
 #
 #   upstream: github.com/nmslib/hnswlib (header-only C++)
 #   pinned commit: d9b3608c83d83b46c96e25088cb1d729b29dcfe9  (master, 2026-08)
+#   license: Apache-2.0 — the upstream license is committed as LICENSE.hnswlib in this directory and
+#   MUST travel with any distribution that carries the built artifact (the npm files list includes
+#   vendor/; the single-file viewer embeds the wasm, so the notice ships with the repo it came from)
 #
 # The npm wrapper ecosystem for hnswlib-in-the-browser is dead (hnswlib-wasm's last release crashed
 # our runtime via its -lidbfs.js persistence hooks), so we build our own from wrapper.cpp — a ~30 line
