@@ -1,8 +1,8 @@
 // HOST-FREE geometry — the layout/scoring stages of the engine, shared verbatim by the node pipeline
-// (src/map.ts wraps these with hnswlib + the on-disk embedding cache) and the in-page ingest
+// (src/map.ts wraps these with the kNN regimes + the on-disk embedding cache) and the in-page ingest
 // (viewer/src/ingest.ts wraps them with the transformers.js embedder). Nothing here touches node APIs;
-// approximate kNN is an INJECTED seam (`approxKnn`) because hnswlib-node exists only on the node host —
-// in the page, corpora under the envelope use umap-js's internal exact/nn-descent path and brute kNN.
+// kNN is an INJECTED seam (`Knn`) because its implementations are host-bound (Dawn vs navigator.gpu,
+// hnswlib-node vs the vendored wasm) — src/knn/regime.ts chooses among them by measured cost curves.
 import { UMAP } from "umap-js";
 import type { Card } from "./card.ts";
 import { mulberry32, SEED, type Axis } from "./axes.ts";
@@ -91,15 +91,33 @@ export async function poolEmbedWith(texts: string[], embed: EmbedItems, opts: { 
 
 const unit = (v: number[]) => { let n = 0; for (const x of v) n += x * x; n = Math.sqrt(n) || 1; return v.map((x) => x / n); };
 
-// kNN on unit vectors (cosine = dot). Exact brute force for small n; an injected approximate index past
-// HNSW_MIN, where O(n²) stops being affordable (node: hnswlib — src/map.ts). Both are named functions so
-// a test can assert the approximate index agrees with the exact answer on a synthetic set — the swap is
-// a scale optimization, not a change in what a "neighbor" means.
-export const HNSW_MIN = 3000;
-// An approximate kNN seam: self-inclusive rows ([i, ...K neighbors]) + matching distances, the exact
-// (indices, distances) shape umap-js's setPrecomputedKNN expects. Node injects hnswlib; the page has none
-// (wasm hnsw is out of scope) and stays on the exact/internal paths — the envelope keeps that honest.
-export type ApproxKnn = (X: number[][], K: number) => { idx: number[][]; dst: number[][] };
+// kNN on unit vectors (cosine = dot). THE seam every layout goes through: umap-js's internal
+// nn-descent path is dead here — measured recall 0.36 @ 10k / 0.15 @ 50k against exact truth, i.e. it
+// was quietly poisoning browser-built maps — so projectAndCluster ALWAYS hands UMAP a precomputed
+// graph from a Knn implementation. Below the measured crossover that's exact (GPU when a WebGPU
+// adapter is present — src/knn/kernel.ts, recall 1.0 by construction — else CPU brute force under
+// HNSW_MIN); above it, hnswlib (node: hnswlib-node in src/map.ts; page: our vendored wasm build in
+// viewer/src/knn.ts — same algorithm, neighbors verified bit-identical at identical params).
+// `method` names which implementation answered — it flows into derivedBy.neighbors (provenance).
+export const HNSW_MIN = 3000; // max n where O(n²·d) CPU brute force stays affordable (no-GPU fallback bound)
+// Self-inclusive rows ([i, ...K neighbors]) + matching euclidean-on-the-unit-sphere distances
+// (sqrt(2·cosineDist)) — the exact (indices, distances) shape umap-js's setPrecomputedKNN expects.
+export type KnnResult = { idx: number[][]; dst: number[][]; method: string };
+export type Knn = (X: number[][], K: number) => Promise<KnnResult> | KnnResult;
+
+// CPU exact brute force in seam shape — the default Knn and the ground truth the others are tested against.
+export const knnExact: Knn = (X, K) => {
+  const n = X.length, Kc = Math.min(K, n - 1), idx: number[][] = [], dst: number[][] = [];
+  for (let i = 0; i < n; i++) {
+    const sims: [number, number][] = [];
+    for (let j = 0; j < n; j++) { if (j === i) continue; let s = 0; const a = X[i], b = X[j]; for (let d = 0; d < a.length; d++) s += a[d] * b[d]; sims.push([j, s]); }
+    sims.sort((a, b) => b[1] - a[1]);
+    const top = sims.slice(0, Kc);
+    idx.push([i, ...top.map(([j]) => j)]);
+    dst.push([0, ...top.map(([, s]) => Math.sqrt(Math.max(0, 2 * (1 - s))))]);
+  }
+  return { idx, dst, method: "exact-cpu" };
+};
 
 export function knnBrute(X: number[][], K: number): number[][] {
   const n = X.length, nbr: number[][] = [];
@@ -145,26 +163,27 @@ export function normPct(arr: number[][], dims: number): number[][] {
   return arr.map((r) => r.map((v, j) => +(((v - (b[j][0] + b[j][1]) / 2) / (((b[j][1] - b[j][0]) / 2) || 1))).toFixed(4)));
 }
 
-export async function projectAndCluster(embs: number[][], opts: { approxKnn?: ApproxKnn; layoutApprox?: LayoutKnnApprox } = {}) {
+export async function projectAndCluster(embs: number[][], opts: { knn?: Knn; layoutApprox?: LayoutKnnApprox } = {}) {
   const X = embs.map(unit);
   const n = X.length;
   if (n < 5) { // too few points for UMAP/clustering — lay them on a ring so the tool still runs
     const xy = X.map((_, i) => [Math.cos((2 * Math.PI * i) / n) * 0.6, Math.sin((2 * Math.PI * i) / n) * 0.6] as number[]);
     const one = X.map(() => 0);
-    return { xy, xyz: xy.map((p) => [p[0], p[1], 0]), xyzAgree: n > 1 ? Math.min(8, n - 1) : 0, cluster: one, k: 1, di: 0, levels: [one], counts: [1], hub: X.map(() => 0), nbr: X.map(() => [] as number[]) };
+    return { xy, xyz: xy.map((p) => [p[0], p[1], 0]), xyzAgree: n > 1 ? Math.min(8, n - 1) : 0, cluster: one, k: 1, di: 0, levels: [one], counts: [1], hub: X.map(() => 0), nbr: X.map(() => [] as number[]), knnMethod: "none" };
   }
   const nn = Math.max(2, Math.min(15, n - 1)); // small corpora have fewer points than neighbors
-  // Past HNSW_MIN, the kNN graph is computed ONCE with the injected approximate index and handed to
-  // umap-js as a precomputed graph — umap-js's internal nn-descent (rp-forest + heaps) was both the time
-  // and the memory wall at scale (measured: 14.7GB RSS at n=100k). Small corpora — and the page host,
-  // which injects no index — keep umap-js's internal path.
+  // The kNN graph is computed ONCE through the seam and ALWAYS handed to umap-js as a precomputed
+  // graph. umap-js's internal nn-descent path is dead on purpose: its recall was measured at 0.36 @ 10k
+  // and 0.15 @ 50k against exact truth (poisoned neighborhoods), and it was also the time AND memory
+  // wall at scale (14.7GB RSS at n=100k). Default seam = exact CPU brute force; hosts inject the
+  // GPU-exact / hnswlib regimes (src/map.ts, viewer/src/knn.ts).
   // Seeded: umap-js takes a `random` fn. Unseeded it draws from Math.random for init + negative sampling,
   // so the same corpus laid out twice gave different coordinates. Each fit gets its OWN generator (from the
   // same seed) so the 2D layout is unaffected by whether the 3D one ran first.
-  const pre = n > HNSW_MIN && opts.approxKnn ? opts.approxKnn(X, nn - 1) : undefined; // self-inclusive rows of length nn
+  const pre = await (opts.knn ?? knnExact)(X, nn - 1); // self-inclusive rows of length nn
   const fitUMAP = (nComponents: number) => {
     const u = new UMAP({ nComponents, nNeighbors: nn, minDist: 0.15, random: mulberry32(SEED) });
-    if (pre) u.setPrecomputedKNN(pre.idx, pre.dst);
+    u.setPrecomputedKNN(pre.idx, pre.dst);
     return u.fit(X);
   };
   const xy = normPct(fitUMAP(2), 2);
@@ -178,7 +197,8 @@ export async function projectAndCluster(embs: number[][], opts: { approxKnn?: Ap
   const cluster = levels[di] ?? X.map(() => 0), k = counts[di] ?? 1; // di = default level index; the slider exposes the rest
   // kNN + hubness (cosine on unit vectors = dot). the approximate index at scale; brute for small n.
   const K = 8, hub = new Array(n).fill(0);
-  const nbr = pre ? pre.idx.map((row) => row.slice(1, K + 1)) : knnBrute(X, K); // reuse the UMAP graph's index (nn-1 ≥ K past HNSW_MIN)
+  // reuse the UMAP graph's rows (nn-1 ≥ K whenever n ≥ 10); tiny corpora re-answer exactly at their smaller K
+  const nbr = pre.idx[0].length - 1 >= Math.min(K, n - 1) ? pre.idx.map((row) => row.slice(1, K + 1)) : knnBrute(X, K);
   for (const top of nbr) for (const j of top) hub[j]++;
-  return { xy, xyz, xyzAgree: xyzOverlap(xy, xyz, K, opts.layoutApprox), cluster, k, di, levels, counts, hub, nbr };
+  return { xy, xyz, xyzAgree: xyzOverlap(xy, xyz, K, opts.layoutApprox), cluster, k, di, levels, counts, hub, nbr, knnMethod: pre.method };
 }

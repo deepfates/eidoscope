@@ -1,7 +1,7 @@
 {
   "name": "eidoscope",
   "version": "0.0.1",
-  "description": "An instrument for seeing the forms in a corpus \u2014 turn documents into interpretable cards on data-discovered axes, then look at their shape from every angle at once.",
+  "description": "An instrument for seeing the forms in a corpus — turn documents into interpretable cards on data-discovered axes, then look at their shape from every angle at once.",
   "type": "module",
   "license": "MIT",
   "author": "deepfates (with Claude)",
@@ -15,7 +15,7 @@
     "check:viewer": "cd viewer && bunx svelte-check --tsconfig ./tsconfig.json --threshold error",
     "e2e": "bun run e2e/viewer.e2e.ts",
     "build:viewer": "cd viewer && bun run build",
-    "qa": "tsc --noEmit && bun run typecheck:viewer && bun run check:viewer && bun test && bun run build:viewer && bun run e2e/viewer.e2e.ts && bun run e2e/ingest.e2e.ts && bun run e2e/opfs.e2e.ts && bun run e2e/descend.e2e.ts && bun run e2e/offline.ts",
+    "qa": "tsc --noEmit && bun run typecheck:viewer && bun run check:viewer && bun test && bun run build:viewer && bun run e2e/viewer.e2e.ts && bun run e2e/ingest.e2e.ts && bun run e2e/opfs.e2e.ts && bun run e2e/descend.e2e.ts && bun run e2e/knn.e2e.ts && bun run e2e/offline.ts",
     "check:redundancy": "bun run src/redundancy.ts",
     "gallery": "bun run e2e/gallery.ts",
     "singlefile": "bun bin/build-singlefile.ts",
@@ -31,7 +31,8 @@
     "ml-kmeans": "^6.0.0",
     "ml-pca": "^4.1.1",
     "sharp": "0.35.3",
-    "umap-js": "^1.4.0"
+    "umap-js": "^1.4.0",
+    "webgpu": "^0.4.0"
   },
   "bin": {
     "eidoscope": "./src/cli.ts"
@@ -72,5 +73,8 @@
   },
   "patchedDependencies": {
     "umap-js@1.4.0": "patches/umap-js@1.4.0.patch"
-  }
+  },
+  "trustedDependencies": [
+    "webgpu"
+  ]
 }

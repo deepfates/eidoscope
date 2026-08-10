@@ -1,7 +1,7 @@
 import { writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { deckToJSONL } from "./card.ts";
-import { poolEmbed, buildMetaFields, knnIndex, type Embedder } from "./map.ts";
+import { poolEmbed, buildMetaFields, nodeKnn, type Embedder } from "./map.ts";
 import { poolEmbedWith } from "./geometry.ts";
 import { getTextEmbeddings } from "./embed.ts";
 import { nameLevels } from "./regions.ts";
@@ -51,7 +51,7 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
       : poolEmbedWith(texts, (items) => (opts.embedder ?? getTextEmbeddings)(items, {}))),
     cardCache: useCache ? cacheStore("card-cache.jsonl") : undefined,
     regionCache: useCache ? cacheStore("region-cache.jsonl") : undefined,
-    approxKnn: knnIndex,
+    knn: nodeKnn,
     name: opts.name, source: opts.source,
     cardModel: CFG.model, embedderId: CFG.embedModel,
     onProgress,
@@ -125,6 +125,7 @@ export async function descendMap(P: MapContract, selIds: string[], opts: { llm?:
     else if (p.stage === "regions") { if (p.done === 1) say(`[3/3] naming regions…`); if (!opts.quiet && p.total && (p.done % 25 === 0 || p.done === p.total)) process.stderr.write(`  regions ${p.done}/${p.total}\r`); }
   };
   return engineDescend(P, selIds, {
+    knn: nodeKnn,
     llm: opts.llm ?? provider(), sig: opts.sig,
     name: opts.name, parentFile: opts.parentFile,
     concurrency: opts.concurrency ?? Number(process.env.EIDOSCOPE_CONCURRENCY || 24),

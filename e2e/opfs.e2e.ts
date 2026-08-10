@@ -27,6 +27,7 @@ const server = Bun.serve({
     if (path === "/map.eido") return new Response("not here", { status: 404 });
     if (path === "/tf") return new Response(Bun.file(join(TDIST, "transformers.min.js")), { headers: { "content-type": "text/javascript" } });
     if (path.startsWith("/tf/dist/")) { const f = join(TDIST, path.slice("/tf/dist/".length)); return existsSync(f) ? new Response(Bun.file(f)) : new Response("", { status: 404 }); }
+    if (path.startsWith("/tfwasm/")) { const f = join(TDIST, path.slice("/tfwasm/".length)); return existsSync(f) ? new Response(Bun.file(f)) : new Response("", { status: 404 }); }
     const hf = path.match(/^\/hf\/.*all-MiniLM-L6-v2\/resolve\/[^/]+\/(.+)$/);
     if (hf) { hfRequests++; const f = hf[1].startsWith("onnx/") ? join(TMODEL, "onnx", "model.onnx") : join(TMODEL, hf[1]); return existsSync(f) ? new Response(Bun.file(f)) : new Response("", { status: 404 }); }
     if (path.startsWith("/hf/")) return new Response("", { status: 404 });
@@ -84,7 +85,11 @@ const blocked: string[] = [];
 await p.route("https://openrouter.ai/**", async (route) => {
   route.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: mockLLM(route.request().postData() ?? "{}") });
 });
-await p.addInitScript(`window.__EIDO_TF_CDN = ${JSON.stringify(base + "/tf")}; window.__EIDO_TF_HOST = ${JSON.stringify(base + "/hf/")};`);
+// __EIDO_TF_WASM pins ort's wasmPaths to localhost (same seam ingest.e2e.ts uses) — without it this
+// test is only hermetic when headless Chromium happens to expose a WebGPU adapter; on builds where it
+// doesn't, the embedder falls to the wasm backend and fetches ort-wasm-*.jsep.mjs from the CDN, which
+// the network guard blocks and the run hangs (found 2026-08-09 when a fresh Chromium had no adapter).
+await p.addInitScript(`window.__EIDO_TF_CDN = ${JSON.stringify(base + "/tf")}; window.__EIDO_TF_HOST = ${JSON.stringify(base + "/hf/")}; window.__EIDO_TF_WASM = ${JSON.stringify(base + "/tfwasm/")};`);
 await p.route(/^https?:\/\/(?!localhost)/, (route) => {
   const u = route.request().url();
   if (/openrouter\.ai/.test(u)) return route.fallback();
