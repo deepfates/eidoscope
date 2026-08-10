@@ -17,6 +17,10 @@ import { DEFAULT_MODEL, DEFAULT_API_URL, DEFAULT_EMBED_MODEL, DEFAULT_MAX_DOC_CH
 import type { MapContract } from "../../src/schema";
 import { embedItems, type EmbedProgress } from "./embedder";
 import { opfsStore, cacheFileName, persistSummary } from "./opfs";
+// the kNN regime seam (agent/knn-regimes): exact WebGPU whenever this worker's context exposes an
+// adapter (WebGPU is available in dedicated workers), calibrated hnswlib-wasm without one — the same
+// environment-only chooser the node host runs, so derivedBy.neighbors is honest from either host
+import { pageKnn } from "./knn";
 
 // ax stamps x-request-id / x-retry-count onto every request. OpenRouter's CORS allow-list doesn't
 // include them, so a browser's preflight rejects the whole call ("Failed to fetch") and ax retries
@@ -94,7 +98,7 @@ export async function descendInPage(P: DescendParent, selIds: string[], key: str
   const regionRate = new Rate();
   try {
     return await descendMap(P, selIds, {
-      llm, regionCache: await opfsStore(cacheFileName("regions")),
+      llm, knn: pageKnn, regionCache: await opfsStore(cacheFileName("regions")),
       onProgress: (p: EngineProgress) => {
         if (p.stage === "axes") onStatus({ phase: "axes", label: `discovering local axes over ${p.docs} cards…` });
         else if (p.stage === "axes-noise") ax.on({ step: "noise", rep: p.rep, of: p.of });
@@ -228,7 +232,7 @@ export class IngestRun {
 
       const cardRate = new Rate(), regionRate = new Rate();
       const D = (await buildMap(docs, this.embeddings, {
-        llm,
+        llm, knn: pageKnn,
         discovered: this.axes,   // discovery already ran above (deterministic) — not re-spent
         embedCardTexts: (texts) => poolEmbedWith(texts, embedChunks("embedding cards")),
         cardCache: this.cardCache!, regionCache: this.regionCache!,

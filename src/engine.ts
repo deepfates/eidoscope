@@ -10,7 +10,7 @@ import { nameLevels, type Region } from "./regions.ts";
 import { Store } from "./llm.ts";
 import {
   cardText, projectionScores, rawProjectionScores, buildMetaFields, projectAndCluster,
-  type ApproxKnn, type LayoutKnnApprox,
+  type Knn, type LayoutKnnApprox,
 } from "./geometry.ts";
 import type { Doc } from "./corpus-core.ts";
 import type { MapContract } from "./schema.ts";
@@ -48,7 +48,7 @@ export type BuildOpts = {
   cardCache?: Store; regionCache?: Store;              // content-addressed caches (file-backed or session-memory)
   concurrency?: number;
   embed?: "card" | "raw";
-  approxKnn?: ApproxKnn; layoutApprox?: LayoutKnnApprox; // node injects hnswlib; the page injects nothing
+  knn?: Knn; layoutApprox?: LayoutKnnApprox;           // the host's kNN regimes (node: src/map.ts nodeKnn; page: viewer/src/knn.ts)
   name?: string; source?: string;
   cardModel?: string; embedderId?: string;             // provenance (derivedBy)
   onProgress?: (p: EngineProgress) => void;
@@ -95,7 +95,7 @@ export async function buildMap(docs: Doc[], embeddings: number[][], opts: BuildO
   const projOfId = new Map(docs.map((d, i) => [d.id, projections[i]]));
   const deckProjections = deck.map((c) => projOfId.get(c.id)!);
   on({ stage: "layout", cards: deck.length });
-  const geo = await projectAndCluster(embs, { approxKnn: opts.approxKnn, layoutApprox: opts.layoutApprox });
+  const geo = await projectAndCluster(embs, { knn: opts.knn, layoutApprox: opts.layoutApprox });
 
   // Name EVERY grain level contrastively — the deterministic layer computes what makes each region
   // distinct (over-used terms + extreme axes), the LLM only phrases it. Deduped across levels + cached.
@@ -139,6 +139,7 @@ export type DescendOpts = {
   sig?: any;                 // test seam (mock region-naming signature)
   regionCache?: Store;       // content-addressed region-label cache (file-backed or session-memory)
   name?: string; parentFile?: string; concurrency?: number;
+  knn?: Knn;                 // the host's kNN regimes (same seam as buildMap)
   onProgress?: (p: EngineProgress) => void;
 };
 
@@ -170,7 +171,7 @@ export async function descendMap(P: DescendParent, selIds: string[], opts: Desce
   const rawScores = rawProjectionScores(projections, axes);
 
   on({ stage: "layout", cards: idx.length });
-  const { xy, xyz, xyzAgree, cluster, k, di, levels, counts, hub, nbr } = await projectAndCluster(vectors);
+  const { xy, xyz, xyzAgree, cluster, k, di, levels, counts, hub, nbr, knnMethod } = await projectAndCluster(vectors, { knn: opts.knn });
 
   const axLite = axes.map((a) => ({ key: a.key, name: a.name, low: a.pole_low, high: a.pole_high }));
   // llm absent → nameLevels(null): the deterministic contrastive layer still runs, the phrasing call is
@@ -201,7 +202,7 @@ export async function descendMap(P: DescendParent, selIds: string[], opts: Desce
     source: `descend of "${parentTitle}" — ${idx.length} of ${P.ids.length} cards${opts.parentFile ? ` · ${opts.parentFile}` : ""}`,
     generated: Date.now(), count: idx.length,
   };
-  D.derivedBy = { ...P.derivedBy, generated: Date.now() };   // same basis/embedder as the parent — descend adds no new model
+  D.derivedBy = { ...P.derivedBy, neighbors: knnMethod, generated: Date.now() };   // same basis/embedder as the parent — descend adds no new model; neighbors says who answered THIS layout's kNN
   D.metaFields = buildMetaFields(D);
   const nNodes = D.ids.length;
   for (const key of Object.keys(D.scores)) if (D.scores[key].length !== nNodes) throw new Error(`descend invariant violated: scores.${key}.length=${D.scores[key].length} != ids.length=${nNodes}`);
@@ -212,7 +213,7 @@ export async function descendMap(P: DescendParent, selIds: string[], opts: Desce
 // One implementation for both hosts, so a page-built map and a CLI-built map cannot drift in shape.
 export function assembleContract(a: {
   deck: Card[]; axes: Axis[]; scores: Record<string, number[]>; rawScores: Record<string, number[]>;
-  geo: { xy: number[][]; xyz: number[][]; xyzAgree: number; cluster: number[]; k: number; di: number; levels: number[][]; counts: number[]; hub: number[]; nbr: number[][] };
+  geo: { xy: number[][]; xyz: number[][]; xyzAgree: number; cluster: number[]; k: number; di: number; levels: number[][]; counts: number[]; hub: number[]; nbr: number[][]; knnMethod: string };
   levelLabels: string[][]; levelBlurbs: string[][]; regionsByLevel: Region[][];
   embs: number[][]; useRaw: boolean; name?: string; source?: string; cardModel?: string; embedderId?: string;
 }): MapContract {
@@ -254,6 +255,7 @@ export function assembleContract(a: {
     cardModel: a.cardModel,
     embedder: { id: a.embedderId ?? "", dim: a.embs?.[0]?.length ?? 0, pooling: "mean", normalized: true },
     geometryBasis: a.useRaw ? "raw" : "card",
+    neighbors: geo.knnMethod,   // which kNN regime built the nbr lists + UMAP graph (exact-gpu | exact-cpu | hnswlib-node | hnswlib-wasm)
     generated: Date.now(),
   };
   D.metaFields = buildMetaFields(D);   // typed dimension manifest for the channel grammar

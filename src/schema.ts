@@ -94,6 +94,7 @@ export type MapContract = {
     cardModel?: string;
     embedder?: { id: string; dim: number; pooling?: string; normalized?: boolean };
     geometryBasis?: "card" | "raw";
+    neighbors?: string;  // which kNN regime built nbr + the UMAP graph: "exact-gpu" (recall 1.0) | "exact-cpu" | "hnswlib-node" | "hnswlib-wasm"
     pipelineVersion?: string;
     generated?: number;
   };

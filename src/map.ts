@@ -1,6 +1,7 @@
 // The NODE FACE of the geometry stages. The stage logic itself is host-free in src/geometry.ts (shared
 // verbatim with the in-page ingest); this file binds it to the node host: the on-disk embedding cache,
-// the local MiniLM (src/embed.ts), and hnswlib's approximate kNN past HNSW_MIN. Existing callers keep
+// the local MiniLM (src/embed.ts), and the kNN regimes (exact WebGPU whenever an adapter exists via
+// the `webgpu` Dawn package, hnswlib-node without one — src/knn/regime.ts). Existing callers keep
 // importing everything from here — the re-exports below ARE the node API.
 import type { Card } from "./card.ts";
 import { SEED, type Axis } from "./axes.ts";
@@ -10,8 +11,10 @@ import { getTextEmbeddings, EmbeddingCache } from "./embed.ts";
 import { HierarchicalNSW } from "hnswlib-node";
 import {
   cardText, projectionScores, rawProjectionScores, buildMetaFields, poolEmbedWith, knnBrute, layoutKnn as layoutKnnCore,
-  xyzOverlap as xyzOverlapCore, normPct, projectAndCluster as projectAndClusterCore, HNSW_MIN, type ApproxKnn,
+  xyzOverlap as xyzOverlapCore, normPct, projectAndCluster as projectAndClusterCore, HNSW_MIN, type Knn, knnExact,
 } from "./geometry.ts";
+import { makeKnn } from "./knn/regime.ts";
+import { calibrateEf } from "./knn/ef.ts";
 
 export { cardText, projectionScores, rawProjectionScores, buildMetaFields, knnBrute, normPct, HNSW_MIN };
 
@@ -42,11 +45,25 @@ export async function embedDocs(docs: Doc[], opts: { embed?: Embedder } = {}): P
 // as one of nNeighbors, distance 0). Callers that want plain neighbor lists slice the self column off.
 // Deterministic: hnswlib's level RNG is seeded, points are inserted sequentially in corpus order, and
 // search is exact given the built graph — same vectors in, same graph and neighbors out, every run.
-export const knnIndex: ApproxKnn = (X, K) => {
+export const knnIndex = (X: number[][], K: number): { idx: number[][]; dst: number[][]; method?: string } => {
   const index = new HierarchicalNSW("cosine", X[0].length);
   index.initIndex(X.length, 16, 200, SEED);
-  index.setEf(Math.max(64, K + 1));
   for (let i = 0; i < X.length; i++) index.addPoint(X[i], i);
+  // ef is CALIBRATED per index against sampled exact truth (src/knn/ef.ts) — a fixed ef=64 measured
+  // recall 0.933 at 30k×384, silently under the ≥0.99 claim exactly where hnsw is the map's truth
+  const cal = calibrateEf(X, Math.min(K, X.length - 1), (i, k, e) => {
+    index.setEf(Math.max(e, k + 1));
+    return index.searchKnn(X[i], Math.min(X.length, k + 1)).neighbors.filter((j) => j !== i).slice(0, k);
+  }, SEED);
+  if (!cal.ok) {
+    // the index cannot reach the recall claim even with the whole graph as candidates — never certify
+    // failure: exact brute force IS affordable here (ef hit n, so n is small)
+    console.error(`hnsw ef calibration failed (holdout recall ${cal.holdoutRecall.toFixed(4)} at ef=${cal.ef}) — answering with exact brute force`);
+    const e = knnExact(X, K) as { idx: number[][]; dst: number[][] };
+    return { idx: e.idx, dst: e.dst, method: "exact-cpu" }; // honest provenance: exact answered, not hnsw
+  }
+  console.error(`hnsw ef calibrated: ef=${cal.ef}, holdout recall ${cal.holdoutRecall.toFixed(4)} (n=${X.length})`);
+  index.setEf(Math.max(cal.ef, K + 1));
   const idx: number[][] = [], dst: number[][] = [];
   for (let i = 0; i < X.length; i++) {
     const r = index.searchKnn(X[i], Math.min(X.length, K + 1));
@@ -75,9 +92,29 @@ const layoutApprox = (P: number[][], Kc: number): number[][] => {
 export const layoutKnn = (P: number[][], K: number): number[][] => layoutKnnCore(P, K, layoutApprox);
 export const xyzOverlap = (xy: number[][], xyz: number[][], K = 8): number => xyzOverlapCore(xy, xyz, K, layoutApprox);
 
-// Project + cluster with the node host's approximate indexes wired in (geometry.ts holds the logic).
+// NODE's GPU entry point: Dawn's own node bindings (the `webgpu` npm package, maintained by the
+// Chrome WebGPU team). Optional at runtime — a machine without a usable adapter (or where the addon
+// fails to load) just returns null and the regime chooser falls through to hnswlib-node. The exact
+// kernel's output was verified byte-identical between this host and the browser (same Dawn underneath).
+let nodeGpuP: Promise<GPU | null> | null = null;
+export function nodeGpu(): Promise<GPU | null> {
+  return (nodeGpuP ??= (async () => {
+    try {
+      const { create, globals } = await import("webgpu");
+      Object.assign(globalThis, globals); // GPUBufferUsage / GPUMapMode etc. — the kernel uses the standard globals
+      return create([]);
+    } catch (e) { console.error(`webgpu (Dawn) unavailable on this host (${e}) — kNN falls back to hnswlib-node`); return null; }
+  })());
+}
+
+// The node face of the kNN seam: exact-GPU whenever an adapter exists, hnswlib-node without one,
+// CPU brute force for small corpora (src/knn/regime.ts holds the environment-only chooser).
+export const nodeKnn: Knn = async (X, K) =>
+  makeKnn({ gpu: await nodeGpu(), hnsw: knnIndex, hnswMethod: "hnswlib-node" })(X, K);
+
+// Project + cluster with the node host's kNN regimes wired in (geometry.ts holds the logic).
 export async function projectAndCluster(embs: number[][]) {
-  return projectAndClusterCore(embs, { approxKnn: knnIndex, layoutApprox });
+  return projectAndClusterCore(embs, { knn: nodeKnn, layoutApprox });
 }
 
 // verify: (1) MiniLM embeds card text, (2) umap-js + curare-cluster lay out real card embeddings
