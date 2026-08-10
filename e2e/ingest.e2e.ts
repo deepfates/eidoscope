@@ -201,6 +201,20 @@ try {
   ok(provOk, "the toolbar mounted over the ingested map (same working-document path as a dropped .eido)");
   void prov;
 
+  // 8. REACHABILITY FROM THE WITH-MAP STATE (eid-9rdy): a user on the deployed site lands on an
+  // already-open map and never sees the empty-state panel — every ingest doorway must exist in the
+  // open menu there. This drives the state a real visitor is actually in, not the blank-slate one.
+  for (let i = 0; i < 3 && (await p.locator(".fixed.inset-0:visible").count()); i++) await p.keyboard.press("Escape"); // clear any overlay (deck/intro) so the toolbar is clickable
+  await p.click('[data-menu$=":open"]:visible');
+  const menuFolder = await p.locator('[data-opt$=":open:folder"]:visible').count();
+  const menuHf = await p.locator('[data-opt$=":open:hf"]:visible').count();
+  ok(menuFolder === 1, "open menu offers 'open a folder…' with a map already open");
+  ok(menuHf === 1, "open menu offers 'map a HuggingFace dataset…' with a map already open");
+  await p.locator('[data-opt$=":open:hf"]:visible').click();
+  ok((await p.locator("[data-testid=hf-dialog], [data-testid=hf-url]").count()) > 0 || (await p.getByText(/HuggingFace/i).count()) > 0, "the HF connector dialog actually opens from the with-map state");
+  await p.keyboard.press("Escape");
+  ok((await p.locator("[data-testid=open-folder]").count()) === 1, "the ONE persistent folder input exists outside every conditional block");
+
   ok(pageErrs.length === 0, "no page errors through the whole ingest" + (pageErrs.length ? " — " + pageErrs[0] : ""));
   ok(blocked.length === 0, "no request needed the real network" + (blocked.length ? ` — blocked: ${blocked[0]}` : ""));
 } catch (e) {

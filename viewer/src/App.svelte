@@ -605,6 +605,7 @@
   // hfOpen: the HuggingFace connector's dialog (connectors/HuggingFace.svelte). Any connector ends
   // the same way — a CorpusPayload fed to startIngest, into the one Ingest panel.
   let hfOpen = $state(false);
+  let folderInput: HTMLInputElement | undefined = $state(); // the ONE folder doorway (eid-9rdy)
   function startIngest(files: IngestFile[], name: string, source?: string) {
     if (!files.length) { noMapHint = "no .md/.txt files in that folder"; return; }
     ingest = { files, name, source };
@@ -1101,6 +1102,8 @@
     <DropdownMenu.Portal>
       <DropdownMenu.Content class="eido-pop menu w-64 p-1" sideOffset={6} align="end">
         <DropdownMenu.Item class="rounded-field flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm hover:bg-base-200" data-opt="{scope}:open:file" onSelect={openDoc}>open a .eido…</DropdownMenu.Item>
+        <DropdownMenu.Item class="rounded-field flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm hover:bg-base-200" data-opt="{scope}:open:folder" onSelect={() => folderInput?.click()}>open a folder of .md / .txt…</DropdownMenu.Item>
+        <DropdownMenu.Item class="rounded-field flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm hover:bg-base-200" data-opt="{scope}:open:hf" onSelect={() => (hfOpen = true)}>map a HuggingFace dataset…</DropdownMenu.Item>
         {#if recents.length}
           <DropdownMenu.Separator class="my-1 h-px bg-base-300" />
           <div class="px-3 py-1 font-mono text-[10px] uppercase tracking-widest opacity-50">recent</div>
@@ -1417,10 +1420,9 @@
         <div class="text-xl font-bold">eidoscope 🔭</div>
         <div class="mt-1 text-sm opacity-70">turn any folder of documents into an honest, holdable map — entirely in this tab.</div>
         <div class="mt-5 flex flex-col gap-2">
-          <label class="btn btn-primary justify-start gap-2 normal-case">
+          <button class="btn btn-primary justify-start gap-2 normal-case" data-testid="open-folder-btn" onclick={() => folderInput?.click()} aria-label="open a folder of markdown or text files">
             <span>open a folder of .md / .txt</span>
-            <input type="file" webkitdirectory multiple class="hidden" data-testid="open-folder" onchange={pickFolder} aria-label="open a folder of markdown or text files" />
-          </label>
+          </button>
           <button class="btn justify-start gap-2 normal-case" data-testid="open-hf" onclick={() => (hfOpen = true)} aria-label="load a HuggingFace dataset">
             <span>map a HuggingFace dataset</span>
           </button>
@@ -1434,6 +1436,11 @@
       </div>
     </div>
   {/if}
+
+  <!-- ONE folder input for every doorway (eid-9rdy): the landing button and the open-menu item both
+       click it, so folder ingest is reachable from ANY app state, not only the never-shown-in-prod
+       empty state. Lives outside every conditional block on purpose. -->
+  <input bind:this={folderInput} type="file" webkitdirectory multiple class="hidden" data-testid="open-folder" onchange={pickFolder} aria-label="open a folder of markdown or text files" />
 
   {#if hfOpen && !ingest}
     <HuggingFace onReady={connectorReady} onCancel={() => (hfOpen = false)} />
