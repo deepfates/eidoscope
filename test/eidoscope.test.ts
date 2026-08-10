@@ -797,3 +797,30 @@ test("buildReport: a minor axis near the 2% line never rounds up across it", asy
   // and the usage line lands in the footer when given
   expect(buildReport(D, "T", { usage: "LLM usage: 12 tokens" })).toContain("LLM usage: 12 tokens");
 });
+
+// TINY-CORPUS COLOUR HONESTY (codex review, eid-zsij): below UMAP's neighbor floor the colour
+// coordinates must STILL be a projection of the card vectors — the format's claim is unconditional.
+// The old index-ordered ring gave the same colours regardless of embeddings.
+test("projectAndCluster n<5: colour coords derive from the vectors, not the index ring", async () => {
+  const { projectAndCluster, pca2, COLOR_SEED } = await import("../src/geometry.ts");
+  const unit = (v: number[]) => { const n = Math.hypot(...v) || 1; return v.map((x) => x / n); };
+  // 4 cards: two near-duplicates (a, a') and two others far away in embedding space
+  const A = [unit([1, 0.02, 0]), unit([1, 0.03, 0.01]), unit([0, 1, 0]), unit([0, 0, 1])];
+  const rA = await projectAndCluster(A);
+  expect(rA.colorCoords.length).toBe(4);
+  // vector-derived: the near-duplicates sit close on the colour disc, the far pair does not
+  const d = (p: number[], q: number[]) => Math.hypot(p[0] - q[0], p[1] - q[1]);
+  expect(d(rA.colorCoords[0], rA.colorCoords[1])).toBeLessThan(d(rA.colorCoords[0], rA.colorCoords[2]));
+  expect(d(rA.colorCoords[0], rA.colorCoords[1])).toBeLessThan(d(rA.colorCoords[0], rA.colorCoords[3]));
+  // deterministic across runs
+  const rA2 = await projectAndCluster(A);
+  expect(rA2.colorCoords).toEqual(rA.colorCoords);
+  // DIFFERENT embeddings → DIFFERENT colour coords (the ring gave identical ones for any input)
+  const B = [unit([0, 1, 0.02]), unit([0.5, 0.5, 0.7]), unit([1, 0, 0]), unit([0.2, 0.9, 0.4])];
+  const rB = await projectAndCluster(B);
+  expect(rB.colorCoords).not.toEqual(rA.colorCoords);
+  // pca2 edge cases: n=1 centres; identical vectors collapse to the achromatic centre (honest: no structure)
+  expect(pca2([[1, 0]], COLOR_SEED)).toEqual([[0, 0]]);
+  const same = pca2([[1, 0, 0], [1, 0, 0], [1, 0, 0]], COLOR_SEED);
+  for (const p of same) { expect(Math.abs(p[0])).toBeLessThan(1e-9); expect(Math.abs(p[1])).toBeLessThan(1e-9); }
+});

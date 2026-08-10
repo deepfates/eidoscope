@@ -132,7 +132,8 @@ export type MapContract = {
   xyzAgree?: number;
 
   // COLOR COORDINATES (eid-zsij, v2.2 field) — per-card [x, y] on the unit disc: a DEDICATED 2D
-  // projection of the card vectors (same UMAP family/params as the layout, its own seed), centred
+  // projection of the card vectors (same UMAP family/params as the layout with its own seed; below
+  // UMAP's neighbor floor, n < 5, a seeded PCA of the same vectors — always vector-derived), centred
   // and 90th-percentile-normalized (src/geometry.ts toUnitDisc). View-independent: NOT the xy/xyz
   // layout — colour derived from it survives switching between neighbor map, axis scatter and 3D.
   // Region/categorical hues come from member-centroid angles; bipolar ramp poles from decile

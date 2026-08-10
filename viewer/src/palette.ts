@@ -65,26 +65,37 @@ export function centroidHues(coords: number[][], assign: ArrayLike<number>, k: n
   return Array.from({ length: k }, (_, g) => (cn[g] ? ((Math.atan2(cy[g] / cn[g], cx[g] / cn[g]) * 180) / Math.PI + 360) % 360 : 0));
 }
 
-/** Order-preserving circular separation: nudge hues along the ring — NEVER reorder them — until
+/** Order-preserving circular separation: move hues along the ring — NEVER reorder them — so that
  *  every adjacent circular gap is ≥ gmin degrees. Similar groups stay adjacent on the ring (the
  *  similarity signal survives); identical/near-identical centroid angles become distinguishable.
- *  gmin is bounded by equal spacing (360/k), so the loop always converges. */
+ *  EXACT, not iterative: with k hues, k·gmin ≤ 360 is feasible and the construction below provably
+ *  meets the gap; when k·gmin > 360 no placement can honor gmin, so the honest achievable gap —
+ *  exactly 360/k (equal spacing) — is used instead of pretending. Deterministic throughout
+ *  (stable sort; coincident hues keep their input-index order). */
 export function separateHues(hues: number[], gmin: number): number[] {
   const k = hues.length;
   if (k < 2 || gmin <= 0) return hues.slice();
-  const idx = hues.map((_, i) => i).sort((a, b) => hues[a] - hues[b]);
-  const a = idx.map((i) => hues[i]);   // unwrapped working domain: values may drift <0 or >360; order is what matters
-  for (let pass = 0; pass < 400; pass++) {
-    let moved = false;
-    for (let j = 0; j < k; j++) {
-      const p = (j + 1) % k;
-      const gap = j === k - 1 ? a[p] + 360 - a[j] : a[p] - a[j];
-      if (gap < gmin - 1e-6) { const push = (gmin - gap) / 2; a[j] -= push; a[p] += push; moved = true; }
-    }
-    if (!moved) break;
-  }
+  const g = Math.min(gmin, 360 / k);   // the honest achievable gap
+  const idx = hues.map((_, i) => i).sort((a, b) => hues[a] - hues[b]);   // stable: ties keep input order
+  const a = idx.map((i) => hues[i]);
+  // Adjacent circular gaps of the sorted ring, and the sweep start s (gas-station argument): with
+  // slack e_j = gap_j − g and prefix sums P, start just past M = argmax P. Then every cyclic gap
+  // interval ENDING at M has nonneg slack (inside: P_M − P_{i−1} ≥ 0 since P_M is the max; wrapping:
+  // add the total slack P_{k−1} = 360 − k·g ≥ 0), which is exactly the condition for the single
+  // forward sweep below to close the ring: its last→first gap is provably ≥ g.
+  const gap = a.map((_, j) => (j === k - 1 ? a[0] + 360 - a[j] : a[j + 1] - a[j]));
+  let s = 0, run = 0, best = -Infinity;
+  for (let j = 0; j < k; j++) { run += gap[j] - g; if (run > best) { best = run; s = (j + 1) % k; } }
+  // Unwrap the ring into a nondecreasing line starting at s, then one forward pass
+  // d[t] = max(c[t], d[t−1] + g): each hue moves only clockwise, order is preserved by construction,
+  // every interior gap is ≥ g exactly, and the start choice bounds the final push so that
+  // c[0] + 360 − d[k−1] ≥ g (the closing gap).
+  const c = Array.from({ length: k }, (_, t) => a[(s + t) % k] + (s + t >= k ? 360 : 0));
+  const d = new Array<number>(k);
+  d[0] = c[0];
+  for (let t = 1; t < k; t++) d[t] = Math.max(c[t], d[t - 1] + g);
   const out = new Array<number>(k);
-  idx.forEach((orig, j) => (out[orig] = ((a[j] % 360) + 360) % 360));
+  for (let t = 0; t < k; t++) out[idx[(s + t) % k]] = ((d[t] % 360) + 360) % 360;
   return out;
 }
 
@@ -113,7 +124,7 @@ export function anchorHueOf(theme: ThemeTokens): number {
   return 0;
 }
 
-/** Hues fixed by the caller (the grain tree): the engine keeps the theme's chroma personality, the
+/** Hues fixed by the caller (coordPalette's centroid hues): the engine keeps the theme's chroma personality, the
  *  contrast-floor lightness band, the tier phase and the deuteranopia-weighted hill-climb — on L only. */
 export type FixedHues = { hues: number[]; tiers?: number[] };
 
@@ -138,7 +149,7 @@ export function derivePalette(theme: ThemeTokens, n = N, fixed?: FixedHues): Der
   const g = themeGamut(theme)!;   // bgc parsed above, so this cannot be null
   const { C, dark } = g;
 
-  // 3. hue set. FIXED path (region tree): the hues arrive pre-determined by ancestry — the engine
+  // 3. hue set. FIXED path (colour-coordinate centroids): the hues arrive pre-determined — the engine
   //    must not move them. FLAT path (categorical dims, fallback): keep the anchors, fill the rest
   //    by repeatedly splitting the largest circular gap.
   let hues: number[];

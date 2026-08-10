@@ -108,6 +108,43 @@ describe("colour-coordinate palette", () => {
     expect(separateHues([0, 120, 240], 10)).toEqual([0, 120, 240]);
   });
 
+  // adversarial degenerate cases (codex review): the exact constrained placement must PROVABLY meet
+  // the promised gap — the old iterative nudging left 22 of 24 gaps under 10° on coincident input.
+  const circularGaps = (hs: number[]) => {
+    const sorted = [...hs].sort((a, b) => a - b);
+    return sorted.map((v, i) => (((sorted[(i + 1) % sorted.length] - v) % 360) + 360) % 360 || 360);
+  };
+
+  test("separateHues: 24 coincident hues meet the full 10° gap exactly", () => {
+    const sep = separateHues(new Array(24).fill(137), 10);   // 24·10 = 240 ≤ 360: 10° is feasible
+    for (const g of circularGaps(sep)) expect(g).toBeGreaterThanOrEqual(10 - 1e-6);
+    // deterministic
+    expect(separateHues(new Array(24).fill(137), 10)).toEqual(sep);
+  });
+
+  test("separateHues: 36 crowded hues get the honest achievable gap, exactly 360/36 = 10°", () => {
+    // 36 hues jammed into a 40° arc, asked for 12°: 36·12 > 360, so the promise is capped at 360/k
+    const raw = Array.from({ length: 36 }, (_, i) => 100 + (40 * i) / 35);
+    const sep = separateHues(raw, 12);
+    for (const g of circularGaps(sep)) expect(g).toBeGreaterThanOrEqual(360 / 36 - 1e-6);
+  });
+
+  test("separateHues: never reorders — circular order of a mixed crowded ring is preserved", () => {
+    const raw = [350, 351, 352, 5, 6, 90, 91, 92, 180, 181, 270, 271, 272, 273];
+    const sep = separateHues(raw, 10);
+    for (const g of circularGaps(sep)) expect(g).toBeGreaterThanOrEqual(10 - 1e-6);
+    // same circular order: walking the output ring from raw's minimum visits indices in the same
+    // sorted-by-input sequence (stable on ties)
+    const order = (hs: number[]) => hs.map((_, i) => i).sort((a, b) => hs[a] - hs[b]);
+    const rot = (seq: number[], to: number[]) => { const s = seq.indexOf(to[0]); return [...seq.slice(s), ...seq.slice(0, s)]; };
+    expect(rot(order(sep), order(raw))).toEqual(order(raw));
+    // coincident inputs keep input-index order along the ring
+    const co = separateHues([200, 200, 200], 10);
+    const gapsUp = (((co[1] - co[0]) % 360) + 360) % 360;
+    expect(gapsUp).toBeLessThan(180);   // index 1 sits clockwise of index 0
+    expect(((((co[2] - co[1]) % 360) + 360) % 360)).toBeLessThan(180);
+  });
+
   test("coordPalette: similar groups wear similar (but distinct) theme-band colours in every theme", () => {
     const toOklch = converter("oklch") as any;
     for (const [name, tokens] of Object.entries(THEMES)) {
