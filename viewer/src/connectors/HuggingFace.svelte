@@ -2,12 +2,11 @@
   // The HuggingFace connector's UI (eid-ilc5): paste an id or URL → look it up → pick the text
   // column → fetch every row with honest count-based progress → hand a CorpusPayload up. The
   // ingest itself (embed → axes → cards → map) is NOT here — App feeds the payload to the same
-  // Ingest panel the folder connector uses. Envelope honesty happens BEFORE the download: the row
-  // count is known up front, so a split past the in-page envelope is refused here with the same
-  // CLI line IngestRun would give, instead of after fetching it all.
+  // Ingest panel the folder connector uses. Size honesty: the row count is known up front, so a
+  // big split gets a heads-up note here (long download + long run), and the ingest panel states
+  // measured time/spend before carding. The page never refuses by size (docs/ARCHITECTURE.md).
   import { previewDataset, fetchDataset, type HFPreview } from "./huggingface";
   import type { CorpusPayload } from "./types";
-  import { INPAGE_ENVELOPE_DOCS } from "../ingest";
 
   let { onReady, onCancel }: { onReady: (p: CorpusPayload) => void; onCancel: () => void } = $props();
 
@@ -19,7 +18,7 @@
   let progress = $state<{ done: number; total: number } | null>(null);
   let abort: AbortController | null = null;
 
-  const overEnvelope = $derived(!!preview && preview.numRowsTotal > INPAGE_ENVELOPE_DOCS);
+  const bigCorpus = $derived(!!preview && preview.numRowsTotal > 5000); // heads-up threshold only — never a refusal
 
   async function lookup() {
     if (busy) return;
@@ -70,10 +69,15 @@
       {#if preview.sample.length && column}
         <div class="rounded-field mt-2 max-h-24 overflow-hidden bg-base-200 p-2 font-mono text-[10px] leading-snug opacity-60" data-testid="hf-sample">{String(preview.sample[0]?.[column] ?? "").slice(0, 400)}</div>
       {/if}
-      {#if overEnvelope}
-        <div class="rounded-field mt-3 bg-base-200 p-3 text-[12px] leading-snug" data-testid="hf-envelope">
-          {preview.numRowsTotal.toLocaleString()} rows is past the in-page envelope (~{INPAGE_ENVELOPE_DOCS.toLocaleString()} documents).
-          Build this one with the CLI twin — <span class="font-mono">eidoscope</span> — and open the .eido it emits here; same engine, same file.
+      {#if bigCorpus}
+        <!-- The page never refuses a corpus by size (owner ruling, docs/ARCHITECTURE.md): it states an
+             honest scale note and proceeds. Real time/spend estimates come from the ingest panel once
+             the rows are in hand — this is just the pre-download heads-up for a long run. -->
+        <div class="rounded-field mt-3 bg-base-200 p-3 text-[12px] leading-snug" data-testid="hf-scale-note">
+          {preview.numRowsTotal.toLocaleString()} rows is a long run — download first, then the ingest
+          panel states measured time and LLM spend before carding starts. The engine runs in a worker;
+          the tab stays live. (The CLI twin builds the same .eido headless if you'd rather not keep a
+          tab around.)
         </div>
       {/if}
     {/if}
@@ -96,11 +100,9 @@
           {#if busy === "lookup"}<span class="loading loading-spinner loading-xs"></span>{/if}look it up
         </button>
       {:else}
-        {#if !overEnvelope}
-          <button class="btn btn-primary btn-sm normal-case" data-testid="hf-ingest" onclick={ingest} disabled={!!busy || !column}>
-            ingest {preview.numRowsTotal.toLocaleString()} rows
-          </button>
-        {/if}
+        <button class="btn btn-primary btn-sm normal-case" data-testid="hf-ingest" onclick={ingest} disabled={!!busy || !column}>
+          ingest {preview.numRowsTotal.toLocaleString()} rows
+        </button>
         <button class="btn btn-sm normal-case" data-testid="hf-relookup" onclick={() => { preview = null; error = ""; }} disabled={busy === "rows"}>different dataset</button>
       {/if}
       <button class="btn btn-ghost btn-sm normal-case" data-testid="hf-cancel" onclick={cancel}>cancel</button>

@@ -11,6 +11,3 @@ export const DEFAULT_MAX_DOC_CHARS = 1_000_000;
 // The INGEST-RUN refusal at this constant is gone (eid-yhj7): the engine runs in a Web Worker, so any
 // corpus size runs without freezing the tab — the panel narrates a measured time estimate instead,
 // and cancel is always live. The constant survives for CONNECTORS only: when a remote dataset's row
-// count is known up front (HuggingFace), pulling a million rows into the page just to start a
-// multi-hour LLM spend is refused BEFORE download with a pointer at the CLI twin.
-export const INPAGE_ENVELOPE_DOCS = 5000;

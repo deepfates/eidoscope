@@ -24,7 +24,6 @@ import EngineWorker from "./engine.worker?worker&inline";
 export type { IngestFile, IngestStatus };
 // the connectors' pre-download guard (see src/defaults.ts — the ingest-RUN refusal is dead, this
 // bounds only what a connector will pull into the page when the row count is known up front)
-export { INPAGE_ENVELOPE_DOCS } from "../../src/defaults";
 
 // ── the user-held LLM key: a field the user fills, kept in localStorage, never in any file ───────────
 export const KEY_STORAGE = "eido-llm-key";

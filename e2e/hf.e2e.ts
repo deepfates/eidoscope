@@ -146,12 +146,13 @@ try {
   const err = await p.locator("[data-testid=hf-error]").textContent();
   ok(/not found/.test(err ?? ""), `unknown dataset → the server's error, said plainly — "${err?.trim()}"`);
 
-  // 3. a split past the in-page envelope is refused BEFORE any rows are downloaded
+  // 3. a big split gets an honest scale heads-up and PROCEEDS — the page never refuses by size
+  // (owner ruling, docs/ARCHITECTURE.md; the old refusal envelope died here)
   await p.fill("[data-testid=hf-id]", "eido/huge");
   await p.click("[data-testid=hf-lookup]");
-  await p.waitForSelector("[data-testid=hf-envelope]", { timeout: 10000 });
-  ok((await p.locator("[data-testid=hf-ingest]").count()) === 0, "999,999 rows → the envelope line up front, no ingest button, nothing fetched");
-  ok(rowsCalls.length === 0, "no row pages were pulled for the over-envelope dataset");
+  await p.waitForSelector("[data-testid=hf-scale-note]", { timeout: 10000 });
+  ok((await p.locator("[data-testid=hf-ingest]").count()) === 1, "999,999 rows → the scale note AND a live ingest button — informed, never refused");
+  ok(rowsCalls.length === 0, "no row pages were pulled just for the preview");
   await p.click("[data-testid=hf-relookup]");
 
   // 4. paste a URL (not a bare id) → lookup → columns offered → pick the text column
