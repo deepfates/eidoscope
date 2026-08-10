@@ -16,7 +16,7 @@ import { Store } from "../../src/llm";
 import { DEFAULT_MODEL, DEFAULT_API_URL, DEFAULT_EMBED_MODEL, DEFAULT_MAX_DOC_CHARS } from "../../src/defaults";
 import type { MapContract } from "../../src/schema";
 import { embedItems, type EmbedProgress } from "./embedder";
-import { opfsStore, cacheFileName, persistSummary } from "./opfs";
+import { opfsStore, cacheFileName, persistSummary, requestDurableStorage } from "./opfs";
 // the kNN regime seam (agent/knn-regimes): exact WebGPU whenever this worker's context exposes an
 // adapter (WebGPU is available in dedicated workers), calibrated hnswlib-wasm without one — the same
 // environment-only chooser the node host runs, so derivedBy.neighbors is honest from either host
@@ -140,6 +140,9 @@ export class IngestRun {
   private embCache: Store | null = null;
   private async openCaches(): Promise<void> {
     if (this.cardCache) return;
+    // ask for DURABLE storage before the run spends anything (eid-ext6) — the answer decides what the
+    // panel tells the user about how safe this run's cached work is.
+    await requestDurableStorage();
     [this.cardCache, this.regionCache, this.embCache] = await Promise.all([
       opfsStore(cacheFileName("cards")),
       opfsStore(cacheFileName("regions")),

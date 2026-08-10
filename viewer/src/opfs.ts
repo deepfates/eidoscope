@@ -33,10 +33,28 @@ const warnOnce = () => {
 // honest cache-durability state, per file — surfaced in the ingest panel's status line
 export type PersistMode = "opfs" | "contended" | "memory";
 const modes = new Map<string, PersistMode>();
+
+// DURABLE vs BEST-EFFORT storage (eid-ext6). Without navigator.storage.persist(), an origin's data is
+// "best-effort": the browser may evict it under storage pressure, and some hosts (an embedded webview
+// with an ephemeral partition, a private window) never write it to disk at all. A long run can then
+// lose hours of paid work with nothing to point at. So: ASK for durability before a run spends
+// anything, and SAY which mode we got — the run panel would rather warn than surprise.
+let durable: boolean | null = null;   // null = not asked yet
+export async function requestDurableStorage(): Promise<boolean> {
+  const s: any = (globalThis as any).navigator?.storage;
+  if (!s?.persist) { durable = false; return false; }
+  try { durable = (await s.persisted?.()) || (await s.persist()); }
+  catch { durable = false; }
+  return !!durable;
+}
+
 export function persistSummary(): { mode: PersistMode; line: string } {
   const all = [...modes.values()];
   const mode: PersistMode = all.includes("memory") ? "memory" : all.includes("contended") ? "contended" : "opfs";
-  const line = mode === "opfs" ? "caches persist in this browser (OPFS)"
+  const line = mode === "opfs"
+    ? (durable === false
+      ? "caches persist in this browser, but it has not granted DURABLE storage — a long run can be evicted, and some embedded browsers discard it entirely. Save the .eido when the map mounts."
+      : "caches persist in this browser (OPFS, durable)")
     : mode === "contended" ? "caches: another tab holds the cache file — queued writes will persist when it lets go"
     : "caches: memory only in this browser — a reload re-pays uncached work";
   return { mode, line };
