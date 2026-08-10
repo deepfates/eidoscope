@@ -6,7 +6,7 @@
 // module that exports "something → Promise<CorpusPayload>" and a small UI to gather its inputs —
 // nothing downstream changes: corpus rules (the 200-char floor, dedupe, the envelope) live in
 // corpus-core/IngestRun and come free.
-import type { IngestFile } from "../ingest";
+import type { IngestFile } from "../run";
 
 export type CorpusPayload = {
   files: IngestFile[];   // already-read text files, ready for docsFromFiles

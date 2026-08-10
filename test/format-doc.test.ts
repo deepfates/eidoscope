@@ -66,9 +66,8 @@ function parseMeta(container: Uint8Array) {
 describe("EIDO-FORMAT.md matches the codec", () => {
   const meta = parseMeta(encodeContainer(fullMap()));
 
-  test("documented meta keys === keys a full v2.1 emit produces (+ legacy `notes`)", () => {
+  test("documented meta keys === keys a full emit produces (ONE format — v2.2, no legacy keys)", () => {
     const emitted = new Set<string>(Object.keys(meta));
-    emitted.add("notes"); // pre-v2.1 files carry meta.notes inline; documented, never re-emitted
     expect([...docMetaKeys].sort()).toEqual([...emitted].sort());
   });
 

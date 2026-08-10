@@ -1,6 +1,11 @@
 // The synthetic corpus both e2e suites use. Shared so neither depends on a gitignored fixture that
 // only exists after a real pipeline run — that dependency is why CI could not run the full gate.
 import type { MapContract } from "../src/schema.ts";
+import { buildMetaFields } from "../src/geometry.ts";
+
+// like every real emit, the synth maps DECLARE their fields: the viewer builds dimensions only from
+// the manifest (no hardcoded column fallback — a manifest-less file gets derived folder/length only)
+const withManifest = (D: MapContract): MapContract => ({ ...D, metaFields: buildMetaFields(D) });
 
 export function synthMap(): MapContract {
   const B = 3, PER = 30, N = B * PER;
@@ -34,7 +39,7 @@ export function synthMap(): MapContract {
   const clusters = Array.from({ length: k }, (_, c) => ({ c, n: cluster.filter((x) => x === c).length, label: "L2R" + c, cx: 0, cy: 0 }));
   const cite: number[][] = ids.map(() => []); cite[0] = [1, 2, 31]; cite[3] = [4]; cite[31] = [0];
   const ghosts = [{ title: "GhostPaper Attention", arxiv: "2101.00001", url: "https://arxiv.org/abs/2101.00001", n: 5, core: "a cited-but-absent paper", xy: [0.8, 0.5] as [number, number], sim: 0.6 }];
-  return {
+  return withManifest({
     version: 1, ids, titles, cores, notes: ids.map(() => ({ a: "note on a", b: "note on b" })), axes,
     scores: { a: sa, b: sb }, xy, xyz, cluster, k, di: 2, hub, nbr, clusters, levels, counts, levelLabels,
     levelBlurbs: counts.map((n) => Array.from({ length: n }, () => "blurb")),
@@ -52,18 +57,18 @@ export function synthMap(): MapContract {
     vectors: { data: Float32Array.from(ids.flatMap((_, i) => { const b = Math.floor(i / PER); return Array.from({ length: 8 }, (_, j) => (j === b ? 1 : 0) + 0.15 * Math.sin(i * 0.7 + j)); })), dim: 8 },
     provenance: { title: "synth-corpus", source: "e2e/synth.ts", generated: 1, count: N },
     derivedBy: { cardModel: "test/model", embedder: { id: "Xenova/all-MiniLM-L6-v2", dim: 8, pooling: "mean", normalized: true }, geometryBasis: "card" as const, generated: 1 },
-  };
+  });
 }
 
 // a deliberately DIFFERENT map (2 regions vs 12) so ?map= loading it is distinguishable from the default
 export function altSynth(): MapContract {
   const N = 6, ids: string[] = [], titles: string[] = [], cores: string[] = [], xy: number[][] = [], xyz: number[][] = [], cluster: number[] = [], hub: number[] = [], nbr: number[][] = [], sa: number[] = [];
   for (let i = 0; i < N; i++) { const b = i < 3 ? 0 : 1; ids.push("a" + i); titles.push("Alt " + i); cores.push("alt doc " + i); xy.push([b ? 1 : -1, (i % 3) * 0.2]); xyz.push([b ? 1 : -1, 0, 0]); cluster.push(b); hub.push(1); nbr.push([(i + 1) % N]); sa.push(Math.round((i / N) * 100)); }
-  return {
+  return withManifest({
     version: 1, ids, titles, cores, notes: ids.map(() => ({ a: "n" })), axes: [{ key: "a", name: "AxisA", low: "Lo", high: "Hi", variance: 0.5 }],
     scores: { a: sa }, xy, xyz, cluster, k: 2, di: 0, hub, nbr,
     clusters: [{ c: 0, n: 3, label: "Alt-A" }, { c: 1, n: 3, label: "Alt-B" }],
     levels: [cluster], counts: [2], levelLabels: [["Alt-A", "Alt-B"]], levelBlurbs: [["x", "x"]],
-  };
+  });
 }
 

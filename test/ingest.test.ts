@@ -2,7 +2,7 @@
 // host bindings — prove it numerically. Both faces run the 24-doc example corpus with the same
 // deterministic fake embedder and mock LLM signatures (no network, no model download); the resulting
 // maps must agree on axes, scores and geometry to float tolerance (they share seeds, so exactly).
-// Plus the envelope + key gating of the page's IngestRun, which need no models to fire.
+// Plus the key gating of the page's IngestRun, which needs no models to fire.
 import { test, expect } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -12,7 +12,7 @@ import { run } from "../src/pipeline.ts";
 import { buildMap } from "../src/engine.ts";
 import { poolEmbedWith } from "../src/geometry.ts";
 import type { Embedder } from "../src/map.ts";
-import { IngestRun, EnvelopeError, INPAGE_ENVELOPE_DOCS } from "../viewer/src/ingest.ts";
+import { IngestRun } from "../viewer/src/run.ts";
 
 // Deterministic fake embedder: a seeded 32-dim vector from each chunk's content hash. Same text in,
 // same vector out, on both faces — so any divergence downstream is REAL stage divergence, not noise.
@@ -78,21 +78,9 @@ test("in-page engine ≡ node pipeline on the 24-doc example corpus (axes, score
   rmSync(outDir, { recursive: true, force: true });
 }, 60000);
 
-// ── the page run's honesty gates (no models involved — both fire before any embedding) ───────────────
-const mkFiles = (n: number) => Array.from({ length: n }, (_, i) => ({
-  path: `corpus/doc${i}.md`, name: `doc${i}.md`,
-  text: `# Doc ${i}\n\n` + `unique content ${i} `.repeat(30),
-}));
-
-test("IngestRun: past the in-page envelope it refuses honestly and points at the CLI twin", async () => {
-  const run2 = new IngestRun(mkFiles(INPAGE_ENVELOPE_DOCS + 1), "big", () => {});
-  expect(run2.start("sk-test")).rejects.toThrow(EnvelopeError);
-  await run2.start("sk-test").catch((e) => {
-    expect(String(e.message)).toContain("past the in-page envelope");
-    expect(String(e.message)).toContain("CLI");
-  });
-});
-
+// ── the page run's honesty gate (no models involved — fires before any embedding). The old doc-count
+// envelope refusal is DEAD (the engine runs in a worker; any size runs, narrated with measured
+// estimates) — an empty corpus is still a plain, named error.
 test("IngestRun: an empty folder is a plain, named error", async () => {
   const run2 = new IngestRun([{ path: "a/nope.png", name: "nope.png", text: "x" }], "empty", () => {});
   expect(run2.start("sk-test")).rejects.toThrow(/no documents found/);

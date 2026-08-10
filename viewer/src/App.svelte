@@ -8,17 +8,16 @@
   import { themePalette } from "./palette";
   import { buildDimensions, scores01, type Dimension } from "./dimensions";
   import { ViewModel, parseUrl, type CameraOp, type StatePatch } from "./model.svelte";
-  import { embedQuery, cosineAll, resetEmbedder } from "./semantic";
+  import { cosineAll } from "./semantic";
   import { deriveDirection } from "./derive";
   import { resolveIdSet, type UrlIdSet } from "./idset";
   import { GRAIN_MIN_REGION, GRAIN_RATIO, GRAIN_PALETTE_N, type SavedView, type ViewState } from "../../src/schema";
   import { encodeContainer } from "../../src/eido-container";
-  import { EmbeddedStore } from "../../src/store";
   import { gzipSync, zipSync, strToU8 } from "fflate";
   import Ingest from "./Ingest.svelte";
   import HuggingFace from "./connectors/HuggingFace.svelte";
   import type { CorpusPayload } from "./connectors/types";
-  import { filesFromFileList, filesFromDataTransfer, descendInPage, getKey, type IngestFile, type IngestStatus } from "./ingest";
+  import { engine, filesFromFileList, filesFromDataTransfer, getKey, type IngestFile, type IngestStatus } from "./ingest";
   import type { MapContract } from "../../src/schema";
   import { injectEido, vaultEntries, deckJSONL } from "../../src/export";
   import { setSource, currentFileName, canWriteInPlace, supportsFSA, openViaPicker, openRecent, listRecents, writeEido, download, type RecentFile } from "./file";
@@ -304,8 +303,8 @@
     descendErr = "";
     descending = { phase: "axes", label: "descending…" };
     try {
-      const child = await descendInPage(D, sel.map((i) => D.ids[i]), getKey(), (s) => (descending = s));
-      mountMap(new EmbeddedStore(child), { intro: true });   // the child IS the working document now
+      const child = await engine.descend(D, sel.map((i) => D.ids[i]), getKey(), (s) => (descending = s));
+      mountMap(child, { intro: true });   // the child IS the working document now (a Store, decoded from the worker's container bytes)
     } catch (e: any) {
       descendErr = String(e?.message ?? e);
     } finally { descending = null; }
@@ -564,10 +563,9 @@
     const armStall = () => { clearTimeout(stallTimer); stallTimer = setTimeout(() => onStall(new Error("__stall__")), 40000); };
     armStall();
     try {
-      const qv = await Promise.race([
-        embedQuery(q, (D as any).derivedBy?.embedder?.id, (p) => { queryStatus = p.label; queryPct = p.pct ?? null; armStall(); }),
-        stalled,
-      ]);
+      const qp = engine.embedQuery(q, (D as any).derivedBy?.embedder?.id, (p) => { queryStatus = p.label; queryPct = p.pct ?? null; armStall(); });
+      qp.catch(() => {});   // if the race is lost to the stall, the reset-terminated promise must not surface as an unhandled rejection
+      const qv = await Promise.race([qp, stalled]);
       const key = m.addQuery(q, cosineAll(qv, V));
       queryStatus = "";
       // M-D1: the fresh axis presents ITSELF — its chip scrolls into view and takes focus, the way any new
@@ -575,7 +573,7 @@
       queueMicrotask(() => { const el = document.querySelector<HTMLElement>(`[data-minted="${key}"]`); el?.scrollIntoView({ block: "nearest" }); el?.focus(); });
       return key;
     } catch (e: any) {
-      resetEmbedder();   // drop the poisoned/half-loaded model so the next add retries cleanly
+      engine.resetEmbedder();   // drop the worker's poisoned/half-loaded model so the next add retries cleanly
       queryErr = e?.message === "__stall__"
         ? "model download stalled — check your connection, then press add to retry"
         : "couldn’t run the query (" + String(e?.message ?? e) + ") — press add to retry";
@@ -619,11 +617,11 @@
     startIngest(await filesFromFileList(list), name);
     input.value = "";
   }
-  function ingestDone(D: MapContract) {
+  function ingestDone(store: Store) {
     ingest = null; noMap = false; status = "";
     // the SAME in-memory path a dropped .eido takes — the map opens as the working document; Save
-    // produces the .eido through the shared codec.
-    mountMap(new EmbeddedStore(D), { intro: true });
+    // produces the .eido through the shared codec (the worker already handed us codec bytes).
+    mountMap(store, { intro: true });
   }
   async function onDrop(e: DragEvent) {
     e.preventDefault(); dragOver = false;

@@ -102,9 +102,12 @@ the buffers region.
 
 ### The meta JSON
 
-The meta object carries all textual/structural data plus a manifest of the binary buffers.
-JSON serialization drops keys whose value is `undefined`, so optional keys are simply absent.
-Every key the encoder can emit:
+The meta object carries the file's structural description plus a manifest of the binary buffers.
+Nothing in it grows with the document count or with the user's saved work: per-node
+content rides in the `prow_*` row buffers, per-region content in `rrow_*`, saved views in `vrow_*`
+(all described below), so a reader can parse the meta in one bounded step and expand the rest
+incrementally. JSON serialization drops keys whose value is `undefined`, so optional keys are
+simply absent. Every key the encoder can emit:
 
 Stratum letters: **S** = source truth, **C** = cache, **W** = work, **F** = file plumbing.
 
@@ -115,38 +118,31 @@ Stratum letters: **S** = source truth, **C** = cache, **W** = work, **F** = file
 | `provenance` | object | no | S | `{title?, source?, generated?, count?}` — what corpus, from where, when, how big |
 | `derivedBy` | object | no | C | `{cardModel?, embedder?: {id, dim, pooling?, normalized?}, geometryBasis?: "card"\|"raw", pipelineVersion?, generated?}` — how the map was made; `embedder` lets a tool embed a query into the same space as `vectors` |
 | `metaFields` | array | no | S | typed dimension manifest: `{key, label, type: "categorical"\|"scalar"\|"temporal"\|"boolean", multi?, source}` where `source` is `col:<field>`, `axis:<key>`, or `derived:<k>` |
-| `ids` | string[] | yes | S | per-node stable document ids |
-| `titles` | string[] | yes | S | per-node titles |
-| `cores` | string[] | yes | S | per-node card restatements |
-| `notes` | object[] | pre-v2.1 only | S | per-node `{axisKey: placementNote}`; v2.1+ files carry notes in the `notes_z`/`notes_zi`/`notes_o` buffers instead |
 | `axes` | array | yes | C | `{key, name, low, high, variance?, weak?}` per discovered axis; order defines the row order of the `scores`/`rawScores` buffers |
 | `k` | number | yes | C | region count at the default cluster grain |
 | `di` | number | no | C | default level index into `levels`/`counts` |
 | `xyzAgree` | number | no | C | 2D↔3D neighborhood agreement (mean shared 8-nearest-neighbors, 0..8) |
 | `counts` | number[] | no | C | per cluster level: region count |
-| `levelLabels` | string[][] | no | C | per level: label per region |
-| `levelBlurbs` | string[][] | no | C | per level: blurb per region |
-| `clusters` | array | yes | C | default-level regions: `{c, n, label, blurb?, cx?, cy?}` |
-| `urls` | (string\|null)[] | no | S | per-node canonical link (null = absent for that node; same for all sparse columns below) |
-| `sources` | (string\|null)[] | no | S | per-node original source url |
-| `siteNames` | (string\|null)[] | no | S | per-node human label for the source |
-| `authors` | (string\|null)[] | no | S | per-node author |
-| `tags` | (string[]\|null)[] | no | S | per-node tag list |
-| `dates` | (number\|null)[] | no | S | per-node timestamp |
-| `read` | (boolean\|null)[] | no | S | per-node read flag |
-| `citec` | number[] | no | S | per-node external citation impact |
-| `ghosts` | array | no | S | frontier ghosts (cited-but-absent docs): `{title, arxiv, url, n, core, xy, sim}` |
-| `folders` | (string\|null)[] | no | S | per-node source folder (parent directory of the ingested file) |
-| `views` | array | no | W | saved views: `{name, created, state}` |
+| `cols` | object | yes | F | which optional per-node columns the `prow_*` rows carry: `{urls, sources, siteNames, authors, tags, dates, read, folders, citec}` booleans — a column marked false decodes as absent, never as an all-null column |
+| `hasLevelLabels` | boolean | yes | F | whether the level-label segment of `rrow_*` is present (distinguishes `[]` from absent) |
+| `levelCounts` | number[] | yes | F | per cluster level: how many label rows that level contributes to `rrow_*` |
+| `hasBlurbs` | boolean | yes | F | whether the level-blurb segment of `rrow_*` is present — independent of `hasLevelLabels` |
+| `blurbCounts` | number[] | yes | F | per cluster level: how many blurb rows that level contributes to `rrow_*` |
+| `clustersN` | number | yes | F | how many default-level RegionDef rows follow the blurb segment in `rrow_*` |
+| `hasGhosts` | boolean | yes | F | whether the ghost segment of `rrow_*` is present (distinguishes `[]` from absent) |
+| `ghostsN` | number | yes | F | how many ghost rows end `rrow_*` |
+| `hasViews` | boolean | yes | F | whether the `vrow_*` buffers carry saved views (distinguishes `[]` from absent) |
+| `viewsN` | number | yes | F | number of saved-view rows in `vrow_*` |
 | `hasLevels` | boolean | yes | F | whether the `levels_v`/`levels_o` buffers are present |
 | `hasCite` | boolean | yes | F | whether the `cite_v`/`cite_o` buffers are present |
 | `hasVectors` | boolean | yes | F | whether the `vectors` buffer is present (false in a "lite" emit) |
 | `vdim` | number | yes | F | embedding dimension of `vectors` (0 when absent) |
-| `notesBlock` | number | v2.1+ | F | cards per gzipped notes block (currently 512); readers must use this, never a hard-coded constant |
+| `notesBlock` | number | yes | F | cards per gzipped notes block (currently 512); readers must use this, never a hard-coded constant |
 | `buffers` | array | yes | F | the buffer manifest, below |
 
-In JSON, an absent value inside a sparse per-node column is `null` (JSON has no `undefined`);
-decoders should treat `null` as "no value".
+There is exactly **one** format: v2.2, this document. (Earlier internal layouts kept these
+per-node/per-region/view fields in the meta JSON; every shipping and fixture `.eido` was
+regenerated when v2.2 landed, and the codec neither reads nor writes anything older.)
 
 ### The buffer manifest
 
@@ -180,9 +176,17 @@ Every buffer key the encoder can emit:
 | `levels_v` / `levels_o` | i32 | if `hasLevels` | C | ragged: per cluster-ladder level, per-node region assignment |
 | `cite_v` / `cite_o` | i32 | if `hasCite` | C | ragged: per-node intra-corpus citation edges (node indices) |
 | `vectors` | f16 | if `hasVectors` | C | card embedding matrix, row-major `n × vdim`; node `i`'s vector is elements `i*vdim .. (i+1)*vdim` |
-| `notes_z` | u8 | v2.1+ | S | concatenated gzip blocks of placement notes (below) |
-| `notes_zi` | i32 | v2.1+ | S | block byte offsets into `notes_z` (`blockCount + 1` entries) |
-| `notes_o` | i32 | v2.1+ | S | each row's byte offset within its *decompressed* block (`n` entries) |
+| `notes_z` | u8 | yes | S | concatenated gzip blocks of placement notes (below) |
+| `notes_zi` | i32 | yes | S | block byte offsets into `notes_z` (`blockCount + 1` entries) |
+| `notes_o` | i32 | yes | S | each row's byte offset within its *decompressed* block (`n` entries) |
+| `prow_v` | u8 | yes | S | ragged UTF-8 values: one JSON row per node (the per-doc columns; layout below) |
+| `prow_o` | i32 | yes | S | `n+1` row byte offsets into `prow_v` |
+| `rrow_v` | u8 | yes | C | ragged UTF-8 values: one JSON row per region label, region blurb, default-level RegionDef, then ghost (segment order and counts below) |
+| `rrow_o` | i32 | yes | C | row byte offsets into `rrow_v` |
+| `vrow_v` | u8 | yes | W | ragged UTF-8 values: one JSON row per saved view — its settings plus id-list counts, with the id lists themselves in `vid_*` (layout below) |
+| `vrow_o` | i32 | yes | W | `viewsN+1` row byte offsets into `vrow_v` |
+| `vid_v` | u8 | yes | W | ragged UTF-8 values: one RAW card id per row (no JSON) — the views' selection and derived-axis id lists, concatenated in file order |
+| `vid_o` | i32 | yes | W | row byte offsets into `vid_v` |
 
 ### f16 encoding
 
@@ -192,7 +196,7 @@ This was measured lossless for cosine-similarity ranking at half the bytes. Any 
 half-float conversion reads it; `src/eido-container.ts` has a dependency-free reference
 implementation (`f32ToF16`/`f16ToF32`).
 
-### The notes blocks (v2.1+)
+### The notes blocks
 
 The per-card placement notes are the file's largest text section (measured 31.8 MB of a
 42.2 MB meta on a 13,830-doc corpus) and mostly go unread in a session, so they are stored in
@@ -212,16 +216,43 @@ independently-gzipped blocks that a reader can inflate lazily:
 A reader that does not care about laziness can inflate every block, split by offsets, and
 parse each row.
 
-### Versions and backward compatibility
+### The JSON row buffers
 
+Three ragged UTF-8 buffers carry everything textual that scales with the corpus or the user's
+work, one independently-parseable JSON row at a time (row `i` of `<name>_v` is bytes
+`<name>_o[i] .. <name>_o[i+1]`, parsed as one JSON document). This is what keeps the meta parse
+bounded and lets a reader expand a huge file incrementally.
+
+- **`prow_*`** — `n` rows; row `i` is a 12-element JSON array for node `i`:
+  `[id, title, core, url, source, siteName, author, tags, date, read, folder, citec]`.
+  Optional slots hold `null` when the value is absent; `meta.cols` says which columns are
+  present *at all* (a column marked `false` is absent from the contract, not an all-null
+  column).
+- **`rrow_*`** — four consecutive segments, each row one JSON value:
+  1. region **labels**: for each level `l`, `levelCounts[l]` rows (JSON strings) — present only
+     when `hasLevelLabels`;
+  2. region **blurbs**: for each level `l`, `blurbCounts[l]` rows (JSON string or `null`) —
+     present only when `hasBlurbs`, and independent of the labels segment;
+  3. `clustersN` default-level **RegionDef** rows: `{c, n, label, blurb?, cx?, cy?}`;
+  4. `ghostsN` **ghost** rows (`{title, arxiv, url, n, core, xy, sim}`) — present only when
+     `hasGhosts`.
+- **`vrow_*`** — `viewsN` rows, each one saved view `{name, created, state, __selN, __derN}`
+  (present only when `hasViews`). The view's uncapped card-id lists are NOT in this JSON: the
+  row carries only counts — `__selN` (id count of `state.selection`; `null` = selection absent)
+  and `__derN` (per `state.derived` entry, its `ids` count; `null` = that entry carries no ids)
+  — so each view row parses in time bounded by its own small settings.
+- **`vid_*`** — the views' id lists, one RAW UTF-8 card id per ragged row (offsets delimit; no
+  JSON, no quoting). Ids appear in file order: for each view in `vrow_*` order, first its
+  `__selN` selection ids, then each derived entry's `__derN[k]` ids. A reader reassembles by
+  consuming rows sequentially; the counts always sum to the total row count of `vid_*`.
+
+### Versions
+
+- There is exactly **one** format — the one in this document (v2.2). Older internal layouts
+  existed during development and every shipping/fixture `.eido` was regenerated when this one
+  landed; the codec neither reads nor writes anything else.
 - `version` is a human capability signal. Readers detect features by presence: the `has*`
   flags, whether a buffer key exists in the manifest, whether a meta key exists.
-- **Pre-versioned files** (no `version` key) are treated as v1: no `vectors`, no `derivedBy`,
-  no `metaFields`, notes inline.
-- **v2** added the optional `vectors` (f16) buffer and `derivedBy` provenance.
-- **v2.1** (same `version: 2` number — detect by buffer presence) moved notes out of the meta
-  JSON into the `notes_z`/`notes_zi`/`notes_o` buffers. If `meta.notes` exists, use it; else
-  the three notes buffers are required and their absence is an error.
 - **Lite emits** omit `vectors` (`hasVectors: false`, `vdim: 0`). Such a file still renders and
   filters fully, but nothing that needs the embedding space works offline: no *descend*
   (re-laying-out a subset in its own space), no *derive* / semantic-query axes (embedding a
@@ -230,13 +261,20 @@ parse each row.
 
 ### Writing a valid file (checklist for another tool)
 
-1. Build the meta object with at minimum the required keys above; all per-node arrays length `n`.
-2. Encode required buffers (`xy`, `xyz`, `hub`, `cluster`, `scores`, `nbr_v`, `nbr_o`, and the
-   notes blocks), set `has*` flags for the optional ones you include.
-3. Lay buffers out in the buffers region 4-byte aligned; record `{key, type, length, offset}`
+1. Build the meta object with at minimum the required keys above. Nothing that grows with `n`
+   or with saved work belongs in it.
+2. Encode required buffers (`xy`, `xyz`, `hub`, `cluster`, `scores`, `nbr_v`, `nbr_o`, the
+   notes blocks, and `prow_v`/`prow_o` with one 12-element row per node); set `has*` flags for
+   the optional ones you include.
+3. Encode `rrow_v`/`rrow_o` (labels · blurbs · RegionDefs · ghosts, in that order, with the
+   matching `levelCounts`/`blurbCounts`/`clustersN`/`ghostsN`), `vrow_v`/`vrow_o` (one row per
+   saved view, `viewsN` total, id lists replaced by `__selN`/`__derN` counts) and
+   `vid_v`/`vid_o` (the extracted ids, raw utf8, in view order). Emit the presence flags so
+   empty-but-present lists (`[]`) survive as `[]`.
+4. Lay buffers out in the buffers region 4-byte aligned; record `{key, type, length, offset}`
    for each in `meta.buffers`.
-4. Write magic + u32 metaLen + meta JSON (padded to 4 bytes) + buffers region.
-5. Gzip the whole thing.
+5. Write magic + u32 metaLen + meta JSON (padded to 4 bytes) + buffers region.
+6. Gzip the whole thing.
 
 ### View state (stratum 3 detail)
 

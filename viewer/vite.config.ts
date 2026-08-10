@@ -28,6 +28,12 @@ export default defineConfig({
     },
   ],
   build: { target: "es2022", assetsInlineLimit: 100_000_000 },
+  // The engine worker (viewer/src/engine.worker.ts) is imported `?worker&inline` — vite's documented
+  // pattern for a worker inside a single-file artifact (the worker becomes a base64 blob, created via
+  // Blob URL at runtime). Module format (transformers.js is ESM) + inlineDynamicImports so the worker
+  // is ONE chunk: a blob-URL module worker cannot resolve split chunks or dynamic-import specifiers
+  // relative to itself, so everything it needs (engine, ax, transformers.js) is bundled in.
+  worker: { format: "es", rollupOptions: { output: { inlineDynamicImports: true } } },
   // transformers.js ships a prebuilt web bundle; esbuild prebundling chokes on its wasm-adjacent imports,
   // so keep it out of dep optimization (the documented bundler guidance). It stays a lazy dynamic import
   // in the app, so the runtime is a code-split chunk in hosted mode and never blocks first paint.

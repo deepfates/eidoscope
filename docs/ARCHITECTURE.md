@@ -19,8 +19,9 @@ different costumes), in the Excalidraw lineage: no account, no server, files you
   workspace re-presents.
 
 The CLI is not a second product: it is the **headless face of the same engine** — batch, scripting,
-and long unattended runs — reading and writing the same files. The page never refuses a corpus by
-size: it states honest time/spend estimates and proceeds; the choice of face is the user's.
+and long unattended runs — reading and writing the same files. In the app the engine runs inside a
+Web Worker, so any corpus size runs without freezing the tab; the ingest panel states honest
+time/spend estimates and proceeds — it never refuses by size. The choice of face is the user's.
 
 ## The three strata inside a .eido
 
@@ -39,9 +40,9 @@ size: it states honest time/spend estimates and proceeds; the choice of face is 
 ## The loops
 
 - **Ingest:** open app → point at a corpus (folder / HF dataset / connector) → embed, discover,
-  card, layout in-page → a map, and a file when you save. Envelope stated honestly: comfortable to
-  **~2–5k docs in-page** (layout: 5k docs in 2.9s, measured in-browser; the wall is embed+card
-  time, not layout). Past that, the CLI twin builds the file and the app opens it.
+  card, layout in a Web Worker → a map, and a file when you save. The panel states measured
+  time/spend estimates up front (the wall is embed+card time, not layout) and proceeds at any
+  size; the CLI twin is a convenience for long unattended runs, not a requirement.
 - **Work:** every operator in the grammar, in the app — including **descend as a gesture**
   (subset layout is interactive at any selection size; naming falls back to PC labels until a key
   is present). No file ferrying between intent and result, ever.

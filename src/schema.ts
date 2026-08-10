@@ -4,15 +4,13 @@
 // deck.gl), as long as both sides honor THIS shape. Versioned, so a viewer can refuse or adapt to an
 // older/newer emit instead of silently misreading it.
 //
-// Wire format (see ticket eid-6wek): this logical shape is serialized as binary — coordinates, scores,
-// and any embeddings as Float32 typed arrays; per-node metadata columnar (Apache Arrow); the whole
-// payload gzipped. JSON is the fallback/debug form. The FIELDS below are the contract; the encoding is
-// an implementation detail beneath them.
-
-// v2 adds two OPTIONAL, presence-gated sections — carried card vectors (f16) and `derivedBy` provenance.
-// Both are additive: a v1 file lacks them and still loads; a v1 viewer ignores them. The bump is a human
-// signal of capability, not a decode gate (readers gate on the has* flags, never on this number).
-export const CONTRACT_VERSION = 2;
+// Wire format: this logical shape is serialized as the ONE .eido container (docs/EIDO-FORMAT.md,
+// src/eido-container.ts — v2.2): numeric data as typed-array buffers, textual per-doc/per-region/view
+// content as ragged utf8 JSON rows, a small O(axes+levels) meta JSON, the whole payload gzipped.
+// The FIELDS below are the contract; the encoding is an implementation detail beneath them.
+// (History in one line: earlier internal layouts existed during development; every .eido was
+// regenerated when v2.2 landed and nothing else is read or written.)
+export const CONTRACT_VERSION = 2;   // a human capability signal — readers gate on has* flags and buffer presence, never on this number
 
 // ── THE GRAIN LADDER CONTRACT (eid-iw04) ─────────────────────────────────────────────────────────────
 // Measured on the real corpora (markdown-export n=1446, pathfinder n=13830): the card-embedding space

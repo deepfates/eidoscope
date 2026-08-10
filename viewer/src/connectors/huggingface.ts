@@ -6,7 +6,10 @@
 // (100/page, the server's num_rows_per_page) into IngestFile[]. Corpus rules — the 200-char floor,
 // dedupe, splitOversized, the in-page envelope — are NOT re-implemented here: they come free from
 // corpus-core/IngestRun, exactly like the folder connector.
-import type { IngestFile } from "../ingest";
+// IngestFile's home module (run.ts) — importing it via ../ingest would drag the engine-client's
+// `?worker&inline` import into the root tsc pass (include=[src,test] → test/hf-connector.test.ts →
+// here), which only the viewer tsconfig's vite-env types can resolve.
+import type { IngestFile } from "../run";
 import type { CorpusPayload } from "./types";
 
 export const HF_API = "https://datasets-server.huggingface.co";
