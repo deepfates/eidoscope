@@ -29,6 +29,7 @@ export type Dimension = {
   ord?: string[];               // categories, most-frequent first
   idx?: Record<string, number>; // category → colour index
   cnt?: Record<string, number>;
+  wide?: boolean;               // more distinct values than colour can speak about (see LEGIBLE_VALUES)
 };
 
 export const defaultProps = (d: Dimension): DimProps => ({
@@ -66,6 +67,10 @@ function resolve(D: MapContract, f: MetaField): ((i: number) => unknown) | null 
 }
 
 // A declared field → a Dimension (or null when the corpus doesn't actually carry usable values for it).
+// how many distinct values a categorical can have before colour stops being able to say anything
+// useful about it (the legend would be a phone book, and the palette would recycle)
+export const LEGIBLE_VALUES = 40;
+
 function dimOf(D: MapContract, f: MetaField): Dimension | null {
   const get = resolve(D, f); if (!get) return null;
   const n = D.ids.length;
@@ -82,11 +87,14 @@ function dimOf(D: MapContract, f: MetaField): Dimension | null {
   const cnt: Record<string, number> = {};
   for (let i = 0; i < n; i++) { const v = cat(i); if (v) cnt[v] = (cnt[v] || 0) + 1; }
   const ord = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a]);
-  // self-filter to a legible, well-covered set: at least two values, not a near-unique id column, and present
-  // on a real share of the corpus. A field that fails this would make a useless colour lens.
-  if (ord.length < 2 || ord.length > 40 || ord.reduce((a, v) => a + cnt[v], 0) < n * 0.4) return null;
+  // Drop only what carries no information: a single value, or a field absent from most of the corpus.
+  // CARDINALITY IS NOT A REASON TO DELETE A DIMENSION (eid-ml88). 9,000 artists make a useless COLOUR
+  // lens, but sorting the deck by artist, isolating one, or finding by album are all exactly what a
+  // reader wants. So a wide field stays in the registry, flagged `wide` — the colour channel declines
+  // it (a channel's own affordance), every other channel keeps it.
+  if (ord.length < 2 || ord.reduce((a, v) => a + cnt[v], 0) < n * 0.4) return null;
   const idx: Record<string, number> = {}; ord.forEach((v, i) => (idx[v] = i));
-  return { key: f.key, name: nameOf(f), kind: "categorical", source: "meta", cat, ord, idx, cnt };
+  return { key: f.key, name: nameOf(f), kind: "categorical", source: "meta", cat, ord, idx, cnt, wide: ord.length > LEGIBLE_VALUES };
 }
 
 // A file without a manifest gets ONLY what the viewer can derive itself (folder from urls, length from

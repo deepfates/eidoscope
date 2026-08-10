@@ -161,6 +161,9 @@
   const setProp = (d: Dimension, patch: Parameters<typeof m.setProp>[1]) => m.setProp(d, patch);
   const scalarDims = $derived(allDims.filter((d) => d.kind !== "categorical"));
   const catDims = $derived(allDims.filter((d) => d.kind === "categorical"));
+  // colour can only speak about a legible number of values — a 9,000-artist legend says nothing. Wide
+  // categoricals stay available on every OTHER channel (sort, find, facet, window): eid-ml88.
+  const colourCatDims = $derived(catDims.filter((d) => !d.wide));
 
   // Pin/isolate is a state mutation (model) plus a camera move (App owns the handle) — the model returns the
   // camera intent rather than reaching for a deck handle it has no business knowing about.
@@ -976,7 +979,13 @@
                  list here — isolation no longer requires putting the dimension on colour first. -->
             {#each catDims as d}
               <li class="flex flex-row items-center gap-0">
-                <button class="min-w-0 flex-1" data-opt="{scope}:color:{d.key}" aria-pressed={m.channels.color === d.key} onclick={() => (m.channels.color = d.key)}><span class="w-3">{m.channels.color === d.key ? "✓" : ""}</span><span class="truncate">{d.name}</span></button>
+                {#if d.wide}
+                  <!-- too many values for colour to say anything (eid-ml88) — the dimension is still
+                       here to ISOLATE by, and still available on sort/find/window; colour just declines -->
+                  <span class="min-w-0 flex-1 px-3 py-1.5 text-sm opacity-50" data-wide="{scope}:{d.key}"><span class="w-3 inline-block"></span><span class="truncate">{d.name}</span> <span class="font-mono text-[10px]">· {d.ord?.length} values, too many to colour</span></span>
+                {:else}
+                  <button class="min-w-0 flex-1" data-opt="{scope}:color:{d.key}" aria-pressed={m.channels.color === d.key} onclick={() => (m.channels.color = d.key)}><span class="w-3">{m.channels.color === d.key ? "✓" : ""}</span><span class="truncate">{d.name}</span></button>
+                {/if}
                 <button class="flex-none px-2" data-iso="{scope}:{d.key}" aria-expanded={isoOpen === d.key} aria-label="isolate a {d.name} value" onclick={() => (isoOpen = isoOpen === d.key ? null : d.key)}><span class="text-[9px] opacity-60">{isoOpen === d.key ? "▴" : "▾"}</span></button>
               </li>
               {#if isoOpen === d.key}
