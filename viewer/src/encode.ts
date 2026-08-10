@@ -23,15 +23,28 @@ export const PALX: RGB[] = (() => {
 // setActiveTheme() is called once per theme switch (App.svelte, right after data-theme is stamped) and
 // bumps paletteVer so reactive readers and deck updateTriggers can invalidate off ONE number.
 let activeTheme = "";
+// The palette is sized to the categorical count actually on the colour channel (region count at the
+// current grain, or a categorical dimension's value count) — set reactively by App. No fixed size,
+// no modulo recycling: every region gets its own colour, as separated as the engine can make k of them.
+let paletteK = 24;
 export let paletteVer = 0;
-export const palette = (name: string = activeTheme): RGB[] => (name ? themePalette(name)?.colors ?? PALX : PALX);
+export const palette = (name: string = activeTheme): RGB[] => (name ? themePalette(name, undefined, paletteK)?.colors ?? PALX : PALX);
 export function setActiveTheme(name: string): number {
   if (name === activeTheme) return paletteVer;
   activeTheme = name;
-  themePalette(name);   // generate + log the canary metrics now, while the DOM carries this theme
+  themePalette(name, undefined, paletteK);   // generate + log the canary metrics now, while the DOM carries this theme
+  return ++paletteVer;
+}
+export function setPaletteK(k: number): number {
+  const kk = Math.max(2, Math.floor(k) || 2);
+  if (kk === paletteK) return paletteVer;
+  paletteK = kk;
+  if (activeTheme) themePalette(activeTheme, undefined, kk);
   return ++paletteVer;
 }
 export const activeThemeName = () => activeTheme;
+// index directly — ids at the current grain are < k by construction; modulo survives only as a guard
+// for out-of-band callers (ghost/legend edge ids), never as the sizing mechanism.
 export const col = (c: number): RGB => { const p = palette(); return p[((c % p.length) + p.length) % p.length]; };
 // continuous axis gradient (low → high) = Viridis, the ecosystem-standard perceptually-uniform,
 // colourblind-friendly sequential scale. Deliberately NOT theme-derived: most themes' tokens make a

@@ -4,7 +4,7 @@
   import { DropdownMenu, Popover } from "bits-ui";
   import { loadMap, mapUrl, decodeEido, type Store } from "./loader";
   import { createMap, type MapHandle } from "./deckmap";
-  import { col, axisColor, setActiveTheme } from "./encode";
+  import { col, setPaletteK, axisColor, setActiveTheme } from "./encode";
   import { themePalette } from "./palette";
   import { buildDimensions, scores01, type Dimension } from "./dimensions";
   import { ViewModel, parseUrl, type CameraOp, type StatePatch } from "./model.svelte";
@@ -112,6 +112,14 @@
   let palVer = $state(0);
   const theme = $derived.by(() => { void palVer; return (themePalette(themeName)?.dark ?? modeOf(themeName) === "dark") ? "dark" : "light"; });
   const colOf = $derived.by(() => { void palVer; return (c: number) => col(c); });
+  // The palette is sized to what the colour channel actually shows: the region count at this grain,
+  // or a categorical dimension's value count (deepfates' ruling 2026-08-10 — no fixed colour count,
+  // no modulo recycling; coarse maps get few well-separated colours, fine maps get exactly as many
+  // as there are regions).
+  $effect(() => {
+    const k = m.channels.color === "region" ? curCount : (colorDim?.kind === "categorical" ? (colorDim.ord?.length ?? 24) : 24);
+    palVer = setPaletteK(k);
+  });
 
   // read-only views onto the model, so the markup below reads as plainly as it did when the state was inline
   const data = $derived(m.data);

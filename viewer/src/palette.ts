@@ -146,15 +146,24 @@ export function readThemeTokens(el: Element = document.documentElement): ThemeTo
 
 // One generation per data-theme name, for the life of the page. A miss (null) is cached too, so a
 // pathological theme doesn't re-run the hill-climb on every repaint.
+// One generation per (theme, size), for the life of the page: the palette is sized to the REGION
+// COUNT actually on screen (deepfates 2026-08-10 — a fixed 24 was a magic number wearing a haircut:
+// coarse grains got an adjacent-hue prefix that read as a gradient, and fine grains recycled colours
+// by modulo, dressing far-apart regions in identical ink). The engine always generated n colours;
+// now n is the truth of the current grain. A miss (null) is cached so a pathological theme doesn't
+// re-run the hill-climb on every repaint.
 const memo = new Map<string, Derived | null>();
-export function themePalette(name: string, tokens?: ThemeTokens): Derived | null {
-  if (memo.has(name)) return memo.get(name)!;
+const tokenMemo = new Map<string, ThemeTokens>();
+export function themePalette(name: string, tokens?: ThemeTokens, n: number = N): Derived | null {
+  const key = `${name}:${n}`;
+  if (memo.has(key)) return memo.get(key)!;
+  if (!tokens) { tokens = tokenMemo.get(name) ?? readThemeTokens(); tokenMemo.set(name, tokens); }
   let d: Derived | null = null;
-  try { d = derivePalette(tokens ?? readThemeTokens()); } catch { d = null; }
-  memo.set(name, d);
+  try { d = derivePalette(tokens, n); } catch { d = null; }
+  memo.set(key, d);
   if (d) {
     const m = d.metrics;
-    console.info(`[eido] palette "${name}": minΔEOK ${m.minDEok.toFixed(4)} · deuter ${m.minDEokDeuter.toFixed(4)} · contrast ${m.worstContrast.toFixed(2)}:1 · ${d.dark ? "dark" : "light"} ground`);
+    console.info(`[eido] palette "${name}" (${n} colours): minΔEOK ${m.minDEok.toFixed(4)} · deuter ${m.minDEokDeuter.toFixed(4)} · contrast ${m.worstContrast.toFixed(2)}:1 · ${d.dark ? "dark" : "light"} ground`);
   } else {
     console.info(`[eido] palette "${name}": theme tokens unusable — falling back to the fixed palette`);
   }
