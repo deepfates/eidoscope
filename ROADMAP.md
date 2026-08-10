@@ -47,7 +47,16 @@ Build order (deps encoded in `tk`):
 Shipped since this plan was written: the DaisyUI shell (toolbar · filter chips · reading pane ·
 themes), theme-derived map palettes, the extracted view model, SELECT (circle → held set that
 explains itself → filter/export), exact Gram/EVD axis discovery (26× faster, bit-identical), seeded
-determinism, ingest dedupe, and one command-name-per-concept.
+determinism, ingest dedupe, one command-name-per-concept — and **THE BILATERAL** (epic `eid-yhj7`,
+contract in `docs/ARCHITECTURE.md`): the viewer became an app (in-tab ingest with folder + HuggingFace
+connectors, in-app DESCEND, save/open `.eido` incl. FSA in-place, export menu), the `.eido` became a
+pure document (`docs/EIDO-FORMAT.md` + anti-rot test), WebGPU in-page embedding (17× measured), OPFS
+persistent caches, views carried in the file, and the competitive study recorded (`eid-zz8n`, closed).
+In review now: the Web-Worker engine (tab never freezes, one-format v2.2 container) and honest kNN
+(exact WebGPU whenever a GPU exists; calibrated hnswlib-wasm as the no-GPU fallback). Approved and
+queued: the similarity-arranged theme-derived color system (`eid-zsij` — replaces tree hues, spread-k
+region path, and the Viridis carve-out), the matklad QA gate rework (`eid-6egl`), ingest reachable
+from any app state (`eid-9rdy`), and arbitrary per-row metadata columns (`eid-xmf0`).
 
 Recovered from the full conversation history and now tracked (things asked for that had fallen out
 of the record): the micro-UX inventory (`eid-kzv2` — multiple filter slicers, a real status bar,
@@ -62,8 +71,8 @@ inspector) · what a card looks like as you zoom · deck as drawer vs modal.
 
 ## Far side (`eid-8j5h`)
 
-Multimodal ingest, XR rendering, in-browser DESCEND, hosted/collab, 55M-scale tiling, npm publish,
-fancy syntheses (gaps/diffs/paths).
+Multimodal ingest, XR rendering, hosted/collab, 55M-scale tiling, npm publish, fancy syntheses
+(gaps/diffs/paths). (In-browser DESCEND shipped to v1 — it graduated off this list.)
 
 ## The standing loop — keep it honest, keep it improving
 
