@@ -17,9 +17,15 @@ export function rowDefects(rows: number[][], n: number, K: number): number {
   return bad;
 }
 
-// hits / (n × K) over the self-exclusive tail of each row.
+// hits / (n × K) with n = TRUTH set size — an omitted row counts K misses, it never shrinks the
+// denominator (adversarial-review finding: got.length in the denominator forgives dropped rows).
 export function strictRecall(got: number[][], truth: number[][], K: number): number {
   let hit = 0;
-  for (let i = 0; i < got.length; i++) { const t = new Set(truth[i].slice(1)); for (const j of got[i].slice(1)) if (t.has(j)) hit++; }
-  return hit / (got.length * K);
+  for (let i = 0; i < truth.length; i++) {
+    const row = got[i];
+    if (!row) continue; // missing row = K misses
+    const t = new Set(truth[i].slice(1));
+    for (const j of row.slice(1)) if (t.has(j)) hit++;
+  }
+  return hit / (truth.length * K);
 }

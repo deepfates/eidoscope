@@ -39,7 +39,9 @@ const exactUpToTies = (X: number[][], got: number[][], truth: number[][], K: num
 // receipts, same code the unit tests run; a parallel forgiving copy survived one review round here.
 
 (window as any).runKnnProbe = async () => {
-  const out: any = { gpuSupported: !!navigator.gpu };
+  // gpuSupported means AN ADAPTER, not just the API surface — navigator.gpu can exist while
+  // requestAdapter() returns null (headless, blocklisted, or driverless hosts)
+  const out: any = { gpuSupported: !!navigator.gpu && !!(await navigator.gpu.requestAdapter()) };
 
   // ── (1) the seam at n > HNSW_MIN, d=64 (small dim so in-page exact truth stays affordable) ────────
   const n = 6000, K = 14;

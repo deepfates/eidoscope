@@ -1,8 +1,9 @@
 #!/usr/bin/env bun
-// Re-measure the kNN regime cost curves on THIS machine and compare against the constants baked into
-// src/knn/regime.ts (measured on apple metal-3, 2026-08). Run after a hardware change or when the
-// regime choice looks wrong: if the printed coefficients drift far from the baked ones, update
-// regime.ts with the new measurements (they are documented constants, not tunables).
+// Re-measure the kNN regime costs on THIS machine (reference: apple metal-3, 2026-08 — exact-GPU won
+// at every benched n: 10k/100k/230k; the numbers live in src/knn/regime.ts's header comment). The
+// regime branch is environment-only (adapter or not) — there is no crossover constant to tune; run
+// this after a hardware change to check the "GPU wins everywhere we measured" claim still holds, and
+// update the regime.ts comment if the picture changes.
 //
 //   bun bin/knn-calibrate.ts [nGpu=30000] [nHnsw=10000]
 import { knnExact } from "../src/geometry.ts";
@@ -10,7 +11,7 @@ import { gpuAdapterFor, exactGpuKnn } from "../src/knn/kernel.ts";
 import { knnIndex, nodeGpu } from "../src/map.ts";
 import { hnswWasmKnn } from "../vendor/hnswlib-wasm/hnsw.ts";
 import { SEED } from "../src/axes.ts";
-import { exactGpuCrossover, GPU_SECONDS_PER_N2, HNSW_SECONDS_PER_NLOGN_NATIVE, HNSW_SECONDS_PER_NLOGN_WASM } from "../src/knn/regime.ts";
+import { strictRecall } from "../src/knn/recall.ts";
 
 const D = 384, K = 14; // eidoscope layout params (MiniLM dim, UMAP nNeighbors-1)
 const nGpu = parseInt(process.argv[2] ?? "30000", 10), nHnsw = parseInt(process.argv[3] ?? "10000", 10);
@@ -39,20 +40,15 @@ if (await gpuAdapterFor(gpu, nGpu, D)) {
   // measure twice, keep the WORSE run — the documented ~20% run-to-run GPU variance
   const t = Math.max(await time(() => exactGpuKnn(gpu!, Xg, K)), await time(() => exactGpuKnn(gpu!, Xg, K)));
   A = t / (nGpu * nGpu);
-  console.log(`exact-gpu   @ ${nGpu}: ${t.toFixed(2)}s  → A = ${A.toExponential(3)} s/n²   (baked: ${GPU_SECONDS_PER_N2.toExponential(3)})`);
+  console.log(`exact-gpu   @ ${nGpu}: ${t.toFixed(2)}s  → A = ${A.toExponential(3)} s/n²`);
 } else console.log("exact-gpu: no WebGPU adapter on this host");
 
 const tNat = await time(() => knnIndex(Xh, K));
-const Bn = tNat / (nHnsw * Math.log2(nHnsw));
-console.log(`hnsw-native @ ${nHnsw}: ${tNat.toFixed(2)}s → B = ${Bn.toExponential(3)} s/(n·log2 n) (baked: ${HNSW_SECONDS_PER_NLOGN_NATIVE.toExponential(3)})`);
+console.log(`hnsw-native @ ${nHnsw}: ${tNat.toFixed(2)}s (build + ef calibration + calibrated query pass)`);
 const tWasm = await time(() => hnswWasmKnn(Xh, K, SEED));
-const Bw = tWasm / (nHnsw * Math.log2(nHnsw));
-console.log(`hnsw-wasm   @ ${nHnsw}: ${tWasm.toFixed(2)}s → B = ${Bw.toExponential(3)} s/(n·log2 n) (baked: ${HNSW_SECONDS_PER_NLOGN_WASM.toExponential(3)})`);
-console.log(`crossover (baked curves):  native ${exactGpuCrossover(HNSW_SECONDS_PER_NLOGN_NATIVE).toLocaleString()} docs · wasm ${exactGpuCrossover(HNSW_SECONDS_PER_NLOGN_WASM).toLocaleString()} docs`);
+console.log(`hnsw-wasm   @ ${nHnsw}: ${tWasm.toFixed(2)}s`);
 
 // tiny sanity: both index paths still answer neighbors correctly on a small slice
 const Xs = Xbig.slice(0, 800);
 const e = await knnExact(Xs, K), nat = knnIndex(Xs, K);
-let hit = 0, tot = 0;
-for (let i = 0; i < Xs.length; i++) { const t = new Set(e.idx[i].slice(1)); for (const j of nat.idx[i].slice(1)) { tot++; if (t.has(j)) hit++; } }
-console.log(`sanity recall (hnsw-native vs exact, n=800): ${(hit / tot).toFixed(4)}`);
+console.log(`sanity recall (hnsw-native vs exact, n=800): ${strictRecall(nat.idx, e.idx, K).toFixed(4)}`);

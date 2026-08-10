@@ -6,11 +6,12 @@
 import { test, expect } from "bun:test";
 import { knnExact, HNSW_MIN } from "../src/geometry.ts";
 import { gpuAdapterFor, exactGpuKnn } from "../src/knn/kernel.ts";
-import { makeKnn, exactGpuCrossover, HNSW_SECONDS_PER_NLOGN_NATIVE, HNSW_SECONDS_PER_NLOGN_WASM } from "../src/knn/regime.ts";
+import { makeKnn } from "../src/knn/regime.ts";
 import { knnIndex, nodeGpu } from "../src/map.ts";
 import { hnswWasmKnn } from "../vendor/hnswlib-wasm/hnsw.ts";
 import { SEED } from "../src/axes.ts";
 import { rowDefects, strictRecall } from "../src/knn/recall.ts";
+import { calibrateEf } from "../src/knn/ef.ts";
 
 // GPU availability decided ONCE, up front: a receipt that cannot run must be a SKIPPED test, never a
 // silent pass (adversarial-review finding — the production gate false-greened on non-GPU CI in 0.04ms)
@@ -92,18 +93,33 @@ test.skipIf(!hasGpuProd)("PRODUCTION SCALE: hnsw recall ≥ 0.99 at n=30k, d=384
   expect(rWasm).toBeGreaterThanOrEqual(0.99);
 }, 900000);
 
-test("regime chooser: exact under HNSW_MIN on every host; crossover derived from the measured curves, GPU-variance-proof", async () => {
+// THE FAILURE PATH IS EXERCISED, not just written (adversarial-review round-3): calibration that
+// cannot demonstrate the claim must return ok:false, and BOTH callers must then answer with exact
+// brute force — asserted equal to knnExact row-for-row.
+test("calibration failure is never certified: both callers fall back to exact brute force", async () => {
+  const X = clustered(1000, 32);
+  const e = await knnExact(X, K);
+  // a search that returns garbage can never clear the claim → ok:false at the ef ceiling
+  expect(calibrateEf(X, K, () => [], SEED).ok).toBe(false);
+  // an impossible claim (test-only injection) forces ok:false inside each real caller
+  const nat = knnIndex(X, K, 1.01);
+  expect(nat.idx).toEqual(e.idx);
+  expect(nat.dst).toEqual(e.dst);
+  const wasm = await hnswWasmKnn(X, K, SEED, 1.01);
+  expect(wasm.idx).toEqual(e.idx);
+  expect(wasm.dst).toEqual(e.dst);
+}, 60000);
+
+test("regime chooser: exact under HNSW_MIN on every host; above it the branch is ENVIRONMENT (adapter), never data scale", async () => {
   // small corpora: always the shared CPU-exact answer (host parity)
   const X = clustered(200, 16);
   const viaRegime = await makeKnn({ gpu: await nodeGpu(), hnsw: knnIndex, hnswMethod: "hnswlib-node" })(X, 8);
   expect(viaRegime.method).toBe("exact-cpu");
   expect(viaRegime.idx).toEqual((await knnExact(X, 8)).idx);
-  // the crossover is a solved fixed point of the measured curves, not a bare constant: it must sit far
-  // above HNSW_MIN (the GPU wins the whole measured range: 10k, 100k, 230k) and respond to the curve —
-  // a slower hnsw (wasm) pushes the boundary OUT, never in
-  const xNative = exactGpuCrossover(HNSW_SECONDS_PER_NLOGN_NATIVE);
-  const xWasm = exactGpuCrossover(HNSW_SECONDS_PER_NLOGN_WASM);
-  expect(xNative).toBeGreaterThan(230000); // exact-gpu measured faster than hnsw at every benched n
-  expect(xWasm).toBeGreaterThan(xNative);
-  expect(HNSW_MIN).toBeLessThan(xNative);
+  // above HNSW_MIN: with an adapter the method is exact-gpu; without one, hnsw — no n-dependent mode
+  const Xb = clustered(HNSW_MIN + 100, 16);
+  const withGpu = await makeKnn({ gpu: await nodeGpu(), hnsw: knnIndex, hnswMethod: "hnswlib-node" })(Xb, 8);
+  expect(withGpu.method).toBe(hasGpuSmall ? "exact-gpu" : "hnswlib-node");
+  const noGpu = await makeKnn({ gpu: null, hnsw: knnIndex, hnswMethod: "hnswlib-node" })(Xb, 8);
+  expect(noGpu.method).toBe("hnswlib-node");
 });

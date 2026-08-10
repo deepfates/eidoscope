@@ -8,24 +8,25 @@
 // index, never declared.
 //
 // HOW (each piece answers a review finding about statistical honesty, 2026-08):
-//   sample    — a seeded-RNG shuffle picks 2S distinct rows (mulberry32; evenly-spaced sampling can
-//               alias corpus order). The first S rows TUNE ef; the other S are a HOLDOUT that
-//               certifies it — the certifying sample never touched the selection, so the
-//               certification is not circular.
+//   sample    — a seeded-RNG shuffle (mulberry32; evenly-spaced sampling can alias corpus order)
+//               orders the rows once. The first S rows TUNE ef; every certification draws a FRESH
+//               disjoint chunk of S rows from the remaining shuffle — a holdout that fails becomes
+//               selection data from then on and is never certified against again.
 //   truth     — exact brute force (f64) for the sampled rows against the FULL set.
 //   criterion — per-QUERY recalls, not per-slot: the K slots inside one query are correlated, so
 //               the margin is mean ≥ claim + 3·SE with SE = sd(per-query recall)/√S — the MEASURED
 //               standard error over S independent queries, no Bernoulli-independence assumption.
-//   search    — double ef from its floor until the tuning sample passes, then binary-search
-//               (ef/2, ef] for the SMALLEST passing ef (doubling alone can overshoot the needed ef —
-//               and every query's cost — by ~2×).
-//   certify   — the holdout must pass at the chosen ef; a holdout failure resumes tuning higher.
-//   failure   — if ef reaches n and either sample still fails, calibration returns ok:false and the
-//               CALLER FALLS BACK TO EXACT BRUTE FORCE. ef=n means hnsw's candidate list is already
-//               the whole graph, so n is small enough that exact is affordable — a recall the index
-//               cannot reach is never certified, silently or otherwise.
+//   search    — `lo` is always an ef known INADEQUATE (tuning or a holdout failed there), `hi` a
+//               tuning-passing ef: double hi until tuning passes, then binary-search (lo, hi] for
+//               the smallest tuning-passing value (doubling alone overshoots up to 2×; the (lo, hi]
+//               invariant holds across retries, where ef/2 may have previously passed tuning).
+//   certify   — the chosen ef must pass on the fresh holdout; a failure marks it inadequate (lo=ef)
+//               and tuning resumes higher, certified by the NEXT fresh chunk.
+//   failure   — if ef reaches n without certifying, or the shuffle runs out of fresh holdout rows,
+//               calibration returns ok:false and the CALLER FALLS BACK TO EXACT BRUTE FORCE — a
+//               recall the index cannot demonstrably reach is never certified.
 export const EF_RECALL_CLAIM = 0.99; // the product claim test/knn.test.ts gates at production scale
-export const EF_SAMPLE = 200;        // queries per sample (tune and holdout each) — SE is measured, not assumed
+export const EF_SAMPLE = 200;        // queries per sample (tune and each holdout) — SE is measured, not assumed
 
 const mulberry32 = (a: number) => () => {
   a |= 0; a = (a + 0x6d2b79f5) | 0;
@@ -36,47 +37,50 @@ const mulberry32 = (a: number) => () => {
 
 export type EfCalibration = { ok: boolean; ef: number; holdoutRecall: number };
 
-export function calibrateEf(X: number[][], K: number, search: (i: number, k: number, ef: number) => number[], seed = 7): EfCalibration {
+// `claim` is injectable ONLY so tests can force the failure path (an impossible claim exercises the
+// exact-brute-force fallback in both callers); production callers never pass it.
+export function calibrateEf(X: number[][], K: number, search: (i: number, k: number, ef: number) => number[], seed = 7, claim = EF_RECALL_CLAIM): EfCalibration {
   const n = X.length, d = X[0].length;
   const S = Math.max(1, Math.min(EF_SAMPLE, Math.floor(n / 2)));
-  // seeded shuffle → 2S distinct rows; first S tune, last S certify
   const rnd = mulberry32(seed);
   const perm = Array.from({ length: n }, (_, i) => i);
   for (let i = n - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [perm[i], perm[j]] = [perm[j], perm[i]]; }
-  const tune = perm.slice(0, S), holdout = perm.slice(S, 2 * S);
   const exact = (i: number): Set<number> => {
     const sims: [number, number][] = [];
     for (let j = 0; j < n; j++) { if (j === i) continue; let acc = 0; const a = X[i], b = X[j]; for (let t = 0; t < d; t++) acc += a[t] * b[t]; sims.push([j, acc]); }
     sims.sort((a, b) => b[1] - a[1]);
     return new Set(sims.slice(0, K).map(([j]) => j));
   };
-  const tuneTruth = tune.map(exact), holdTruth = holdout.map(exact);
+  const tune = perm.slice(0, S), tuneTruth = tune.map(exact);
+  let nextHoldout = S; // start of the next unused (fresh, disjoint) holdout chunk in the shuffle
   // per-query recalls → measured mean and standard error; pass = mean ≥ claim + 3·SE
   const measure = (rows: number[], truth: Set<number>[], ef: number) => {
     const rs = rows.map((i, s) => { let hit = 0; for (const j of search(i, K, ef)) if (truth[s].has(j)) hit++; return hit / K; });
     const mean = rs.reduce((a, r) => a + r, 0) / rs.length;
     const sd = Math.sqrt(rs.reduce((a, r) => a + (r - mean) ** 2, 0) / Math.max(1, rs.length - 1));
-    return { mean, pass: mean >= EF_RECALL_CLAIM + 3 * (sd / Math.sqrt(rs.length)) };
+    return { mean, pass: mean >= claim + 3 * (sd / Math.sqrt(rs.length)) };
   };
   const floor = Math.max(32, K + 1); // hnswlib requires ef ≥ k; 32 is one doubling below the old fixed value
-  let ef = floor;
+  let lo = floor - 1; // largest ef known INADEQUATE (tuning or a holdout failed there); floor-1 = none yet
+  let hi = floor;     // candidate; made tuning-passing below before any certification
   for (;;) {
-    // double until the tuning sample passes (or the candidate list is the whole graph)
-    while (!measure(tune, tuneTruth, ef).pass) {
-      if (ef >= n) return { ok: false, ef, holdoutRecall: measure(holdout, holdTruth, ef).mean };
-      ef = Math.min(n, ef * 2);
+    while (!measure(tune, tuneTruth, hi).pass) {
+      if (hi >= n) return { ok: false, ef: hi, holdoutRecall: measure(tune, tuneTruth, hi).mean };
+      lo = hi;
+      hi = Math.min(n, hi * 2);
     }
-    // binary-search the smallest passing ef in (ef/2, ef] — doubling alone overshoots up to 2×
-    let lo = Math.max(floor, Math.floor(ef / 2)), hi = ef;
+    // smallest tuning-passing ef in (lo, hi] — both bounds' statuses are known, including on retries
     while (lo + 1 < hi) {
       const mid = Math.floor((lo + hi) / 2);
       if (measure(tune, tuneTruth, mid).pass) hi = mid; else lo = mid;
     }
-    ef = hi;
-    // certify on the independent holdout; a failure resumes tuning from one doubling up
-    const cert = measure(holdout, holdTruth, ef);
-    if (cert.pass) return { ok: true, ef, holdoutRecall: cert.mean };
-    if (ef >= n) return { ok: false, ef, holdoutRecall: cert.mean };
-    ef = Math.min(n, ef * 2);
+    // certify on a FRESH disjoint holdout chunk (never one that has influenced selection)
+    if (nextHoldout + S > n) return { ok: false, ef: hi, holdoutRecall: measure(tune, tuneTruth, hi).mean };
+    const hold = perm.slice(nextHoldout, nextHoldout + S); nextHoldout += S;
+    const cert = measure(hold, hold.map(exact), hi);
+    if (cert.pass) return { ok: true, ef: hi, holdoutRecall: cert.mean };
+    if (hi >= n) return { ok: false, ef: hi, holdoutRecall: cert.mean };
+    lo = hi; // the failed holdout marked this ef inadequate — it is selection data now, never reused
+    hi = Math.min(n, hi * 2);
   }
 }

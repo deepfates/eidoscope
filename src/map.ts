@@ -13,7 +13,7 @@ import {
   cardText, projectionScores, rawProjectionScores, buildMetaFields, poolEmbedWith, knnBrute, layoutKnn as layoutKnnCore,
   xyzOverlap as xyzOverlapCore, normPct, projectAndCluster as projectAndClusterCore, HNSW_MIN, type Knn, knnExact,
 } from "./geometry.ts";
-import { makeKnn, HNSW_SECONDS_PER_NLOGN_NATIVE } from "./knn/regime.ts";
+import { makeKnn } from "./knn/regime.ts";
 import { calibrateEf } from "./knn/ef.ts";
 
 export { cardText, projectionScores, rawProjectionScores, buildMetaFields, knnBrute, normPct, HNSW_MIN };
@@ -45,7 +45,9 @@ export async function embedDocs(docs: Doc[], opts: { embed?: Embedder } = {}): P
 // as one of nNeighbors, distance 0). Callers that want plain neighbor lists slice the self column off.
 // Deterministic: hnswlib's level RNG is seeded, points are inserted sequentially in corpus order, and
 // search is exact given the built graph — same vectors in, same graph and neighbors out, every run.
-export const knnIndex = (X: number[][], K: number): { idx: number[][]; dst: number[][] } => {
+// `recallClaim` is a TEST-ONLY override (an impossible claim forces calibration failure so the exact
+// fallback below is exercisable) — production callers never pass it.
+export const knnIndex = (X: number[][], K: number, recallClaim?: number): { idx: number[][]; dst: number[][] } => {
   const index = new HierarchicalNSW("cosine", X[0].length);
   index.initIndex(X.length, 16, 200, SEED);
   for (let i = 0; i < X.length; i++) index.addPoint(X[i], i);
@@ -54,7 +56,7 @@ export const knnIndex = (X: number[][], K: number): { idx: number[][]; dst: numb
   const cal = calibrateEf(X, Math.min(K, X.length - 1), (i, k, e) => {
     index.setEf(Math.max(e, k + 1));
     return index.searchKnn(X[i], Math.min(X.length, k + 1)).neighbors.filter((j) => j !== i).slice(0, k);
-  }, SEED);
+  }, SEED, recallClaim);
   if (!cal.ok) {
     // the index cannot reach the recall claim even with the whole graph as candidates — never certify
     // failure: exact brute force IS affordable here (ef hit n, so n is small)
@@ -110,7 +112,7 @@ export function nodeGpu(): Promise<GPU | null> {
 // The node face of the kNN seam: exact-GPU below the measured crossover, hnswlib-node above / without
 // a GPU, CPU brute force for small corpora when neither applies (src/knn/regime.ts holds the curves).
 export const nodeKnn: Knn = async (X, K) =>
-  makeKnn({ gpu: await nodeGpu(), hnsw: knnIndex, hnswMethod: "hnswlib-node", hnswSecondsPerNLogN: HNSW_SECONDS_PER_NLOGN_NATIVE })(X, K);
+  makeKnn({ gpu: await nodeGpu(), hnsw: knnIndex, hnswMethod: "hnswlib-node" })(X, K);
 
 // Project + cluster with the node host's kNN regimes wired in (geometry.ts holds the logic).
 export async function projectAndCluster(embs: number[][]) {

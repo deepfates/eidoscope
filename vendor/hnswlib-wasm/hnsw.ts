@@ -14,7 +14,9 @@ import { knnExact } from "../../src/geometry.ts";
 let modP: Promise<any> | null = null;
 const mod = () => (modP ??= createHnswModule());
 
-export async function hnswWasmKnn(X: number[][], K: number, seed: number): Promise<{ idx: number[][]; dst: number[][] }> {
+// `recallClaim` is a TEST-ONLY override (an impossible claim forces calibration failure so the exact
+// fallback below is exercisable) — production callers never pass it.
+export async function hnswWasmKnn(X: number[][], K: number, seed: number, recallClaim?: number): Promise<{ idx: number[][]; dst: number[][] }> {
   const m = await mod();
   const n = X.length, dim = X[0].length, Kc = Math.min(K, n - 1);
   m._hnsw_init(dim, n, 16, 200, seed);
@@ -35,7 +37,7 @@ export async function hnswWasmKnn(X: number[][], K: number, seed: number): Promi
       for (let t = 0; t < got && out.length < k; t++) if (labels[t] !== i) out.push(labels[t]);
       return out;
     };
-    const cal = calibrateEf(X, Kc, searchAt, seed);
+    const cal = calibrateEf(X, Kc, searchAt, seed, recallClaim);
     if (!cal.ok) {
       // never certify failure — exact brute force is affordable when ef reached n (src/knn/ef.ts)
       console.error(`hnsw-wasm ef calibration failed (holdout recall ${cal.holdoutRecall.toFixed(4)} at ef=${cal.ef}) — answering with exact brute force`);
