@@ -239,6 +239,14 @@ test("mapbin v2.2: optional EMPTY states round-trip losslessly — [] stays [], 
   const e3 = decodeMap(encodeMap({ ...base, levelBlurbs: [["only blurb"]] }));
   expect(e3.levelLabels).toBeUndefined();
   expect(e3.levelBlurbs).toEqual([["only blurb"]]);
+  // view id lists ride in vid_* (round 5) — selection, derived ids, and empty/absent all exact
+  const views = [
+    { name: "v1", created: 1, state: { layout: "mde", selection: ["a", "b"], derived: [{ label: "d", key: "k", ids: ["b"] }, { label: "e", key: "k2", ids: [] }] } },
+    { name: "v2", created: 2, state: { find: "x", selection: [] } },
+    { name: "v3", created: 3, state: { grain: 1 } },
+  ] as any;
+  const e4 = decodeMap(encodeMap({ ...base, views }));
+  expect(e4.views).toEqual(views);
 });
 
 test("mapbin v2.1: notes ride as lazy gzip blocks — exact across block boundaries, and old files still read", () => {

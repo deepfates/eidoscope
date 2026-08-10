@@ -183,8 +183,10 @@ Every buffer key the encoder can emit:
 | `prow_o` | i32 | yes | S | `n+1` row byte offsets into `prow_v` |
 | `rrow_v` | u8 | yes | C | ragged UTF-8 values: one JSON row per region label, region blurb, default-level RegionDef, then ghost (segment order and counts below) |
 | `rrow_o` | i32 | yes | C | row byte offsets into `rrow_v` |
-| `vrow_v` | u8 | yes | W | ragged UTF-8 values: one JSON row per saved view `{name, created, state}` |
+| `vrow_v` | u8 | yes | W | ragged UTF-8 values: one JSON row per saved view — its settings plus id-list counts, with the id lists themselves in `vid_*` (layout below) |
 | `vrow_o` | i32 | yes | W | `viewsN+1` row byte offsets into `vrow_v` |
+| `vid_v` | u8 | yes | W | ragged UTF-8 values: one RAW card id per row (no JSON) — the views' selection and derived-axis id lists, concatenated in file order |
+| `vid_o` | i32 | yes | W | row byte offsets into `vid_v` |
 
 ### f16 encoding
 
@@ -234,9 +236,15 @@ bounded and lets a reader expand a huge file incrementally.
   3. `clustersN` default-level **RegionDef** rows: `{c, n, label, blurb?, cx?, cy?}`;
   4. `ghostsN` **ghost** rows (`{title, arxiv, url, n, core, xy, sim}`) — present only when
      `hasGhosts`.
-- **`vrow_*`** — `viewsN` rows, each one saved view `{name, created, state}` (present only when
-  `hasViews`). A view's `state` may carry full card-id lists (selections, derived-axis
-  examples), so each view is its own row — a reader never parses one view to reach another.
+- **`vrow_*`** — `viewsN` rows, each one saved view `{name, created, state, __selN, __derN}`
+  (present only when `hasViews`). The view's uncapped card-id lists are NOT in this JSON: the
+  row carries only counts — `__selN` (id count of `state.selection`; `null` = selection absent)
+  and `__derN` (per `state.derived` entry, its `ids` count; `null` = that entry carries no ids)
+  — so each view row parses in time bounded by its own small settings.
+- **`vid_*`** — the views' id lists, one RAW UTF-8 card id per ragged row (offsets delimit; no
+  JSON, no quoting). Ids appear in file order: for each view in `vrow_*` order, first its
+  `__selN` selection ids, then each derived entry's `__derN[k]` ids. A reader reassembles by
+  consuming rows sequentially; the counts always sum to the total row count of `vid_*`.
 
 ### Versions
 
@@ -259,9 +267,10 @@ bounded and lets a reader expand a huge file incrementally.
    notes blocks, and `prow_v`/`prow_o` with one 12-element row per node); set `has*` flags for
    the optional ones you include.
 3. Encode `rrow_v`/`rrow_o` (labels · blurbs · RegionDefs · ghosts, in that order, with the
-   matching `levelCounts`/`blurbCounts`/`clustersN`/`ghostsN`) and `vrow_v`/`vrow_o` (one row
-   per saved view, `viewsN` total). Emit the presence flags so empty-but-present lists (`[]`)
-   survive as `[]`.
+   matching `levelCounts`/`blurbCounts`/`clustersN`/`ghostsN`), `vrow_v`/`vrow_o` (one row per
+   saved view, `viewsN` total, id lists replaced by `__selN`/`__derN` counts) and
+   `vid_v`/`vid_o` (the extracted ids, raw utf8, in view order). Emit the presence flags so
+   empty-but-present lists (`[]`) survive as `[]`.
 4. Lay buffers out in the buffers region 4-byte aligned; record `{key, type, length, offset}`
    for each in `meta.buffers`.
 5. Write magic + u32 metaLen + meta JSON (padded to 4 bytes) + buffers region.

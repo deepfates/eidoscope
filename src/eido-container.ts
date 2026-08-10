@@ -195,11 +195,33 @@ export function encodeContainer(D: MapContract): Uint8Array {
   for (const g of D.ghosts ?? []) rrows.push(JSON.stringify(g));
   const rr = rowsBuf(rrows);
   bufs.push({ key: "rrow_v", arr: rr.vals, type: "u8" }, { key: "rrow_o", arr: rr.offs, type: "i32" });
-  // v2.2 also evicts `views` from meta (review round 4): a saved view carries UNCAPPED card-id lists
-  // (selections, derived-axis examples — schema.ts), so views are O(user-work × n), not O(1). One JSON
-  // row per view (vrow_*), parsed per-view with a yield between views on decode.
-  const vr = rowsBuf((D.views ?? []).map((v) => JSON.stringify(v)));
+  // Views (review rounds 4+5): a saved view's SETTINGS are one small JSON row (vrow_*), but its
+  // card-id lists (state.selection, state.derived[].ids) are UNCAPPED — O(n) when a view references
+  // the whole corpus — so they don't belong inside any single JSON.parse. They ride as vid_*: one RAW
+  // utf8 id per ragged row (no JSON, offsets delimit), consumed in file order by the decoder's
+  // chunk-yielding id loop. The view row carries only counts (__selN null = selection absent;
+  // __derN[k] = ids count of derived entry k, null = that entry's ids absent).
+  const vrowsJson: string[] = [];
+  const vids: string[] = [];
+  for (const v of D.views ?? []) {
+    const st: any = { ...((v as any).state ?? {}) };
+    let selN: number | null = null;
+    if (Array.isArray(st.selection)) { selN = st.selection.length; for (const id of st.selection) vids.push(id); delete st.selection; }
+    let derN: (number | null)[] | null = null;
+    if (Array.isArray(st.derived)) {
+      derN = [];
+      st.derived = st.derived.map((d: any) => {
+        const { ids, ...rest } = d;
+        if (Array.isArray(ids)) { derN!.push(ids.length); for (const id of ids) vids.push(id); return rest; }
+        derN!.push(null); return d;
+      });
+    }
+    vrowsJson.push(JSON.stringify({ ...v, state: st, __selN: selN, __derN: derN }));
+  }
+  const vr = rowsBuf(vrowsJson);
   bufs.push({ key: "vrow_v", arr: vr.vals, type: "u8" }, { key: "vrow_o", arr: vr.offs, type: "i32" });
+  const vi = rowsBuf(vids);
+  bufs.push({ key: "vid_v", arr: vi.vals, type: "u8" }, { key: "vid_o", arr: vi.offs, type: "i32" });
 
   // lay buffers out 4-byte aligned; build the manifest
   const manifest: BufSpec[] = []; const chunks: Uint8Array[] = []; let offset = 0;
@@ -383,13 +405,28 @@ function* decodeGen(buf: Uint8Array): Generator<void, MapContract> {
   for (let r = 0; r < clusters.length; r++) { clusters[r] = rrow(at++); if (at % 2048 === 0) yield; }
   const ghosts = meta.hasGhosts ? new Array(meta.ghostsN ?? 0) : undefined;
   if (ghosts) for (let r = 0; r < ghosts.length; r++) { ghosts[r] = rrow(at++); if (at % 2048 === 0) yield; }
-  // views: one JSON row per view, a yield between views — a single view's parse is bounded by that
-  // view's own id lists (user-work), never by another view's or the corpus's
+  // views: each view's JSON row is O(its own small settings) — the uncapped id lists (selection,
+  // derived[].ids) live in vid_* as raw utf8 rows and are reassembled here through the same
+  // chunk-yielding loop as every other per-row pass, so no single parse grows with n or user-work.
   let views: any = undefined;
   if (meta.hasViews) {
     const vv = (yield* getG("vrow_v")) as unknown as Uint8Array, vo = (yield* getG("vrow_o")) as Int32Array;
+    const iv = (yield* getG("vid_v")) as unknown as Uint8Array, io = (yield* getG("vid_o")) as Int32Array;
+    let idAt = 0;
+    function* takeIds(count: number): Generator<void, string[]> {
+      const out = new Array(count);
+      for (let j = 0; j < count; j++) { out[j] = td.decode(iv.subarray(io[idAt], io[idAt + 1])); idAt++; if (idAt % 2048 === 0) yield; }
+      return out;
+    }
     views = new Array(meta.viewsN ?? 0);
-    for (let r = 0; r < views.length; r++) { views[r] = JSON.parse(td.decode(vv.subarray(vo[r], vo[r + 1]))); yield; }
+    for (let r = 0; r < views.length; r++) {
+      const { __selN, __derN, ...v } = JSON.parse(td.decode(vv.subarray(vo[r], vo[r + 1])));
+      if (__selN != null) v.state.selection = yield* takeIds(__selN);
+      if (__derN != null && Array.isArray(v.state?.derived))
+        for (let k = 0; k < v.state.derived.length; k++) if (__derN[k] != null) v.state.derived[k] = { ...v.state.derived[k], ids: yield* takeIds(__derN[k]) };
+      views[r] = v;
+      yield;
+    }
   }
 
   return {

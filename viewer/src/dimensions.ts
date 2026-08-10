@@ -38,19 +38,11 @@ export const defaultProps = (d: Dimension): DimProps => ({
 
 const folderOf = (u?: string) => { if (!u || !u.startsWith("file://")) return undefined; const p = u.slice(7).split("/").filter(Boolean); return p.length >= 2 ? decodeURIComponent(p[p.length - 2]).replace(/_/g, " ") : undefined; };
 
-// ---- the META-FIELD MANIFEST (v2 `D.metaFields`) → dimensions -------------------------------------------
+// ---- the META-FIELD MANIFEST (`D.metaFields`) → dimensions ----------------------------------------------
 // The pipeline DECLARES each corpus field and its type (src/map.ts buildMetaFields); the viewer only has to
-// resolve `source` to values. Older (v1) files carry no manifest, so LEGACY_FIELDS below reproduces exactly
-// what the viewer used to hardcode — same keys, same names — and is used as the fallback.
-//
-// Display names come STRAIGHT FROM THE MANIFEST. They used to be pinned by a NAME_OVERRIDE table so that
-// consuming the manifest could not silently rename a user-visible control; the naming rulings (docs/COMMANDS.md
-// §3) settled every label, the pipeline's buildMetaFields now emits the settled ones, and the pin is gone —
-// the file's own declaration is the single source of a dimension's name.
-// The one exception is a MIGRATION, not a pin: .eido files written before the rulings carry the two labels
-// that the rulings changed. Rewrite those two strings so an old file doesn't show a name we've retired.
-const RENAMED: Record<string, string> = { "author / source": "author", tags: "tag" };
-const nameOf = (f: MetaField) => RENAMED[f.label] ?? f.label;
+// resolve `source` to values. Display names come STRAIGHT FROM THE MANIFEST — the file's own declaration is
+// the single source of a dimension's name (the naming rulings live in the pipeline's buildMetaFields).
+const nameOf = (f: MetaField) => f.label;
 
 // Resolve one MetaField.source to a per-card accessor. `col:<field>` reads the named parallel column;
 // `derived:<k>` is something the viewer computes (folder from urls, length from cores).
@@ -89,16 +81,11 @@ function dimOf(D: MapContract, f: MetaField): Dimension | null {
   return { key: f.key, name: nameOf(f), kind: "categorical", source: "meta", cat, ord, idx, cnt };
 }
 
-// What a pre-manifest (v1) .eido gets: exactly the set the viewer used to hardcode.
-const LEGACY_FIELDS: MetaField[] = [
-  { key: "hub", label: "connections", type: "scalar", source: "col:hub" },
-  { key: "citec", label: "citation impact", type: "scalar", source: "col:citec" },
+// A file without a manifest gets ONLY what the viewer can derive itself (folder from urls, length from
+// cores) — honestly, with no guessed column set. Every emitted .eido declares its fields.
+const DERIVED_ONLY: MetaField[] = [
   { key: "length", label: "length", type: "scalar", source: "derived:length" },
-  { key: "date", label: "date", type: "temporal", source: "col:dates" },
   { key: "folder", label: "folder", type: "categorical", source: "derived:folder" },
-  { key: "author", label: "author", type: "categorical", source: "col:authors" },
-  { key: "site", label: "source site", type: "categorical", source: "col:siteNames" },
-  { key: "tags", label: "tag", type: "categorical", multi: true, source: "col:tags" },
 ];
 
 // Build the static dimension registry from the loaded map. The region clustering is NOT a dimension: it's the
@@ -114,7 +101,7 @@ export function buildDimensions(D: MapContract): Dimension[] {
   for (const a of D.axes) if (!(a as any).monotonic) { const raw = D.rawScores?.[a.key]; dims.push({ key: a.key, name: a.name, kind: "scalar", source: "axis", raw: raw ?? D.scores[a.key], bipolar: true, fixedNorm: !raw, low: (a as any).low, high: (a as any).high, variance: (a as any).variance, weak: (a as any).weak }); }
   // metadata dimensions come from the file's own typed manifest when it has one (v2), else the legacy set.
   // `axis:*` entries are skipped — the discovered axes are already served above, straight from D.axes.
-  const fields = (D.metaFields?.length ? D.metaFields : LEGACY_FIELDS).filter((f) => !f.source.startsWith("axis:"));
+  const fields = (D.metaFields?.length ? D.metaFields : DERIVED_ONLY).filter((f) => !f.source.startsWith("axis:"));
   const meta = fields.map((f) => dimOf(D, f)).filter((d): d is Dimension => !!d);
   // scalars/temporals first, categoricals after — the order the channel menus have always presented.
   dims.push(...meta.filter((d) => d.kind !== "categorical"), ...meta.filter((d) => d.kind === "categorical"));
