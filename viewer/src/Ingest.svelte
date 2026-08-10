@@ -1,9 +1,10 @@
 <script lang="ts">
   // The INGEST panel (eid-bacg): one folder → one map, narrated honestly per stage. Owns the run's
-  // lifecycle (start / stop-at-axes-for-key / resume / retry-failures) and the key field; the engine
-  // itself is viewer/src/ingest.ts → src/engine.ts. Emits the finished MapContract upward — App mounts
-  // it through the SAME in-memory path a dropped .eido takes.
-  import { IngestRun, EnvelopeError, getKey, setKey, type IngestFile, type IngestStatus } from "./ingest";
+  // lifecycle (start / stop-at-axes-for-key / resume / retry-failures / CANCEL) and the key field; the
+  // engine itself runs in the engine Web Worker (viewer/src/engine.worker.ts → src/engine.ts), so the
+  // page stays interactive for the whole run and cancel really terminates the work. Emits the finished
+  // MapContract upward — App mounts it through the SAME in-memory path a dropped .eido takes.
+  import { engine, CancelledError, getKey, setKey, type IngestFile, type IngestStatus } from "./ingest";
   import type { MapContract } from "../../src/schema";
 
   let { files, name, onDone, onCancel }: {
@@ -14,29 +15,39 @@
   let key = $state(getKey());
   let status = $state<IngestStatus | null>(null);
   let error = $state("");
-  let envelope = $state("");
   let started = $state(false);
+  let warnings = $state<string[]>([]);
+  let cardsFailed = $state(0);
+  let inFlight = $state(false);
   // a finished-but-partial map (some cards failed): held here, NOT auto-mounted — the user chooses
-  // retry (session caches make it cheap: only failures re-spend) or an explicit open-without-them.
+  // retry (the caches make it cheap: only failures re-spend) or an explicit open-without-them.
   let partial = $state<MapContract | null>(null);
 
-  const run = new IngestRun(files, name, (s) => (status = s));
+  // one run identity for the panel's lifetime: start-again (resume / retry) reuses the worker's
+  // in-memory embeddings, axes and written cards instead of re-spending them
+  const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
   async function go() {
-    started = true; error = ""; partial = null;
+    started = true; error = ""; partial = null; inFlight = true;
     setKey(key.trim());
     try {
-      const D = await run.start(key.trim());
-      if (D && run.cardsFailed > 0) partial = D;
-      else if (D) onDone(D);
-      // null = stopped at the axes stage for want of a key — status.phase === "need-key" says why
+      const r = await engine.ingest(runId, files, name, key.trim(), (s) => (status = s));
+      warnings = r.warnings; cardsFailed = r.cardsFailed;
+      if (r.D && r.cardsFailed > 0) partial = r.D;
+      else if (r.D) onDone(r.D);
+      // null D = stopped at the axes stage for want of a key — status.phase === "need-key" says why
     } catch (e: any) {
-      if (e instanceof EnvelopeError) envelope = e.message;
-      else error = String(e?.message ?? e);
-    }
+      if (!(e instanceof CancelledError)) error = String(e?.message ?? e);
+    } finally { inFlight = false; }
+  }
+  // cancel really cancels: the client terminates the engine worker mid-stage (nothing in the wasm/PCA
+  // stack polls a signal); every cache line already flushed to OPFS survives, so a re-run resumes.
+  function cancel() {
+    if (inFlight) engine.cancel();
+    onCancel();
   }
   const pctOf = (s: IngestStatus) => (s.total ? Math.round((100 * (s.done ?? 0)) / s.total) : (s.pct ?? null));
-  const running = $derived(started && !error && !envelope && !partial && status?.phase !== "need-key" && status?.phase !== "done");
+  const running = $derived(started && !error && !partial && status?.phase !== "need-key" && status?.phase !== "done");
 </script>
 
 <div class="fixed inset-0 z-[65] grid place-items-center bg-black/60 p-4 backdrop-blur-sm">
@@ -64,42 +75,44 @@
         {#if running && pctOf(status) != null}
           <progress class="progress progress-primary h-1 w-full" value={pctOf(status)} max="100"></progress>
         {/if}
+        <!-- the ESTIMATE line (replaces the old doc-count refusal): measured from THIS run's rates,
+             informational, never blocking — the whole run happens in a worker, cancel any time -->
+        {#if status.note && running}
+          <div data-testid="ingest-estimate" class="text-[10px] leading-snug opacity-60">{status.note}</div>
+        {/if}
         {#if status.failed && !partial}
           <div class="text-[11px] text-warning">{status.failed} card{status.failed === 1 ? "" : "s"} failed after retries — you can retry them when the pass finishes (everything written is kept).</div>
         {/if}
       </div>
     {/if}
 
-    {#if run.warnings.length}
+    {#if warnings.length}
       <div class="mt-2 space-y-0.5">
-        {#each run.warnings as w}<div class="font-mono text-[10px] leading-snug opacity-60">{w}</div>{/each}
+        {#each warnings as w}<div class="font-mono text-[10px] leading-snug opacity-60">{w}</div>{/each}
       </div>
     {/if}
 
-    {#if envelope}
-      <div data-testid="ingest-envelope" class="rounded-field mt-4 bg-base-200 p-3 text-[12px] leading-snug">{envelope}</div>
-    {/if}
     {#if error}
       <div data-testid="ingest-error" class="mt-4 text-[12px] leading-snug text-error">{error}</div>
     {/if}
 
     {#if partial}
       <div data-testid="ingest-partial" class="rounded-field mt-4 bg-base-200 p-3 text-[12px] leading-snug">
-        {run.cardsFailed} card{run.cardsFailed === 1 ? "" : "s"} failed after retries. The map is built from the {partial.ids.length} that succeeded — retry the failures (only they re-spend), or open without them.
+        {cardsFailed} card{cardsFailed === 1 ? "" : "s"} failed after retries. The map is built from the {partial.ids.length} that succeeded — retry the failures (only they re-spend), or open without them.
       </div>
     {/if}
 
     <div class="mt-5 flex gap-2">
       {#if partial}
-        <button class="btn btn-primary btn-sm normal-case" data-testid="ingest-retry" onclick={go} disabled={run.running}>retry {run.cardsFailed} failed</button>
+        <button class="btn btn-primary btn-sm normal-case" data-testid="ingest-retry" onclick={go} disabled={inFlight}>retry {cardsFailed} failed</button>
         <button class="btn btn-sm normal-case" data-testid="ingest-open-partial" onclick={() => onDone(partial!)}>open without them</button>
       {/if}
-      {#if !envelope && !partial && (!started || status?.phase === "need-key" || error)}
-        <button class="btn btn-primary btn-sm normal-case" data-testid="ingest-start" onclick={go} disabled={run.running}>
+      {#if !partial && (!started || status?.phase === "need-key" || error)}
+        <button class="btn btn-primary btn-sm normal-case" data-testid="ingest-start" onclick={go} disabled={inFlight}>
           {!started ? (key.trim() ? "map it" : "map it (no key — stops at axes)") : error ? "resume" : "continue with this key"}
         </button>
       {/if}
-      <button class="btn btn-ghost btn-sm normal-case" data-testid="ingest-cancel" onclick={onCancel}>cancel</button>
+      <button class="btn btn-ghost btn-sm normal-case" data-testid="ingest-cancel" onclick={cancel}>cancel</button>
     </div>
   </div>
 </div>

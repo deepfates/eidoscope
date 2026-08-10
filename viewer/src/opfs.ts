@@ -4,12 +4,14 @@
 // mid-ingest, reopen, re-point at the folder: every card, region name, and chunk embedding already
 // paid for reloads instead of re-spending.
 //
-// API choice (docs read 2026-08-09, MDN): OPFS has two write paths — createSyncAccessHandle (workers
-// only; Safari 15.2+) and createWritable (main thread; Chrome 86+, Firefox 111+, Safari 18.2+ — it
-// landed in Baseline Sept 2025). We use plain createWritable on the main thread: no worker, no wrapper
-// library (the raw API is already thinner than any wrapper), at the cost that pre-18.2 Safari gets the
-// session-memory fallback. createWritable commits ONLY on close() (it writes a temp file and swaps),
-// so appends are batched per flush: keepExistingData + seek(EOF) + write + close.
+// API choice (docs read 2026-08-09, MDN; revisited 2026-08-09 for the async engine): OPFS has two
+// write paths — createSyncAccessHandle (WORKERS ONLY; Safari 15.2+) and createWritable (Chrome 86+,
+// Firefox 111+, Safari 18.2+). Since eid-yhj7 the caches are opened inside the engine Web Worker, so
+// the PREFERRED path is the sync access handle: read once at open, then each append is a synchronous
+// write-at-offset + flush — no temp-file swap, no promise chain, and crash/terminate-safe (everything
+// flushed is on disk; the exclusive lock is released when the worker is destroyed). createWritable
+// stays as the fallback for any non-worker caller (it commits ONLY on close() — temp file + swap — so
+// its appends are batched per flush: keepExistingData + seek(EOF) + write + close).
 //
 // Feature-detect, never throw: no getDirectory / no createWritable / any OPFS error → the Store runs
 // with today's session-memory behavior, and ONE honest console line says so.
@@ -34,7 +36,26 @@ async function opfsPersist(name: string): Promise<StorePersist | null> {
     const root = await nav.storage.getDirectory();
     const dir = await root.getDirectoryHandle(DIR, { create: true });
     const fh: any = await dir.getFileHandle(name, { create: true });
-    if (typeof fh.createWritable !== "function") return null;   // Safari < 18.2 main thread
+    // worker path: the sync access handle (worker-only API — gate on actually being in a worker scope)
+    const inWorker = typeof (globalThis as any).WorkerGlobalScope !== "undefined" && globalThis instanceof (globalThis as any).WorkerGlobalScope;
+    if (inWorker && typeof fh.createSyncAccessHandle === "function") {
+      const h = await fh.createSyncAccessHandle();
+      const size0: number = h.getSize();
+      const buf = new Uint8Array(size0);
+      if (size0) h.read(buf, { at: 0 });
+      const initial = new TextDecoder().decode(buf);
+      let at = size0;
+      let dead = false;
+      return {
+        read: () => initial || undefined,
+        append: (line) => {
+          if (dead) return;
+          try { const b = new TextEncoder().encode(line); h.write(b, { at }); at += b.byteLength; h.flush(); }
+          catch { dead = true; warnOnce(); }
+        },
+      };
+    }
+    if (typeof fh.createWritable !== "function") return null;   // Safari < 18.2 outside a worker
     const file: File = await fh.getFile();
     const initial = await file.text();
     let size = file.size;                                       // bytes (≠ chars for multibyte text)
@@ -61,10 +82,17 @@ async function opfsPersist(name: string): Promise<StorePersist | null> {
 }
 
 // A Store persisted in OPFS when the browser can, session-memory (with one honest line) when it can't.
-export async function opfsStore(name: string): Promise<Store> {
-  const p = await opfsPersist(name);
-  if (!p) warnOnce();
-  return new Store(p ?? undefined);
+// ONE Store per filename per scope (memoized): the sync access handle holds an exclusive lock for the
+// worker's lifetime, so a second open of the same file (ingest and descend both use the regions cache)
+// must share the instance, not race the lock into the memory fallback.
+const stores = new Map<string, Promise<Store>>();
+export function opfsStore(name: string): Promise<Store> {
+  let p = stores.get(name);
+  if (!p) {
+    p = opfsPersist(name).then((persist) => { if (!persist) warnOnce(); return new Store(persist ?? undefined); });
+    stores.set(name, p);
+  }
+  return p;
 }
 
 // Filenames carry the model id the way node's EmbeddingCache does (one file per embedder).

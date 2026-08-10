@@ -98,6 +98,20 @@ await p.route("https://openrouter.ai/**", async (route) => {
 // test seams (the library's documented env.remoteHost / wasmPaths) — so the only intercepted host is
 // OpenRouter. Everything else non-local is aborted.
 await p.addInitScript(`window.__EIDO_TF_HOST = ${JSON.stringify(base + "/hf/")}; window.__EIDO_TF_WASM = ${JSON.stringify(base + "/tfwasm/")};`);
+// RECEIPTS for the async engine (eid-yhj7): (1) a longtask observer — the engine runs in a worker, so
+// the MAIN thread must show no long task while a full ingest cooks; (2) a 100ms sampler of the panel's
+// status label + estimate line — the stages must narrate granularly (axes replicates, per-card counts)
+// and the measured-rate estimate line must actually appear.
+await p.addInitScript(`
+  window.__longtasks = []; window.__labels = []; window.__est = [];
+  try { new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__longtasks.push(Math.round(e.duration)); }).observe({ entryTypes: ["longtask"] }); } catch {}
+  setInterval(() => {
+    const s = document.querySelector('[data-testid=ingest-status]')?.textContent?.trim();
+    if (s && window.__labels[window.__labels.length - 1] !== s) window.__labels.push(s);
+    const e = document.querySelector('[data-testid=ingest-estimate]')?.textContent?.trim();
+    if (e && window.__est[window.__est.length - 1] !== e) window.__est.push(e);
+  }, 100);
+`);
 // hermetic: nothing else leaves localhost
 await p.route(/^https?:\/\/(?!localhost)/, (route) => {
   const u = route.request().url();
@@ -130,8 +144,14 @@ try {
 
   // 4. enter the key and RESUME — embeddings + axes are kept, carding runs, the map mounts
   await p.fill("[data-testid=ingest-key]", "sk-or-e2e-test");
+  await p.evaluate(() => { (window as any).__longtasks = []; (window as any).__labels = []; (window as any).__est = []; });   // measure the RUN, not page load
   await p.click("[data-testid=ingest-start]");
   await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 120000 });
+  const perf = await p.evaluate(() => ({ lt: (window as any).__longtasks as number[], labels: (window as any).__labels as string[], est: (window as any).__est as string[] }));
+  const maxLT = perf.lt.length ? Math.max(...perf.lt) : 0;
+  ok(maxLT < 200, `THE MAIN THREAD STAYED RESPONSIVE through the whole keyed run (engine in the worker) — ${perf.lt.length} longtask(s), max ${maxLT}ms (< 200ms)`);
+  ok(perf.labels.some((l) => /replicate \d\/8/.test(l)) || perf.labels.some((l) => /PCA over/.test(l)), `the axes stage narrates its real steps (PCA / shuffle replicates), not one static label — saw: ${JSON.stringify(perf.labels.filter((l) => /replicate|PCA|naming/.test(l)).slice(0, 3))}`);
+  ok(perf.est.length > 0, `the measured-rate ESTIMATE line appeared during the run (the refusal envelope is dead) — "${perf.est[0]}"`);
   await p.waitForTimeout(400);
   const s = await p.evaluate(() => (window as any).__eido());
   ok(s.visible === 12, `the mounted map shows the 12 real docs (stub.md dropped by the floor) — visible=${s.visible}`);

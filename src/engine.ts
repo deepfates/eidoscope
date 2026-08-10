@@ -12,15 +12,16 @@ import {
   cardText, projectionScores, rawProjectionScores, buildMetaFields, projectAndCluster,
   type ApproxKnn, type LayoutKnnApprox,
 } from "./geometry.ts";
-import { INPAGE_ENVELOPE_DOCS } from "./defaults.ts";
 import type { Doc } from "./corpus-core.ts";
 import type { MapContract } from "./schema.ts";
 
-export { INPAGE_ENVELOPE_DOCS };
-
 // Honest per-stage progress — what a UI (or the CLI's stderr) narrates while the engine works.
+// The axes stage is granular (main PCA · each parallel-analysis replicate · the one naming call) so no
+// UI shows a static label through minutes of deterministic math.
 export type EngineProgress =
   | { stage: "axes"; docs: number }
+  | { stage: "axes-noise"; rep: number; of: number }
+  | { stage: "axes-naming"; axes: number }
   | { stage: "axes-done"; axes: number; realDims: number }
   | { stage: "cards"; done: number; total: number; failed: number }
   | { stage: "embed-cards"; cards: number }
@@ -65,7 +66,10 @@ export async function buildMap(docs: Doc[], embeddings: number[][], opts: BuildO
   const conc = opts.concurrency ?? 12;
 
   on({ stage: "axes", docs: docs.length });
-  const { axes, realDims, projections } = opts.discovered ?? await discoverAxes(embeddings, docs.map((d) => d.title.slice(0, 64)), { llm: opts.llm });
+  const { axes, realDims, projections } = opts.discovered ?? await discoverAxes(embeddings, docs.map((d) => d.title.slice(0, 64)), {
+    llm: opts.llm,
+    onProgress: (p) => on(p.step === "pca" ? { stage: "axes", docs: docs.length } : p.step === "noise" ? { stage: "axes-noise", rep: p.rep, of: p.of } : { stage: "axes-naming", axes: p.axes }),
+  });
   on({ stage: "axes-done", axes: axes.length, realDims });
 
   const deck = await cardCorpus(docs, axes, {
@@ -150,7 +154,10 @@ export async function descendMap(P: MapContract, selIds: string[], opts: Descend
   const conc = opts.concurrency ?? 12;
 
   on({ stage: "axes", docs: idx.length });
-  const { axes, realDims, projections } = await discoverAxes(vectors, titles.map((t) => t.slice(0, 64)), { llm: opts.llm });
+  const { axes, realDims, projections } = await discoverAxes(vectors, titles.map((t) => t.slice(0, 64)), {
+    llm: opts.llm,
+    onProgress: (p) => { if (p.step === "noise") on({ stage: "axes-noise", rep: p.rep, of: p.of }); else if (p.step === "naming") on({ stage: "axes-naming", axes: p.axes }); },
+  });
   on({ stage: "axes-done", axes: axes.length, realDims });
   const scores = projectionScores(projections, axes);
   const rawScores = rawProjectionScores(projections, axes);

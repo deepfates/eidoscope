@@ -33,6 +33,8 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
   // stderr narration from the engine's honest progress stream — the CLI's face of the same events a UI shows
   const onProgress = (p: EngineProgress) => {
     if (p.stage === "axes") say(`\n[1/5] discovering axes from ${p.docs} docs…`);
+    else if (p.stage === "axes-noise") process.stderr.write(`  noise floor: shuffle replicate ${p.rep}/${p.of}\r`);
+    else if (p.stage === "axes-naming") say(`  naming ${p.axes} axes (one contrastive call)…`);
     else if (p.stage === "axes-done") {
       say(`  ${p.axes} axes surfaced (${p.realDims} dims above the noise floor)`);
       if (docs.length < 50) say(`  ⚠ small corpus (${docs.length} docs) — PCA axes get noisy below ~50-100 docs; the variance % per axis will show it`);

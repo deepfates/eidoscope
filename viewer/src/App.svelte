@@ -8,7 +8,7 @@
   import { themePalette } from "./palette";
   import { buildDimensions, scores01, type Dimension } from "./dimensions";
   import { ViewModel, parseUrl, type CameraOp, type StatePatch } from "./model.svelte";
-  import { embedQuery, cosineAll, resetEmbedder } from "./semantic";
+  import { cosineAll } from "./semantic";
   import { deriveDirection } from "./derive";
   import { resolveIdSet, type UrlIdSet } from "./idset";
   import { GRAIN_MIN_REGION, GRAIN_RATIO, GRAIN_PALETTE_N, type SavedView, type ViewState } from "../../src/schema";
@@ -16,7 +16,7 @@
   import { EmbeddedStore } from "../../src/store";
   import { gzipSync, zipSync, strToU8 } from "fflate";
   import Ingest from "./Ingest.svelte";
-  import { filesFromFileList, filesFromDataTransfer, descendInPage, getKey, type IngestFile, type IngestStatus } from "./ingest";
+  import { engine, filesFromFileList, filesFromDataTransfer, getKey, type IngestFile, type IngestStatus } from "./ingest";
   import type { MapContract } from "../../src/schema";
   import { injectEido, vaultEntries, deckJSONL } from "../../src/export";
   import { setSource, currentFileName, canWriteInPlace, supportsFSA, openViaPicker, openRecent, listRecents, writeEido, download, type RecentFile } from "./file";
@@ -288,7 +288,7 @@
     descendErr = "";
     descending = { phase: "axes", label: "descending…" };
     try {
-      const child = await descendInPage(D, sel.map((i) => D.ids[i]), getKey(), (s) => (descending = s));
+      const child = await engine.descend(D, sel.map((i) => D.ids[i]), getKey(), (s) => (descending = s));
       mountMap(new EmbeddedStore(child), { intro: true });   // the child IS the working document now
     } catch (e: any) {
       descendErr = String(e?.message ?? e);
@@ -549,7 +549,7 @@
     armStall();
     try {
       const qv = await Promise.race([
-        embedQuery(q, (D as any).derivedBy?.embedder?.id, (p) => { queryStatus = p.label; queryPct = p.pct ?? null; armStall(); }),
+        engine.embedQuery(q, (D as any).derivedBy?.embedder?.id, (p) => { queryStatus = p.label; queryPct = p.pct ?? null; armStall(); }),
         stalled,
       ]);
       const key = m.addQuery(q, cosineAll(qv, V));
@@ -559,7 +559,7 @@
       queueMicrotask(() => { const el = document.querySelector<HTMLElement>(`[data-minted="${key}"]`); el?.scrollIntoView({ block: "nearest" }); el?.focus(); });
       return key;
     } catch (e: any) {
-      resetEmbedder();   // drop the poisoned/half-loaded model so the next add retries cleanly
+      engine.resetEmbedder();   // drop the worker's poisoned/half-loaded model so the next add retries cleanly
       queryErr = e?.message === "__stall__"
         ? "model download stalled — check your connection, then press add to retry"
         : "couldn’t run the query (" + String(e?.message ?? e) + ") — press add to retry";

@@ -19,7 +19,9 @@ different costumes), in the Excalidraw lineage: no account, no server, files you
   workspace re-presents.
 
 The CLI is not a second product: it is the **headless face of the same engine** — batch, scripting,
-and every corpus past the in-page envelope — reading and writing the same files.
+automation — reading and writing the same files. (In the app the engine runs inside a Web Worker,
+so any corpus size runs without freezing the tab; the ingest panel narrates measured time estimates
+instead of refusing at a doc-count envelope.)
 
 ## The three strata inside a .eido
 

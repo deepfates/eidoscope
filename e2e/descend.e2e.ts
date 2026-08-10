@@ -57,8 +57,13 @@ const p = await browser.newPage({ viewport: { width: 1960, height: 1050 }, devic
 const pageErrs: string[] = []; p.on("pageerror", (e) => pageErrs.push(String(e)));
 let downloads = 0; p.on("download", () => downloads++);   // the ferry is DEAD — descend must download nothing
 const blocked: string[] = [];
-await p.route("https://openrouter.ai/**", (route) =>
-  route.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: mockLLM(route.request().postData() ?? "{}") }));
+// mockDelayMs stretches each LLM answer so pass B has a real window in which the descend is IN FLIGHT —
+// the receipt that the engine worker leaves the page interactive is a camera gesture landed mid-run.
+let mockDelayMs = 0;
+await p.route("https://openrouter.ai/**", async (route) => {
+  if (mockDelayMs) await new Promise((r) => setTimeout(r, mockDelayMs));
+  route.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: mockLLM(route.request().postData() ?? "{}") });
+});
 await p.route(/^https?:\/\/(?!localhost)/, (route) => {
   const u = route.request().url();
   if (/openrouter\.ai/.test(u)) return route.fallback();
@@ -124,8 +129,28 @@ try {
   await p.addInitScript(() => { try { localStorage.setItem("eido-llm-key", "sk-or-e2e-test"); } catch {} });
   await freshMap();
   await lassoBlob1();
+  // ═══ INTERACTIVITY RECEIPT (eid-yhj7): the descend runs in the engine WORKER, so the parent map must
+  // stay drivable while it cooks — zoom the camera MID-DESCEND with a real wheel gesture and assert it
+  // moved, while a longtask observer proves the main thread never blocked >200ms.
+  mockDelayMs = 500;   // stretch naming calls: a real in-flight window (~seconds), same deterministic answers
+  await p.evaluate(() => {
+    (window as any).__lt = [];
+    try { new PerformanceObserver((l: any) => { for (const e of l.getEntries()) (window as any).__lt.push(Math.round(e.duration)); }).observe({ entryTypes: ["longtask"] }); } catch {}
+  });
   await p.click('[data-testid="sel-descend"]');
+  await p.waitForTimeout(250);   // the run is now in flight (axes naming is delayed 500ms)
+  const zoom0 = (await st()).zoom;
+  const [cx, cy] = await proj([1.6, 1.1]);
+  await p.mouse.move(cx, cy);
+  await p.mouse.wheel(0, -400); await p.waitForTimeout(250);
+  const midRun = await st();
+  ok(midRun.visible === 90, "mid-descend the PARENT map is still the working document (the run cooks in the worker)");
+  ok(midRun.zoom !== zoom0, `the camera answered a real wheel gesture MID-DESCEND — zoom ${zoom0} → ${midRun.zoom}`);
   await p.waitForFunction(() => (window as any).__eido?.()?.visible === 30, null, { timeout: 60000 });
+  const lt = await p.evaluate(() => (window as any).__lt as number[]);
+  const maxLT = lt.length ? Math.max(...lt) : 0;
+  ok(maxLT < 200, `no main-thread long task through the whole keyed descend — ${lt.length} longtask(s), max ${maxLT}ms (< 200ms)`);
+  mockDelayMs = 0;
   await p.keyboard.press("Escape"); await p.waitForTimeout(300);   // the child's intro overlay
   s = await st();
   ok(llmCalls.axes >= 1, `axis naming went through the mocked endpoint — ${llmCalls.axes} call(s)`);
