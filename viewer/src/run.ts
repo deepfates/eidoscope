@@ -9,14 +9,14 @@
 // createSyncAccessHandle is worker-only, so the cache adapter is at home here).
 import { ai } from "@ax-llm/ax";
 import { docsFromFiles, splitOversized, parseVaultManifest, type Doc } from "../../src/corpus-core";
-import { buildMap, descendMap, type EngineProgress } from "../../src/engine";
+import { buildMap, descendMap, type EngineProgress, type DescendParent } from "../../src/engine";
 import { poolEmbedWith } from "../../src/geometry";
 import { discoverAxes, type Axis, type AxesProgress } from "../../src/axes";
 import { Store } from "../../src/llm";
 import { DEFAULT_MODEL, DEFAULT_API_URL, DEFAULT_EMBED_MODEL, DEFAULT_MAX_DOC_CHARS } from "../../src/defaults";
 import type { MapContract } from "../../src/schema";
 import { embedItems, type EmbedProgress } from "./embedder";
-import { opfsStore, cacheFileName } from "./opfs";
+import { opfsStore, cacheFileName, persistSummary } from "./opfs";
 
 // ax stamps x-request-id / x-retry-count onto every request. OpenRouter's CORS allow-list doesn't
 // include them, so a browser's preflight rejects the whole call ("Failed to fetch") and ax retries
@@ -88,7 +88,7 @@ const axesNarration = (set: (s: IngestStatus) => void, n: () => number, named: b
 // as a plain MapContract the app mounts through the SAME in-memory path a dropped .eido takes.
 // The key is OPTIONAL — the cards already exist, so without one the child opens honest-but-unnamed:
 // PC axis names + deterministic contrastive-term region labels (naming can be applied later with a key).
-export async function descendInPage(P: MapContract, selIds: string[], key: string, onStatus: (s: IngestStatus) => void): Promise<MapContract> {
+export async function descendInPage(P: DescendParent, selIds: string[], key: string, onStatus: (s: IngestStatus) => void): Promise<MapContract> {
   const llm = key ? pageLLM(key) : undefined;
   const ax = axesNarration(onStatus, () => selIds.length, false);
   const regionRate = new Rate();
@@ -150,7 +150,10 @@ export class IngestRun {
 
   private set(s: IngestStatus) { this.status = s; this.onStatus(s); }
 
-  // Read + parse the corpus (no models involved).
+  // Read + parse the corpus (no models involved). The raw file texts are RELEASED afterwards — the
+  // parsed docs are the working truth, and a resume message carries the files again if a fresh worker
+  // ever needs them (review finding: retained corpus text is a pure leak once parsed).
+  private fileCount = 0;
   private parse(): Doc[] {
     if (this.docs) return this.docs;
     const warns: string[] = [];
@@ -163,6 +166,8 @@ export class IngestRun {
     if (!docs.length) throw new Error("no documents found — the folder has no .md/.txt files with at least 200 characters of text");
     this.docs = docs;
     this.warnings = warns;
+    this.fileCount = this.files.length;
+    this.files = [];
     return docs;
   }
   warnings: string[] = [];
@@ -175,9 +180,10 @@ export class IngestRun {
     const ax = axesNarration((s) => this.set(s), () => this.docs?.length ?? 0, true);
     try {
       const docs = this.parse();
-      this.set({ phase: "read", label: `read ${docs.length} documents from ${this.files.length} files`, note: "each stage's time is estimated from this run's measured rates as it goes — the map stays usable, cancel any time" });
       this.cardsFailed = 0;
       await this.openCaches();
+      // the read line carries the honest cache-durability state (OPFS / contended / memory-only)
+      this.set({ phase: "read", label: `read ${docs.length} documents from ${this.fileCount} files`, note: `${persistSummary().line} · stage times are estimated from this run's measured rates — cancel any time` });
       const llm = key ? pageLLM(key) : undefined;
 
       // full-text embeddings (chunk-pooled, exactly like the CLI's embedDocs) — computed once, kept
@@ -225,7 +231,7 @@ export class IngestRun {
         cardCache: this.cardCache!, regionCache: this.regionCache!,
         concurrency: 8,
         name: this.name,
-        source: `folder (in-page ingest) · ${this.files.length} files`,
+        source: `folder (in-page ingest) · ${this.fileCount} files`,
         cardModel: DEFAULT_MODEL, embedderId: DEFAULT_EMBED_MODEL,
         onProgress: (p: EngineProgress) => {
           if (p.stage === "cards") {

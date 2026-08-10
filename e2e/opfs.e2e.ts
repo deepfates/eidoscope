@@ -45,12 +45,35 @@ for (const t of TOPICS) for (let i = 0; i < 4; i++) {
   const body = Array.from({ length: 8 }, (_, s) => `Notes on ${t.name} session ${i} part ${s}: ${t.words} — observed in study ${i}.${s}.`).join("\n\n");
   writeFileSync(join(corpusDir, `${t.name}-${i}.md`), `# ${t.name} study ${i}\n\n${body}\n`);
 }
+// distinct corpora for the cancel-mid-append and two-tab passes (fresh vocab → fresh cache keys)
+function mkCorpus(topics: { name: string; words: string }[], per = 4): string {
+  const dir = mkdtempSync(join(tmpdir(), "eido-opfs-x-"));
+  for (const t of topics) for (let i = 0; i < per; i++) {
+    const body = Array.from({ length: 8 }, (_, s) => `Notes on ${t.name} session ${i} part ${s}: ${t.words} — observed in study ${i}.${s}.`).join("\n\n");
+    writeFileSync(join(dir, `${t.name}-${i}.md`), `# ${t.name} study ${i}\n\n${body}\n`);
+  }
+  return dir;
+}
+const corpusC = mkCorpus([
+  { name: "glacier", words: "crevasse moraine serac firn ablation calving icefall nunatak bergschrund cirque" },
+  { name: "orchard", words: "grafting rootstock scion espalier pomology cultivar thinning windfall cider pollinator" },
+  { name: "radio", words: "heterodyne oscillator antenna modulation transceiver waveform squelch repeater telemetry ionosphere" },
+]);
+const corpusD = mkCorpus([
+  { name: "tannery", words: "vegetable-tan chrome hide currier bating liming splitting suede grain-side fatliquor" },
+  { name: "apiary", words: "brood frame langstroth propolis drone waggle nectar-flow supersedure varroa smoker" },
+], 3);
+const corpusE = mkCorpus([
+  { name: "foundry", words: "crucible slag ingot annealing quench patternmaker sprue investment-casting tuyere billet" },
+  { name: "tidepool", words: "anemone chiton barnacle intertidal spray-zone limpet nudibranch holdfast brittle-star wrack" },
+], 3);
 
 const fails: string[] = [];
 const ok = (cond: boolean, msg: string) => { if (cond) console.log("  ✓", msg); else { console.log("  ✗", msg); fails.push(msg); } };
 
 // mocked OpenRouter (same shapes as ingest.e2e.ts) with per-kind counters — the receipt
 let llmCalls = { card: 0, axes: 0, region: 0 };
+let cardDelayMs = 0;   // stretches card answers so cancel-mid-cards has a real window
 function mockLLM(bodyStr: string): string {
   const body = JSON.parse(bodyStr);
   const sys: string = body.messages[0]?.content ?? "";
@@ -76,33 +99,57 @@ function mockLLM(bodyStr: string): string {
 }
 
 const browser = await chromium.launch();
-const p = await browser.newPage({ viewport: { width: 1400, height: 950 } });
-const pageErrs: string[] = []; p.on("pageerror", (e) => pageErrs.push(String(e)));
-if (process.env.EIDO_E2E_DEBUG) p.on("console", (m) => console.error("[page]", m.type(), m.text().slice(0, 300)));
+const pageErrs: string[] = [];
 const blocked: string[] = [];
-await p.route("https://openrouter.ai/**", async (route) => {
-  route.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: mockLLM(route.request().postData() ?? "{}") });
-});
-// the library's documented seams, exactly as ingest.e2e.ts sets them: weights from /hf, ort wasm from
-// /tfwasm (the old `__EIDO_TF_CDN` name pointed at nothing — the run stalled fetching wasm from the
-// blocked real CDN, a pre-existing rig defect surfaced when the run moved into the worker)
-await p.addInitScript(`window.__EIDO_TF_HOST = ${JSON.stringify(base + "/hf/")}; window.__EIDO_TF_WASM = ${JSON.stringify(base + "/tfwasm/")};`);
-await p.route(/^https?:\/\/(?!localhost)/, (route) => {
-  const u = route.request().url();
-  if (/openrouter\.ai/.test(u)) return route.fallback();
-  blocked.push(u); route.abort();
-});
+// one rig per page — the two-tab pass needs a SECOND page in the SAME context (same origin storage)
+// with the same routes and seams
+async function rigPage(pg: import("playwright").Page): Promise<void> {
+  pg.on("pageerror", (e) => pageErrs.push(String(e)));
+  if (process.env.EIDO_E2E_DEBUG) pg.on("console", (m) => console.error("[page]", m.type(), m.text().slice(0, 300)));
+  await pg.route("https://openrouter.ai/**", async (route) => {
+    const body = route.request().postData() ?? "{}";
+    if (cardDelayMs && /`Restatement`/.test(body)) await new Promise((r) => setTimeout(r, cardDelayMs));
+    route.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: mockLLM(body) });
+  });
+  // the library's documented seams, exactly as ingest.e2e.ts sets them: weights from /hf, ort wasm from
+  // /tfwasm (the old `__EIDO_TF_CDN` name pointed at nothing — the run stalled fetching wasm from the
+  // blocked real CDN, a pre-existing rig defect surfaced when the run moved into the worker)
+  await pg.addInitScript(`window.__EIDO_TF_HOST = ${JSON.stringify(base + "/hf/")}; window.__EIDO_TF_WASM = ${JSON.stringify(base + "/tfwasm/")};`);
+  await pg.route(/^https?:\/\/(?!localhost)/, (route) => {
+    const u = route.request().url();
+    if (/openrouter\.ai/.test(u)) return route.fallback();
+    blocked.push(u); route.abort();
+  });
+}
+const ctx = await browser.newContext({ viewport: { width: 1400, height: 950 } });   // one explicit context = one origin storage shared by both tabs
+const p = await ctx.newPage();
+await rigPage(p);
 
-// one full ingest of the folder in the CURRENT page; returns wall time to the mounted map
-async function ingestOnce(): Promise<number> {
-  await p.waitForSelector("[data-testid=open-panel]", { timeout: 15000 });
-  await p.setInputFiles("[data-testid=open-folder]", corpusDir);
-  await p.waitForSelector("[data-testid=ingest-key]", { timeout: 10000 });
-  await p.fill("[data-testid=ingest-key]", "sk-or-e2e-test");
+// one full ingest of a folder in the given page; returns wall time to the mounted map
+async function ingestOnce(pg = p, dir = corpusDir): Promise<number> {
+  await pg.waitForSelector("[data-testid=open-panel]", { timeout: 15000 });
+  await pg.setInputFiles("[data-testid=open-folder]", dir);
+  await pg.waitForSelector("[data-testid=ingest-key]", { timeout: 10000 });
+  await pg.fill("[data-testid=ingest-key]", "sk-or-e2e-test");
   const t0 = Date.now();
-  await p.click("[data-testid=ingest-start]");
-  await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 180000 });
+  await pg.click("[data-testid=ingest-start]");
+  await pg.waitForFunction(() => !!(window as any).__eido, null, { timeout: 180000 });
   return Date.now() - t0;
+}
+
+// cache integrity, read through OPFS itself: every jsonl line must parse (a sealed torn tail shows up
+// as at most ONE malformed line, which the Store loader reports rather than silently drops)
+async function cacheIntegrity(pg = p): Promise<{ bad: number; lines: number }> {
+  return pg.evaluate(async () => {
+    const root = await (navigator as any).storage.getDirectory();
+    const dir = await root.getDirectoryHandle("eido-cache");
+    let bad = 0, lines = 0;
+    for await (const [, h] of (dir as any).entries()) if (h.kind === "file") {
+      const t = await (await h.getFile()).text();
+      for (const l of t.split("\n")) { if (!l) continue; lines++; try { JSON.parse(l); } catch { bad++; } }
+    }
+    return { bad, lines };
+  });
 }
 
 console.log("eidoscope OPFS CACHE e2e (ingest → reload the page → re-ingest the same folder)\n");
@@ -115,7 +162,7 @@ try {
     const fh: any = await root.getFileHandle("probe.txt", { create: true });
     return typeof fh.createWritable === "function";
   });
-  ok(hasOPFS, "this browser has OPFS with main-thread createWritable (Chromium — the persistence path is live)");
+  ok(hasOPFS, "this browser has OPFS (Chromium — the worker's sync-access-handle persistence path is live)");
 
   // ── PASS 1: cold — everything is spent once ──────────────────────────────────────────────────────
   const t1 = await ingestOnce();
@@ -151,7 +198,50 @@ try {
   const s = await p.evaluate(() => (window as any).__eido());
   ok(s.visible === 12, `the warm map is the same 12-card map — visible=${s.visible}`);
 
-  ok(pageErrs.length === 0, "no page errors across both passes" + (pageErrs.length ? " — " + pageErrs[0] : ""));
+  // ── PASS 3: CANCEL MID-APPEND (eid-yhj7 review) — terminate the run's worker while cards are being
+  // written+flushed, then re-ingest: the flushed lines must survive, the file must stay parseable, and
+  // the re-run must resume from them instead of re-spending everything ─────────────────────────────
+  cardDelayMs = 2500;                                // 12 cards at concurrency 8 → two ~2.5s waves: a real window
+  const cardsAtC0 = llmCalls.card;
+  await p.goto(base + "/index.html");
+  await p.waitForSelector("[data-testid=open-panel]", { timeout: 15000 });
+  await p.setInputFiles("[data-testid=open-folder]", corpusC);
+  await p.waitForSelector("[data-testid=ingest-key]", { timeout: 10000 });
+  await p.fill("[data-testid=ingest-key]", "sk-or-e2e-test");
+  await p.click("[data-testid=ingest-start]");
+  await p.waitForSelector('[data-testid=ingest-status][data-phase="cards"]', { timeout: 180000 });
+  // the first "cards" status posts at the first COMPLETION — wave 1 (8 cards) is already done and
+  // flushed when the selector fires; cancel shortly after, while wave 2 (4 cards) is in flight
+  await p.waitForTimeout(600);
+  await p.click("[data-testid=ingest-cancel]");      // Worker.terminate mid-carding (appends in flight)
+  await p.waitForTimeout(400);
+  cardDelayMs = 0;
+  await p.goto(base + "/index.html");
+  await ingestOnce(p, corpusC);
+  const cardsForC = llmCalls.card - cardsAtC0;
+  ok(cardsForC < 24, `cancel-mid-cards then re-ingest RESUMED from the flushed cache — ${cardsForC} card calls total for 12 docs (< 24: at least one flushed card was reused)`);
+  const integ3 = await cacheIntegrity();
+  ok(integ3.bad <= 1, `the cache survived a terminate mid-append — ${integ3.lines} lines, ${integ3.bad} malformed (a sealed torn tail is at most one reported line)`);
+
+  // ── PASS 4: TWO TABS, one origin, concurrent ingests (eid-yhj7 review) — per-flush locking means
+  // neither tab is demoted to memory-only; both complete, both persist into the SAME cache files ────
+  const cardsAt4 = llmCalls.card;
+  const pB = await ctx.newPage();                    // same context = same OPFS origin storage
+  await rigPage(pB);
+  await p.goto(base + "/index.html");
+  await pB.goto(base + "/index.html");
+  const [tA, tB] = await Promise.all([ingestOnce(p, corpusD), ingestOnce(pB, corpusE)]);
+  ok(llmCalls.card - cardsAt4 === 12, `both tabs' ingests completed concurrently (${tA}ms / ${tB}ms) — exactly one card call per doc across both (${llmCalls.card - cardsAt4}/12)`);
+  const integ4 = await cacheIntegrity();
+  ok(integ4.bad <= 1, `interleaved two-tab appends kept every cache file parseable — ${integ4.lines} lines, ${integ4.bad} malformed`);
+  // and the shared cache really holds BOTH tabs' work: a reload of tab A re-ingesting tab B's corpus spends nothing
+  const cardsAt5 = llmCalls.card;
+  await pB.close();
+  await p.goto(base + "/index.html");
+  await ingestOnce(p, corpusE);
+  ok(llmCalls.card === cardsAt5, `tab A re-ingests tab B's corpus for ZERO card calls — the two tabs shared one durable cache`);
+
+  ok(pageErrs.length === 0, "no page errors across all passes" + (pageErrs.length ? " — " + pageErrs[0] : ""));
   ok(blocked.length === 0, "no request needed the real network" + (blocked.length ? ` — blocked: ${blocked[0]}` : ""));
 } catch (e) {
   fails.push("harness error: " + e);

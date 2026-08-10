@@ -1,10 +1,20 @@
 // MAIN-THREAD FACE of the async engine (eid-yhj7): folder collection, the user-held key, and the
-// ENGINE CLIENT — a thin postMessage bridge to viewer/src/engine.worker.ts, where every long operation
-// (ingest, descend, query embedding) actually runs. Nothing heavy is imported here: the engine, ax and
-// transformers.js live only in the worker bundle, so the main thread's job during a run is to paint
-// progress and keep the current map interactive. Cancel really cancels: the client terminates the
-// worker (see engine.worker.ts for why terminate beats an abort signal here) and the next run resumes
-// from the OPFS caches.
+// ENGINE CLIENT — worker spawning, ownership and the postMessage bridge to viewer/src/engine.worker.ts,
+// where every long operation (ingest, descend, query embedding) actually runs. Nothing heavy is
+// imported here: engine, ax and transformers.js live only in the worker bundle.
+//
+// OWNERSHIP (one worker per operation class — review finding 4): each ingest RUN owns a worker (alive
+// across need-key/retry resumes, terminated on clean completion, cancel, or error), each descend owns
+// a short-lived worker, and query embeds share one persistent worker (it holds the warmed model).
+// cancelIngest(runId) therefore terminates exactly that run — never a query or a descend in flight.
+// A worker whose health is unknown (onerror / onmessageerror / clone failure) is REJECTED-AND-RECYCLED:
+// every pending promise on it fails and the worker is discarded, never reused (review finding 5).
+//
+// RESULTS cross as the encoded .eido container (one transferred buffer — no big structured clones,
+// review finding 3) and are decoded here by the SAME decodeContainer/EmbeddedStore a dropped file uses.
+import { EmbeddedStore, type Store as MapStore } from "../../src/store";
+import { decodeContainer } from "../../src/eido-container";
+import type { DescendParent } from "../../src/engine";
 import type { MapContract } from "../../src/schema";
 import type { IngestFile, IngestStatus } from "./run";
 import type { EmbedProgress } from "./embedder";
@@ -58,14 +68,10 @@ export async function filesFromDataTransfer(dt: DataTransfer): Promise<IngestFil
   return readTexts(files);
 }
 
-// ── the engine client: one lazy worker, promise-per-request, streamed status ────────────────────────
+// ── the engine client ───────────────────────────────────────────────────────────────────────────────
 export class CancelledError extends Error { constructor() { super("cancelled"); } }
 
 type Pending = { resolve: (v: any) => void; reject: (e: Error) => void; onStatus?: (s: IngestStatus) => void; onEmbed?: (p: EmbedProgress) => void };
-
-let w: Worker | null = null;
-let seq = 0;
-const pending = new Map<number, Pending>();
 
 // the e2e seams are set on the PAGE by playwright init scripts (which never run inside workers) — the
 // client forwards them with every request so the worker's embedder sees them before first load.
@@ -74,31 +80,57 @@ const seams = (): Seams | undefined => {
   return host || wasm ? { host, wasm } : undefined;
 };
 
-function worker(): Worker {
-  if (w) return w;
-  w = new EngineWorker();
-  w.onmessage = (ev: MessageEvent<WorkerRes>) => {
-    const m = ev.data, p = pending.get(m.id);
-    if (!p) return;
-    if (m.t === "status") p.onStatus?.(m.s);
-    else if (m.t === "embed-status") p.onEmbed?.(m.p);
-    else if (m.t === "err") { pending.delete(m.id); p.reject(new Error(m.message)); }
-    else { pending.delete(m.id); p.resolve(m); }
-  };
-  w.onerror = (e) => rejectAll(new Error("engine worker error: " + (e?.message ?? e)));
-  return w;
-}
-const rejectAll = (err: Error) => { for (const p of pending.values()) p.reject(err); pending.clear(); };
+let seq = 0;
 
-function call<T>(req: WorkerOp, hooks: Omit<Pending, "resolve" | "reject"> = {}): Promise<T> {
-  const id = ++seq;
-  return new Promise<T>((resolve, reject) => {
-    pending.set(id, { resolve, reject, ...hooks });
-    worker().postMessage({ ...req, id, seams: seams() } as WorkerReq);
-  });
+// One worker + its in-flight requests. terminate() rejects everything and discards the worker; any
+// signal that its health is unknown (onerror / onmessageerror / clone failure) does the same — a
+// possibly-dead worker is never reused.
+class Bridge {
+  private w: Worker;
+  private pending = new Map<number, Pending>();
+  dead = false;
+  constructor() {
+    this.w = new EngineWorker();
+    this.w.onmessage = (ev: MessageEvent<WorkerRes>) => {
+      const m = ev.data, p = this.pending.get(m.id);
+      if (!p) return;
+      if (m.t === "status") p.onStatus?.(m.s);
+      else if (m.t === "embed-status") p.onEmbed?.(m.p);
+      else if (m.t === "err") { this.pending.delete(m.id); p.reject(new Error(m.message)); }
+      else { this.pending.delete(m.id); p.resolve(m); }
+    };
+    this.w.onerror = (e: any) => this.terminate(new Error("engine worker error: " + (e?.message ?? e)));
+    this.w.onmessageerror = () => this.terminate(new Error("engine worker message could not be deserialized"));
+  }
+  call<T>(req: WorkerOp, hooks: Omit<Pending, "resolve" | "reject"> = {}, transfer?: Transferable[]): Promise<T> {
+    if (this.dead) return Promise.reject(new Error("engine worker is gone — retry to spawn a fresh one"));
+    const id = ++seq;
+    return new Promise<T>((resolve, reject) => {
+      this.pending.set(id, { resolve, reject, ...hooks });
+      try { this.w.postMessage({ ...req, id, seams: seams() } as WorkerReq, transfer ?? []); }
+      catch (e: any) { this.pending.delete(id); reject(new Error("could not send to the engine worker: " + (e?.message ?? e))); }
+    });
+  }
+  terminate(err: Error = new CancelledError()) {
+    if (this.dead) return;
+    this.dead = true;
+    this.w.terminate();
+    const ps = [...this.pending.values()]; this.pending.clear();
+    ps.forEach((p) => p.reject(err));
+  }
+  // graceful shutdown for an IDLE worker: the worker closes ITSELF (self.close()), so the teardown of
+  // its (potentially huge) wasm heap runs on its own thread. Measured: main-thread terminate() of a
+  // warmed engine worker blocked the page ~1.3s — exactly the freeze this architecture exists to kill.
+  dispose() {
+    if (this.dead) return;
+    this.dead = true;
+    try { this.w.postMessage({ op: "dispose", id: ++seq } as WorkerReq); } catch { this.w.terminate(); }
+    const ps = [...this.pending.values()]; this.pending.clear();
+    ps.forEach((p) => p.reject(new CancelledError()));
+  }
 }
 
-export type IngestResult = { D: MapContract | null; cardsFailed: number; warnings: string[] };
+const decode = (bytes: Uint8Array): MapStore => new EmbeddedStore(decodeContainer(bytes));
 
 // Deep-materialize before postMessage: the app hands svelte $state proxies (structured clone throws
 // "could not be cloned" on them); plain property reads unwrap every proxy while typed arrays pass
@@ -111,26 +143,65 @@ const toPlain = (v: any): any => {
   return o;
 };
 
+export type IngestResult = { store: MapStore | null; cardsFailed: number; warnings: string[] };
+type DoneMsg = { bytes: Uint8Array | null; cardsFailed: number; warnings: string[] };
+
+const ingestBridges = new Map<string, Bridge>();
+let embedBridge: Bridge | null = null;
+
 export const engine = {
-  // Run (or resume — same runId) one folder's ingest in the worker. Resolves null D at the key gate.
-  ingest(runId: string, files: IngestFile[], name: string, key: string, onStatus: (s: IngestStatus) => void): Promise<IngestResult> {
-    return call<IngestResult>({ op: "ingest", runId, files: toPlain(files), name, key }, { onStatus });
+  // Run (or resume — same runId, same worker, warm state) one folder's ingest. Resolves a null store
+  // at the key gate. The run's worker dies on clean completion or error (OPFS is the durable resume
+  // state); it survives need-key and failed-cards partials, which the panel resumes in place.
+  async ingest(runId: string, files: IngestFile[], name: string, key: string, onStatus: (s: IngestStatus) => void): Promise<IngestResult> {
+    let b = ingestBridges.get(runId);
+    if (!b || b.dead) { b = new Bridge(); ingestBridges.set(runId, b); }
+    try {
+      const r = await b.call<DoneMsg>({ op: "ingest", runId, files: toPlain(files), name, key }, { onStatus });
+      const complete = !!r.bytes && r.cardsFailed === 0;
+      if (complete) { b.dispose(); ingestBridges.delete(runId); }
+      return { store: r.bytes ? decode(r.bytes) : null, cardsFailed: r.cardsFailed, warnings: r.warnings };
+    } catch (e) {
+      if (!(e instanceof CancelledError)) { b.terminate(e as Error); ingestBridges.delete(runId); }
+      throw e;
+    }
   },
-  // DESCEND the held set into its own map. The parent map is structured-cloned INTO the worker (its
-  // vectors stay owned by the page); the child's vectors are transferred back, zero-copy.
-  descend(map: MapContract, selIds: string[], key: string, onStatus: (s: IngestStatus) => void): Promise<MapContract> {
-    return call<{ D: MapContract }>({ op: "descend", map: toPlain(map), selIds: toPlain(selIds), key }, { onStatus }).then((r) => r.D);
+  // CANCEL exactly this run: terminate ITS worker (preempts wasm/GPU inference and tight math loops —
+  // nothing in that stack polls an abort signal). Cache lines already flushed to OPFS survive, so a
+  // re-run of the same folder resumes instead of re-spending.
+  cancelIngest(runId: string): void {
+    const b = ingestBridges.get(runId);
+    if (b) { b.terminate(); ingestBridges.delete(runId); }
   },
-  // Embed one semantic query with the SAME worker-resident model the ingest uses — the one-off embed
-  // rides the same bridge rather than loading a second 23MB model on the main thread.
+  // DESCEND the held set into its own map — a fresh worker per call, gone when the call settles.
+  // Inbound crosses ONLY what descend reads (engine.ts DescendParent): identity, cards, metadata and
+  // one copied vectors buffer (transferred) — the parent's heavy geometry never crosses at all.
+  async descend(map: MapContract, selIds: string[], key: string, onStatus: (s: IngestStatus) => void): Promise<MapStore> {
+    const parent: DescendParent = {
+      ids: toPlain(map.ids), titles: toPlain(map.titles), cores: toPlain(map.cores),
+      vectors: map.vectors ? { data: new Float32Array(map.vectors.data), dim: map.vectors.dim } : undefined,
+      cite: toPlain(map.cite), citec: toPlain(map.citec),
+      urls: toPlain(map.urls), sources: toPlain(map.sources), siteNames: toPlain(map.siteNames),
+      authors: toPlain(map.authors), tags: toPlain(map.tags), dates: toPlain(map.dates),
+      read: toPlain(map.read), folders: toPlain(map.folders),
+      provenance: toPlain(map.provenance), derivedBy: toPlain(map.derivedBy),
+    };
+    const b = new Bridge();
+    try {
+      const r = await b.call<DoneMsg>({ op: "descend", map: parent, selIds: toPlain(selIds), key }, { onStatus },
+        parent.vectors ? [parent.vectors.data.buffer as ArrayBuffer] : []);
+      b.dispose();   // graceful: the worker closes itself (its heap teardown never blocks the page)
+      return decode(r.bytes!);
+    } catch (e) { b.terminate(e as Error); throw e; }
+  },
+  // Embed one semantic query on the persistent embed worker (it keeps the warmed model between queries).
   embedQuery(text: string, embedderId: string | undefined, onEmbed: (p: EmbedProgress) => void): Promise<Float32Array> {
-    return call<{ vec: Float32Array }>({ op: "embed-query", text, embedderId }, { onEmbed }).then((r) => r.vec);
+    if (!embedBridge || embedBridge.dead) embedBridge = new Bridge();
+    return embedBridge.call<{ vec: Float32Array }>({ op: "embed-query", text, embedderId }, { onEmbed }).then((r) => r.vec);
   },
-  // Drop the worker's cached extractor so the next embed refetches cleanly (after a stalled download).
-  resetEmbedder(): void { if (w) w.postMessage({ op: "reset-embedder", id: ++seq } as WorkerReq); },
-  // CANCEL: terminate the worker (preempts wasm/GPU inference and tight math loops mid-flight — nothing
-  // in that stack polls an abort signal) and fail every in-flight promise. OPFS cache lines already
-  // flushed survive, so a re-run of the same folder resumes instead of re-spending.
-  cancel(): void { if (w) { w.terminate(); w = null; } rejectAll(new CancelledError()); },
-  busy(): boolean { return pending.size > 0; },
+  // A stalled/poisoned embed: terminate the embed worker (aborting its hung download for real) — the
+  // next query spawns a clean one. Exact ownership: ingest and descend workers are untouched.
+  resetEmbedder(): void {
+    if (embedBridge) { embedBridge.terminate(); embedBridge = null; }
+  },
 };

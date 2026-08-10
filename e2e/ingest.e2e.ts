@@ -98,13 +98,18 @@ await p.route("https://openrouter.ai/**", async (route) => {
 // test seams (the library's documented env.remoteHost / wasmPaths) — so the only intercepted host is
 // OpenRouter. Everything else non-local is aborted.
 await p.addInitScript(`window.__EIDO_TF_HOST = ${JSON.stringify(base + "/hf/")}; window.__EIDO_TF_WASM = ${JSON.stringify(base + "/tfwasm/")};`);
-// RECEIPTS for the async engine (eid-yhj7): (1) a longtask observer — the engine runs in a worker, so
-// the MAIN thread must show no long task while a full ingest cooks; (2) a 100ms sampler of the panel's
-// status label + estimate line — the stages must narrate granularly (axes replicates, per-card counts)
-// and the measured-rate estimate line must actually appear.
+// RECEIPTS for the async engine (eid-yhj7): (1) main-thread responsiveness across the FULL cold ingest,
+// measured by TWO independent instruments — the long-animation-frame observer (spec threshold: an entry
+// exists only when a frame ran >=50ms) and a continuous rAF clock recording every gap >100ms. The
+// "longtask" entryType was measured (2026-08-09, probe with all three instruments side by side) to
+// report the WORKER's 1.2s wasm embed task against a main thread whose rAF cadence never gapped — it
+// misattributes cross-thread work in this Chromium, so it is NOT the instrument here.
+// (2) a 100ms sampler of the panel's status label + estimate line — the stages must narrate granularly
+// (axes replicates, per-card counts) and the measured-rate estimate line must actually appear.
 await p.addInitScript(`
-  window.__longtasks = []; window.__labels = []; window.__est = [];
-  try { new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__longtasks.push(Math.round(e.duration)); }).observe({ entryTypes: ["longtask"] }); } catch {}
+  window.__loaf = []; window.__gaps = []; window.__labels = []; window.__est = [];
+  (function tick(prev) { requestAnimationFrame((now) => { if (prev && now - prev > 100) window.__gaps.push(Math.round(now - prev)); tick(now); }); })(0);
+  try { new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__loaf.push(Math.round(e.duration)); }).observe({ entryTypes: ["long-animation-frame"] }); } catch {}
   setInterval(() => {
     const s = document.querySelector('[data-testid=ingest-status]')?.textContent?.trim();
     if (s && window.__labels[window.__labels.length - 1] !== s) window.__labels.push(s);
@@ -134,8 +139,11 @@ try {
   const corpusLine = await p.locator("[data-testid=ingest-corpus]").textContent();
   ok(/13 files/.test(corpusLine ?? ""), `the ingest panel names the corpus — "${corpusLine?.trim()}"`);
 
-  // 3. KEY GATE: start with NO key → the run stops at the axes stage and says plainly what's needed
+  // 3. KEY GATE: start with NO key → the run stops at the axes stage and says plainly what's needed.
+  // The longtask window opens HERE — before the COLD start — so the receipt spans the model download,
+  // wasm init, document embedding, axes, and later the keyed carding + layout + mount: the full run.
   await p.fill("[data-testid=ingest-key]", "");
+  await p.evaluate(() => { (window as any).__loaf = []; (window as any).__gaps = []; (window as any).__labels = []; (window as any).__est = []; });
   await p.click("[data-testid=ingest-start]");
   await p.waitForSelector('[data-testid=ingest-status][data-phase="need-key"]', { timeout: 120000 });
   const gate = await p.locator("[data-testid=ingest-status]").textContent();
@@ -144,12 +152,13 @@ try {
 
   // 4. enter the key and RESUME — embeddings + axes are kept, carding runs, the map mounts
   await p.fill("[data-testid=ingest-key]", "sk-or-e2e-test");
-  await p.evaluate(() => { (window as any).__longtasks = []; (window as any).__labels = []; (window as any).__est = []; });   // measure the RUN, not page load
   await p.click("[data-testid=ingest-start]");
   await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 120000 });
-  const perf = await p.evaluate(() => ({ lt: (window as any).__longtasks as number[], labels: (window as any).__labels as string[], est: (window as any).__est as string[] }));
-  const maxLT = perf.lt.length ? Math.max(...perf.lt) : 0;
-  ok(maxLT < 200, `THE MAIN THREAD STAYED RESPONSIVE through the whole keyed run (engine in the worker) — ${perf.lt.length} longtask(s), max ${maxLT}ms (< 200ms)`);
+  const perf = await p.evaluate(() => ({ loaf: (window as any).__loaf as number[], gaps: (window as any).__gaps as number[], labels: (window as any).__labels as string[], est: (window as any).__est as string[] }));
+  // an entry EXISTS only at >=50ms — the honest bar is ZERO across the whole cold window:
+  // model download + wasm init + embed + axes + cards + layout + map mount.
+  ok(perf.loaf.length === 0, `ZERO main-thread long frames (>=50ms) through the ENTIRE cold ingest — model load → embed → axes → cards → layout → mount${perf.loaf.length ? ` — saw [${perf.loaf.join(",")}]ms` : ""}`);
+  ok(perf.gaps.length === 0, `the rAF clock never gapped >100ms through the same window (independent ground truth)${perf.gaps.length ? ` — gaps [${perf.gaps.join(",")}]ms` : ""}`);
   ok(perf.labels.some((l) => /replicate \d\/8/.test(l)) || perf.labels.some((l) => /PCA over/.test(l)), `the axes stage narrates its real steps (PCA / shuffle replicates), not one static label — saw: ${JSON.stringify(perf.labels.filter((l) => /replicate|PCA|naming/.test(l)).slice(0, 3))}`);
   ok(perf.est.length > 0, `the measured-rate ESTIMATE line appeared during the run (the refusal envelope is dead) — "${perf.est[0]}"`);
   await p.waitForTimeout(400);

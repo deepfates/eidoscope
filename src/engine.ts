@@ -127,6 +127,13 @@ export async function buildMap(docs: Doc[], embeddings: number[][], opts: BuildO
 // Both faces run THIS function: the CLI through src/pipeline.ts descendMap (provider(), file-backed
 // cache, stderr narration), the page through viewer/src/ingest.ts descendInPage (user-held key,
 // session cache, the selection pane's progress line).
+// Exactly what descend READS from the parent — the page's worker client sends only this subset across
+// the thread boundary (the parent's heavy geometry — xy/xyz/scores/levels/nbr/notes — is never cloned;
+// descend recomputes all of it for the child anyway).
+export type DescendParent = Pick<MapContract,
+  "ids" | "titles" | "cores" | "vectors" | "cite" | "citec" | "urls" | "sources" | "siteNames"
+  | "authors" | "tags" | "dates" | "read" | "folders" | "provenance" | "derivedBy">;
+
 export type DescendOpts = {
   llm?: any;                 // absent → PC axis names + term region labels (no call is attempted)
   sig?: any;                 // test seam (mock region-naming signature)
@@ -135,7 +142,7 @@ export type DescendOpts = {
   onProgress?: (p: EngineProgress) => void;
 };
 
-export async function descendMap(P: MapContract, selIds: string[], opts: DescendOpts = {}): Promise<MapContract> {
+export async function descendMap(P: DescendParent, selIds: string[], opts: DescendOpts = {}): Promise<MapContract> {
   const on = opts.onProgress ?? (() => {});
   if (!P.vectors?.data?.length) throw new Error("descend: this .eido carries no card vectors (a lite emit) — nothing honest to re-discover from");
   const at = new Map(P.ids.map((id, i) => [id, i]));

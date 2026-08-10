@@ -21,7 +21,13 @@ export class Store {
   private map = new Map<string, any>();
   constructor(private persist?: StorePersist) {
     const raw = persist?.read();
-    if (raw) for (const l of raw.split("\n")) { if (!l) continue; try { const { k, v } = JSON.parse(l); this.map.set(k, v); } catch {} }
+    if (raw) {
+      let bad = 0;
+      for (const l of raw.split("\n")) { if (!l) continue; try { const { k, v } = JSON.parse(l); this.map.set(k, v); } catch { bad++; } }
+      // a malformed line is usually a torn tail from an interrupted write (the OPFS adapter seals it
+      // into one bad line on the next append) — report it, never silently drop it
+      if (bad) console.warn(`eidoscope: cache loaded with ${bad} malformed line(s) skipped (interrupted write) — the affected entries will be recomputed`);
+    }
   }
   has(k: string) { return this.map.has(k); }
   get(k: string) { return this.map.get(k); }

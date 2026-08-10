@@ -134,8 +134,11 @@ try {
   // moved, while a longtask observer proves the main thread never blocked >200ms.
   mockDelayMs = 500;   // stretch naming calls: a real in-flight window (~seconds), same deterministic answers
   await p.evaluate(() => {
-    (window as any).__lt = [];
-    try { new PerformanceObserver((l: any) => { for (const e of l.getEntries()) (window as any).__lt.push(Math.round(e.duration)); }).observe({ entryTypes: ["longtask"] }); } catch {}
+    // long-animation-frame + a rAF clock — the same two instruments as ingest.e2e.ts ("longtask" was
+    // measured to misattribute worker-thread wasm work to the window there; see that rig's comment)
+    (window as any).__lt = []; (window as any).__gaps = [];
+    (function tick(prev: number) { requestAnimationFrame((now) => { if (prev && now - prev > 100) (window as any).__gaps.push(Math.round(now - prev)); tick(now); }); })(0);
+    try { new PerformanceObserver((l: any) => { for (const e of l.getEntries()) (window as any).__lt.push(Math.round(e.duration)); }).observe({ entryTypes: ["long-animation-frame"] }); } catch {}
   });
   await p.click('[data-testid="sel-descend"]');
   await p.waitForTimeout(250);   // the run is now in flight (axes naming is delayed 500ms)
@@ -147,9 +150,9 @@ try {
   ok(midRun.visible === 90, "mid-descend the PARENT map is still the working document (the run cooks in the worker)");
   ok(midRun.zoom !== zoom0, `the camera answered a real wheel gesture MID-DESCEND — zoom ${zoom0} → ${midRun.zoom}`);
   await p.waitForFunction(() => (window as any).__eido?.()?.visible === 30, null, { timeout: 60000 });
-  const lt = await p.evaluate(() => (window as any).__lt as number[]);
-  const maxLT = lt.length ? Math.max(...lt) : 0;
-  ok(maxLT < 200, `no main-thread long task through the whole keyed descend — ${lt.length} longtask(s), max ${maxLT}ms (< 200ms)`);
+  const lt = await p.evaluate(() => ({ loaf: (window as any).__lt as number[], gaps: (window as any).__gaps as number[] }));
+  ok(lt.loaf.length === 0, `ZERO main-thread long frames (>=50ms) through the whole keyed descend${lt.loaf.length ? ` — saw [${lt.loaf.join(",")}]ms` : ""}`);
+  ok(lt.gaps.length === 0, `the rAF clock never gapped >100ms mid-descend${lt.gaps.length ? ` — gaps [${lt.gaps.join(",")}]ms` : ""}`);
   mockDelayMs = 0;
   await p.keyboard.press("Escape"); await p.waitForTimeout(300);   // the child's intro overlay
   s = await st();

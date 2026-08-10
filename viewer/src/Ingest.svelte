@@ -5,11 +5,11 @@
   // page stays interactive for the whole run and cancel really terminates the work. Emits the finished
   // MapContract upward — App mounts it through the SAME in-memory path a dropped .eido takes.
   import { engine, CancelledError, getKey, setKey, type IngestFile, type IngestStatus } from "./ingest";
-  import type { MapContract } from "../../src/schema";
+  import type { Store } from "../../src/store";
 
   let { files, name, onDone, onCancel }: {
     files: IngestFile[]; name: string;
-    onDone: (D: MapContract) => void; onCancel: () => void;
+    onDone: (store: Store) => void; onCancel: () => void;
   } = $props();
 
   let key = $state(getKey());
@@ -21,29 +21,32 @@
   let inFlight = $state(false);
   // a finished-but-partial map (some cards failed): held here, NOT auto-mounted — the user chooses
   // retry (the caches make it cheap: only failures re-spend) or an explicit open-without-them.
-  let partial = $state<MapContract | null>(null);
+  let partial = $state<Store | null>(null);
 
-  // one run identity for the panel's lifetime: start-again (resume / retry) reuses the worker's
-  // in-memory embeddings, axes and written cards instead of re-spending them
+  // one run identity for the panel's lifetime: start-again (resume / retry) reuses the SAME worker's
+  // in-memory embeddings, axes and written cards instead of re-spending them; the run's worker dies
+  // with the panel (done/open/cancel — engine.cancelIngest), never outliving its owner.
   const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
   async function go() {
+    if (inFlight) return;   // one start owns the stream — no concurrent restart can rebind it
     started = true; error = ""; partial = null; inFlight = true;
     setKey(key.trim());
     try {
       const r = await engine.ingest(runId, files, name, key.trim(), (s) => (status = s));
       warnings = r.warnings; cardsFailed = r.cardsFailed;
-      if (r.D && r.cardsFailed > 0) partial = r.D;
-      else if (r.D) onDone(r.D);
-      // null D = stopped at the axes stage for want of a key — status.phase === "need-key" says why
+      if (r.store && r.cardsFailed > 0) partial = r.store;
+      else if (r.store) onDone(r.store);
+      // null store = stopped at the axes stage for want of a key — status.phase === "need-key" says why
     } catch (e: any) {
       if (!(e instanceof CancelledError)) error = String(e?.message ?? e);
     } finally { inFlight = false; }
   }
-  // cancel really cancels: the client terminates the engine worker mid-stage (nothing in the wasm/PCA
+  function open(store: Store) { engine.cancelIngest(runId); onDone(store); }
+  // cancel really cancels: the client terminates THIS run's worker mid-stage (nothing in the wasm/PCA
   // stack polls a signal); every cache line already flushed to OPFS survives, so a re-run resumes.
   function cancel() {
-    if (inFlight) engine.cancel();
+    engine.cancelIngest(runId);
     onCancel();
   }
   const pctOf = (s: IngestStatus) => (s.total ? Math.round((100 * (s.done ?? 0)) / s.total) : (s.pct ?? null));
@@ -98,14 +101,14 @@
 
     {#if partial}
       <div data-testid="ingest-partial" class="rounded-field mt-4 bg-base-200 p-3 text-[12px] leading-snug">
-        {cardsFailed} card{cardsFailed === 1 ? "" : "s"} failed after retries. The map is built from the {partial.ids.length} that succeeded — retry the failures (only they re-spend), or open without them.
+        {cardsFailed} card{cardsFailed === 1 ? "" : "s"} failed after retries. The map is built from the {partial.map().ids.length} that succeeded — retry the failures (only they re-spend), or open without them.
       </div>
     {/if}
 
     <div class="mt-5 flex gap-2">
       {#if partial}
         <button class="btn btn-primary btn-sm normal-case" data-testid="ingest-retry" onclick={go} disabled={inFlight}>retry {cardsFailed} failed</button>
-        <button class="btn btn-sm normal-case" data-testid="ingest-open-partial" onclick={() => onDone(partial!)}>open without them</button>
+        <button class="btn btn-sm normal-case" data-testid="ingest-open-partial" onclick={() => open(partial!)}>open without them</button>
       {/if}
       {#if !partial && (!started || status?.phase === "need-key" || error)}
         <button class="btn btn-primary btn-sm normal-case" data-testid="ingest-start" onclick={go} disabled={inFlight}>

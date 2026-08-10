@@ -2,14 +2,25 @@
 // query embedding) executes HERE, off the main thread, so the map stays pannable and no stage ever
 // freezes a frame. Bundled by vite's documented worker pattern (`?worker&inline` in viewer/src/ingest.ts
 // with worker.format "es" + inlineDynamicImports in vite.config.ts — one self-contained blob, which the
-// singlefile build inlines like everything else). Results ferry back as transferables where large
-// (MapContract.vectors / query vectors: the Float32Array buffer is TRANSFERRED, not structured-clone
-// copied). Cancel is Worker.terminate() from the client — chosen over an abort signal because the time
-// actually goes into onnx-wasm/WebGPU inference and tight PCA/UMAP loops that never poll a signal;
-// terminate preempts them all, and the OPFS caches are append-only + content-addressed, so everything
-// flushed before the kill is honestly resumable by the next run.
+// singlefile build inlines like everything else).
+//
+// OWNERSHIP (review finding 4): the client spawns ONE WORKER PER OPERATION CLASS — a worker per ingest
+// run (alive across need-key/retry resumes of that run), a worker per descend, one persistent worker
+// for query embeds. So cancel is exact — terminating a worker kills exactly its own operation — and
+// no two operations ever share a thread or a status stream. This file is the same script in every
+// role; each instance only ever receives its owner's requests.
+//
+// RESULTS cross as the .eido CONTAINER (src/eido-container.ts — the ONE shared codec): a single
+// Uint8Array, transferred (zero-copy), decoded on the main thread by the same decodeContainer a
+// dropped file uses. No large object graphs are ever structured-cloned out of the worker. Cancel is
+// Worker.terminate() — the time goes into onnx-wasm/WebGPU inference and tight PCA/UMAP loops that
+// never poll an abort signal; the OPFS caches are append-only + content-addressed (and DRAINED before
+// any result posts), so everything flushed before a kill is honestly resumable.
 import { IngestRun, descendInPage, type IngestFile, type IngestStatus } from "./run";
-import { embedQuery, resetEmbedder, type EmbedProgress } from "./embedder";
+import { embedQuery, type EmbedProgress } from "./embedder";
+import { encodeContainer } from "../../src/eido-container";
+import { opfsDrain } from "./opfs";
+import type { DescendParent } from "../../src/engine";
 import type { MapContract } from "../../src/schema";
 
 // Test seams travel from the page (where playwright's init scripts run — they do NOT run in workers)
@@ -22,42 +33,57 @@ const applySeams = (s?: Seams) => {
 
 export type WorkerOp =
   | { op: "ingest"; runId: string; files: IngestFile[]; name: string; key: string }
-  | { op: "descend"; map: MapContract; selIds: string[]; key: string }
+  | { op: "descend"; map: DescendParent; selIds: string[]; key: string }
   | { op: "embed-query"; text: string; embedderId?: string }
-  | { op: "reset-embedder" };
+  | { op: "dispose" };   // graceful shutdown: self.close() tears the (large wasm) heap down ON THIS thread
 export type WorkerReq = { id: number; seams?: Seams } & WorkerOp;
 export type WorkerRes =
   | { id: number; t: "status"; s: IngestStatus }
   | { id: number; t: "embed-status"; p: EmbedProgress }
-  | { id: number; t: "done"; D: MapContract | null; cardsFailed: number; warnings: string[] }
+  | { id: number; t: "done"; bytes: Uint8Array | null; cardsFailed: number; warnings: string[] }
   | { id: number; t: "vec"; vec: Float32Array }
   | { id: number; t: "err"; message: string };
 
-// Runs are kept per runId so start-again (need-key resume, retry-failures) reuses the same IngestRun —
-// its in-memory embeddings/axes/deck survive between starts exactly as they did on the main thread.
+// One IngestRun per runId — and ONLY while resume genuinely needs it (review finding 2): kept through
+// the need-key gate and a failed-cards partial (both are the panel explicitly waiting to resume with
+// warm in-memory state), DELETED on clean completion and on error. The durable resume state is the
+// OPFS caches; in-memory duplication after the run ends is a pure leak.
 const runs = new Map<string, IngestRun>();
 
 const post = (m: WorkerRes, transfer?: Transferable[]) => (self as any).postMessage(m, transfer ?? []);
-// transfer the big buffer out — the worker's copy is dead after this, which is fine: the map's owner is the page
-const mapTransfer = (D: MapContract | null): Transferable[] => (D?.vectors?.data?.buffer instanceof ArrayBuffer ? [D.vectors.data.buffer] : []);
+
+// encode → drain caches → post one transferred buffer. Encoding through the shared container codec is
+// exactly what view.save does in-page; the main thread decodes with the same decodeContainer a dropped
+// .eido uses, so nothing big is ever structured-cloned.
+const postMap = async (id: number, D: MapContract | null, cardsFailed: number, warnings: string[]) => {
+  const bytes = D ? encodeContainer(D) : null;
+  await opfsDrain();   // a client that terminates this worker right after "done" cuts nothing off the cache files
+  post({ id, t: "done", bytes, cardsFailed, warnings }, bytes ? [bytes.buffer as ArrayBuffer] : []);
+};
 
 self.onmessage = async (ev: MessageEvent<WorkerReq>) => {
   const m = ev.data; applySeams(m.seams);
   try {
-    if (m.op === "ingest") {
+    if (m.op === "dispose") {
+      // MEASURED (probe3, 2026-08-09): main-thread Worker.terminate() of a worker holding the warmed
+      // onnx-wasm heap blocked the page for ~1.3s. self.close() runs the teardown HERE instead — the
+      // client only hard-terminates for cancel/error, where preemption is the whole point.
+      (self as any).close();
+    } else if (m.op === "ingest") {
       let run = runs.get(m.runId);
       if (!run) { run = new IngestRun(m.files, m.name, (s) => post({ id: m.id, t: "status", s })); runs.set(m.runId, run); }
       else run.onStatus = (s: IngestStatus) => post({ id: m.id, t: "status", s });
-      const D = await run.start(m.key);
-      post({ id: m.id, t: "done", D, cardsFailed: run.cardsFailed, warnings: run.warnings }, mapTransfer(D));
+      try {
+        const D = await run.start(m.key);
+        if (D && !run.cardsFailed) runs.delete(m.runId);   // clean completion: nothing left to resume
+        await postMap(m.id, D, run.cardsFailed, run.warnings);
+      } catch (e) { runs.delete(m.runId); throw e; }        // failure: OPFS is the resume state
     } else if (m.op === "descend") {
       const D = await descendInPage(m.map, m.selIds, m.key, (s) => post({ id: m.id, t: "status", s }));
-      post({ id: m.id, t: "done", D, cardsFailed: 0, warnings: [] }, mapTransfer(D));
+      await postMap(m.id, D, 0, []);
     } else if (m.op === "embed-query") {
       const vec = await embedQuery(m.text, m.embedderId, (p) => post({ id: m.id, t: "embed-status", p }));
       post({ id: m.id, t: "vec", vec }, [vec.buffer as ArrayBuffer]);
-    } else if (m.op === "reset-embedder") {
-      resetEmbedder();
     }
   } catch (e: any) {
     post({ id: m.id, t: "err", message: String(e?.message ?? e) });
