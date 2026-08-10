@@ -141,6 +141,9 @@ export class IngestRun {
     public files: IngestFile[],
     public name: string,
     private onStatus: (s: IngestStatus) => void,
+    // provenance.source — which connector this corpus truthfully came through (connectors/types.ts);
+    // defaults to the folder connector's line.
+    private source?: string,
   ) {}
 
   private set(s: IngestStatus) { this.status = s; this.onStatus(s); }
@@ -216,7 +219,7 @@ export class IngestRun {
         cardCache: this.cardCache!, regionCache: this.regionCache!,
         concurrency: 8,
         name: this.name,
-        source: `folder (in-page ingest) · ${this.files.length} files`,
+        source: this.source ?? `folder (in-page ingest) · ${this.files.length} files`,
         cardModel: DEFAULT_MODEL, embedderId: DEFAULT_EMBED_MODEL,
         onProgress: (p: EngineProgress) => {
           if (p.stage === "cards") { this.cardsFailed = p.failed; this.set({ phase: "cards", label: `writing cards ${p.done}/${p.total}${p.failed ? ` · ${p.failed} failed` : ""}`, done: p.done, total: p.total, failed: p.failed }); }
