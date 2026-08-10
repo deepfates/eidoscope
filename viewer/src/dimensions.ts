@@ -48,7 +48,12 @@ const nameOf = (f: MetaField) => f.label;
 // `derived:<k>` is something the viewer computes (folder from urls, length from cores).
 function resolve(D: MapContract, f: MetaField): ((i: number) => unknown) | null {
   if (f.source.startsWith("col:")) {
-    const arr = (D as unknown as Record<string, unknown[]>)[f.source.slice(4)];
+    const key = f.source.slice(4);
+    // the GENERIC column store first (eid-xmf0): source-carried columns live in D.cols; the top-level
+    // property lookup remains for the hand-declared fields (col:authors/tags/dates/… — schema.ts).
+    const gc = D.cols?.find((c) => c.key === key);
+    if (gc) return (i) => gc.values[i];
+    const arr = (D as unknown as Record<string, unknown[]>)[key];
     if (!Array.isArray(arr)) return null;
     return (i) => arr[i];
   }

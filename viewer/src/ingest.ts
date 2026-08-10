@@ -38,7 +38,10 @@ const readTexts = async (files: File[]): Promise<IngestFile[]> => {
   const out: IngestFile[] = [];
   for (const f of files) {
     if (!SOURCE_EXT.test(f.name) && f.name !== "eidoscope-vault.json") continue;
-    out.push({ path: (f as any).webkitRelativePath || f.name, name: f.name, text: await f.text() });
+    // file mtime → a temporal "modified" column (eid-xmf0). ISO string, not epoch number: buildCols
+    // infers temporal from date-shaped strings (a bare number would honestly read as a scalar).
+    const meta = f.lastModified ? { modified: new Date(f.lastModified).toISOString() } : undefined;
+    out.push({ path: (f as any).webkitRelativePath || f.name, name: f.name, text: await f.text(), ...(meta ? { meta } : {}) });
   }
   return out;
 };
@@ -192,7 +195,7 @@ export const engine = {
       cite: toPlain(map.cite), citec: toPlain(map.citec),
       urls: toPlain(map.urls), sources: toPlain(map.sources), siteNames: toPlain(map.siteNames),
       authors: toPlain(map.authors), tags: toPlain(map.tags), dates: toPlain(map.dates),
-      read: toPlain(map.read), folders: toPlain(map.folders),
+      read: toPlain(map.read), folders: toPlain(map.folders), cols: toPlain(map.cols),
       provenance: toPlain(map.provenance), derivedBy: toPlain(map.derivedBy),
     };
     const b = new Bridge();

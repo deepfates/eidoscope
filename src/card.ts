@@ -12,7 +12,7 @@ import type { Doc } from "./corpus-core.ts";
 // user-held key), the cache is an injected Store (file-backed in node via config.fileStore, session
 // memory in the page — which is what makes an in-page pass RESUMABLE: retrying re-runs only failures),
 // and progress is a callback (node default: the stderr ticker).
-export type Card = { id: string; title: string; cat?: string; date?: number; url?: string; source?: string; siteName?: string; author?: string; tags?: string[]; path?: string; readProgress?: number; core: string; axes: Record<string, { note: string }> };
+export type Card = { id: string; title: string; cat?: string; date?: number; url?: string; source?: string; siteName?: string; author?: string; tags?: string[]; path?: string; readProgress?: number; meta?: Record<string, unknown>; core: string; axes: Record<string, { note: string }> };
 
 export const axesPrompt = (axes: Axis[]) =>
   axes.map((a, i) => `${i + 1}. ${a.name}: low="${a.pole_low}" high="${a.pole_high}"`).join("\n");
@@ -51,7 +51,7 @@ export async function cardCorpus(docs: Doc[], axes: Axis[], opts: { llm?: any; s
     const c = cache.get(key(d)); if (!c) continue;
     const ax: Record<string, { note: string }> = {};
     axes.forEach((a, i) => { ax[a.key] = { note: String(c.placements?.[i] ?? "") }; });
-    out.push({ id: d.id, title: d.title, cat: d.cat, date: d.date, url: d.url, source: d.source, siteName: d.siteName, author: d.author, tags: d.tags, path: d.path, readProgress: d.readProgress, core: c.core, axes: ax });
+    out.push({ id: d.id, title: d.title, cat: d.cat, date: d.date, url: d.url, source: d.source, siteName: d.siteName, author: d.author, tags: d.tags, path: d.path, readProgress: d.readProgress, meta: d.meta, core: c.core, axes: ax });
   }
   // A run where every card failed has produced nothing to map — that is a failure, and it must never
   // roll on to emit an empty .eido wearing a ✅. Name the underlying provider error once, plainly.

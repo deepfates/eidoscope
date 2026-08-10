@@ -40,7 +40,10 @@ const corsSafeFetch = ((input: RequestInfo | URL, init?: RequestInit) => {
 export const pageLLM = (key: string) =>
   ai({ name: "openai", apiKey: key, apiURL: DEFAULT_API_URL, config: { model: DEFAULT_MODEL, stream: false }, options: { fetch: corsSafeFetch } } as any);
 
-export type IngestFile = { path: string; name: string; text: string };
+// `meta` (eid-xmf0): connector-carried row metadata (an HF row's non-text columns, a file's mtime) —
+// plain JSON values only (it crosses postMessage); docsFromFiles moves it onto the Doc, and
+// assembleContract turns the union into the map's generic column store (MapContract.cols).
+export type IngestFile = { path: string; name: string; text: string; meta?: Record<string, unknown> };
 
 // ── honest per-stage progress, streamed over postMessage to whichever pane owns the verb ────────────
 export type IngestStatus = {

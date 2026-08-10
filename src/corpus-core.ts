@@ -3,7 +3,7 @@
 // The 200-char junk floor, the binary sniff, the frontmatter/metadata parse and the exact-duplicate
 // collapse all live here exactly once — two hosts, one truth about what a document is.
 
-export type Doc = { id: string; title: string; body: string; cat?: string; date?: number; url?: string; source?: string; siteName?: string; arxiv?: string; author?: string; tags?: string[]; path?: string; readProgress?: number };
+export type Doc = { id: string; title: string; body: string; cat?: string; date?: number; url?: string; source?: string; siteName?: string; arxiv?: string; author?: string; tags?: string[]; path?: string; readProgress?: number; meta?: Record<string, unknown> };
 
 export const SOURCE_EXT = /\.(md|markdown|txt)$/i;
 export const DEFAULT_MIN_CHARS = 200;
@@ -115,7 +115,7 @@ export function splitOversized(docs: Doc[], maxChars: number): { docs: Doc[]; sp
 // report every drop by name/count — the SAME honesty lines both hosts print. Files are processed in the
 // order given (the fs walker and the folder picker both hand them over in directory order).
 export function docsFromFiles(
-  files: { path: string; name: string; text: string }[],
+  files: { path: string; name: string; text: string; meta?: Record<string, unknown> }[],
   opts: { limit?: number; minChars?: number; warn?: (line: string) => void } = {},
 ): Doc[] {
   const warn = opts.warn ?? ((l: string) => console.error(l));
@@ -127,6 +127,8 @@ export function docsFromFiles(
     const r = parseSourceFile(f.path, f.name, f.text, { minChars: opts.minChars });
     if (r.skip) { if (r.skip === "binary") warn(`  ⚠ skipped binary-looking file (not text): ${f.path}`); else skipped++; continue; }
     if (r.vaultKept) vaultKept++;
+    // connector-carried row metadata rides the file → the doc (eid-xmf0); the parser needn't know
+    if (f.meta) r.doc.meta = f.meta;
     docs.push(r.doc);
   }
   // never drop docs silently: a corpus of short structured entries (reference cards, stat blocks) can

@@ -53,6 +53,23 @@ export type MetaField = {
   source: string;
 };
 
+// ── GENERIC METADATA COLUMNS (eid-xmf0) ──────────────────────────────────────────────────────────────
+// ONE generic per-node column store for whatever metadata a corpus source carries (an HF dataset's
+// non-text columns, a folder's file mtimes, …). Each column is typed + parallel to `ids`; the manifest
+// (`metaFields`, source "col:<key>") points at it, and the viewer's dimension registry resolves through
+// it before falling back to the hand-declared top-level fields (authors/tags/dates/… — which stay as
+// they are for now; unifying them into this store is a follow-up, kept out of this diff for review).
+//   scalar/temporal → number (temporal = epoch ms); boolean → boolean;
+//   categorical → string (string[] when `multi`). undefined = the doc doesn't carry this field.
+export type MetaColValue = string | string[] | number | boolean | undefined;
+export type MetaCol = {
+  key: string;
+  label: string;
+  type: "categorical" | "scalar" | "temporal" | "boolean";
+  multi?: boolean;              // categorical whose value is a list (e.g. a comma-multivalue genre)
+  values: MetaColValue[];       // node-indexed, parallel to ids
+};
+
 // ── SAVED VIEWS (eid-thbs) ───────────────────────────────────────────────────────────────────────────
 // A named view IS the file's own state object — the same shape the viewer's URL (de)serializes, carried
 // in the .eido so a configured way of looking travels WITH the corpus. Deliberately id-based and complete:
@@ -156,6 +173,10 @@ export type MapContract = {
   nbr: number[][];                         // per node: nearest-neighbor node indices
   cite?: number[][];                       // per node: intra-corpus citation edges (node indices)
   citec?: number[];                        // per node: external citation impact
+
+  // v2.2 OPTIONAL — the generic column store (see MetaCol above): source-carried metadata columns,
+  // typed and node-indexed. metaFields entries with source "col:<key>" resolve here first.
+  cols?: MetaCol[];
 
   // optional per-node metadata (columnar on the wire); any may be absent/sparse
   urls?: (string | undefined)[];           // the canonical link (e.g. the Readwise reader link)
