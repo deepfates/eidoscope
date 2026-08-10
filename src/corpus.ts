@@ -35,13 +35,14 @@ export const fixtureSource = (): Source => ({
 
 // Load any folder of .md/.markdown/.txt files (recursively) through the shared corpus-core rules.
 export function loadFolder(dir: string, opts: { limit?: number; minChars?: number } = {}): Doc[] {
-  const files: { path: string; name: string; text: string }[] = [];
+  const files: { path: string; name: string; text: string; meta?: Record<string, unknown> }[] = [];
   const walk = (d: string) => {
     for (const f of readdirSync(d)) {
       const p = join(d, f); let s; try { s = statSync(p); } catch { continue; }
       if (s.isDirectory()) { walk(p); continue; }
       if (!/\.(md|markdown|txt)$/i.test(f)) continue;
-      files.push({ path: resolve(p), name: f, text: readFileSync(p, "utf8") });
+      // file mtime → a temporal "modified" column, same field the in-page folder connector carries
+      files.push({ path: resolve(p), name: f, text: readFileSync(p, "utf8"), meta: s.mtimeMs ? { modified: new Date(s.mtimeMs).toISOString() } : undefined });
     }
   };
   walk(dir);

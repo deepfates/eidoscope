@@ -117,7 +117,7 @@ Stratum letters: **S** = source truth, **C** = cache, **W** = work, **F** = file
 | `n` | number | yes | F | document count; every per-node array/buffer has this many rows |
 | `provenance` | object | no | S | `{title?, source?, generated?, count?}` — what corpus, from where, when, how big |
 | `derivedBy` | object | no | C | `{cardModel?, embedder?: {id, dim, pooling?, normalized?}, geometryBasis?: "card"\|"raw", pipelineVersion?, generated?}` — how the map was made; `embedder` lets a tool embed a query into the same space as `vectors` |
-| `metaFields` | array | no | S | typed dimension manifest: `{key, label, type: "categorical"\|"scalar"\|"temporal"\|"boolean", multi?, source}` where `source` is `col:<field>`, `axis:<key>`, or `derived:<k>` |
+| `metaFields` | array | no | S | typed dimension manifest: `{key, label, type: "categorical"\|"scalar"\|"temporal"\|"boolean", multi?, source}` where `source` is `col:<field>` (a hand-declared top-level column), `mcol:<key>` (the generic column store — a disjoint namespace, so a source column named like a native field never shadows it), `axis:<key>`, or `derived:<k>` |
 | `axes` | array | yes | C | `{key, name, low, high, variance?, weak?}` per discovered axis; order defines the row order of the `scores`/`rawScores` buffers |
 | `k` | number | yes | C | region count at the default cluster grain |
 | `di` | number | no | C | default level index into `levels`/`counts` |
@@ -133,6 +133,7 @@ Stratum letters: **S** = source truth, **C** = cache, **W** = work, **F** = file
 | `ghostsN` | number | yes | F | how many ghost rows end `rrow_*` |
 | `hasViews` | boolean | yes | F | whether the `vrow_*` buffers carry saved views (distinguishes `[]` from absent) |
 | `viewsN` | number | yes | F | number of saved-view rows in `vrow_*` |
+| `mcols` | array | no | S | generic column-store descriptors, in order: `{key, label, type: "categorical"\|"scalar"\|"temporal"\|"boolean", multi?}` — values ride the `mcol*` buffers (layout below); absent = the map carries no generic columns |
 | `hasLevels` | boolean | yes | F | whether the `levels_v`/`levels_o` buffers are present |
 | `hasCite` | boolean | yes | F | whether the `cite_v`/`cite_o` buffers are present |
 | `hasVectors` | boolean | yes | F | whether the `vectors` buffer is present (false in a "lite" emit) |
@@ -154,9 +155,11 @@ regenerated when v2.2 landed, and the codec neither reads nor writes anything ol
 ```
 
 - `type` is one of `f32` (4-byte little-endian IEEE float), `i32` (4-byte little-endian signed
-  int), `f16` (2-byte IEEE half-precision float), `u8` (raw bytes).
+  int), `f16` (2-byte IEEE half-precision float), `u8` (raw bytes), `f64` (8-byte little-endian
+  IEEE double — the generic column store's numeric block; temporal values are epoch milliseconds,
+  which f32 would round by minutes).
 - `length` is the element count (not bytes); byte size = `length × width` where width is
-  4/4/2/1 respectively.
+  4/4/2/1/8 respectively.
 - `offset` is the byte offset into the buffers region. Each buffer starts 4-byte aligned; the
   encoder inserts zero padding between buffers to keep that true.
 
@@ -189,6 +192,9 @@ Every buffer key the encoder can emit:
 | `vrow_o` | i32 | yes | W | `viewsN+1` row byte offsets into `vrow_v` |
 | `vid_v` | u8 | yes | W | ragged UTF-8 values: one RAW card id per row (no JSON) — the views' selection and derived-axis id lists, concatenated in file order |
 | `vid_o` | i32 | yes | W | row byte offsets into `vid_v` |
+| `mcolnum_v` | f64 | if `mcols` | S | the generic column store's numeric block: every scalar/temporal column from `mcols` (in descriptor order), column-major — numeric column `c`'s value for node `i` is at `c*n + i`; NaN = absent |
+| `mcolrow_v` | u8 | if `mcols` | S | ragged UTF-8 values: one JSON row per node per categorical/boolean column from `mcols` (in descriptor order, `n` consecutive rows per column) — a string (`string[]` when `multi`) or boolean; `null` = absent |
+| `mcolrow_o` | i32 | if `mcols` | S | row byte offsets into `mcolrow_v` |
 
 ### f16 encoding
 

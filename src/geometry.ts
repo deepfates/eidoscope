@@ -7,7 +7,7 @@ import { UMAP } from "umap-js";
 import type { Card } from "./card.ts";
 import { mulberry32, SEED, type Axis } from "./axes.ts";
 import { divisiveLevels } from "./cluster.ts";
-import { GRAIN_PALETTE_N, type MapContract, type MetaField } from "./schema.ts";
+import { GRAIN_PALETTE_N, type MapContract, type MetaCol, type MetaColValue, type MetaField } from "./schema.ts";
 import { EMBED_PARAMS } from "./defaults.ts";
 
 // Declare each corpus field as a TYPED encodable dimension (the channel-grammar substrate). Presence-based:
@@ -26,8 +26,82 @@ export function buildMetaFields(D: Partial<MapContract> & { axes: MapContract["a
   f.push({ key: "hub", label: "connections", type: "scalar", source: "col:hub" });
   if (has(D.citec)) f.push({ key: "citec", label: "citation impact", type: "scalar", source: "col:citec" });
   f.push({ key: "length", label: "length", type: "scalar", source: "derived:length" });
+  // the GENERIC column store (eid-xmf0): every carried column becomes a declared dimension, under its
+  // OWN source namespace — `mcol:<key>` reads ONLY D.cols, `col:<field>` reads ONLY the hand-declared
+  // top-level fields, no fallthrough. So an incoming column named `authors`/`tags`/`dates` can never
+  // shadow (or be shadowed by) a native dimension: both exist, each resolving its own data. Only the
+  // DISPLAY key is deduplicated on collision (the key is UI identity — channel slots, URLs).
+  const taken = new Set(f.map((x) => x.key));
+  for (const c of D.cols ?? []) {
+    const key = taken.has(c.key) ? c.key + "·col" : c.key;
+    taken.add(key);
+    f.push({ key, label: c.label, type: c.type, ...(c.multi ? { multi: true } : {}), source: "mcol:" + c.key });
+  }
   for (const a of D.axes) f.push({ key: "axis:" + a.key, label: a.name, type: "scalar", source: "axis:" + a.key });
   return f;
+}
+
+// ── the GENERIC COLUMN STORE builder (eid-xmf0) ─────────────────────────────────────────────────────
+// Per-doc `meta` records (whatever a connector attached to its IngestFiles) → typed MetaCols, one per
+// key that actually carries values. Types are inferred from the values themselves, by looking:
+//   all booleans → boolean · all numbers → scalar · strings that overwhelmingly parse as dates
+//   (ISO-date-shaped) → temporal (epoch ms) · arrays of strings → categorical multi · else categorical.
+// Comma-multivalue strings (e.g. genre: "rock, pop") are detected by SAMPLING the column, not by name:
+// a fair share of values contain a comma AND the split tokens read as short labels. Mixed-type columns
+// keep the majority type; minority-typed values become undefined (reported nowhere — they simply don't
+// place). Near-useless columns are NOT filtered here: the viewer's dimOf self-filters (one rule, there).
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}([T ]|$)/;
+export function buildCols(metas: (Record<string, unknown> | undefined)[]): MetaCol[] {
+  const n = metas.length;
+  const keys: string[] = [];
+  const seen = new Set<string>();
+  for (const m of metas) if (m) for (const k of Object.keys(m)) if (!seen.has(k)) { seen.add(k); keys.push(k); }
+  const out: MetaCol[] = [];
+  for (const key of keys) {
+    const vals: unknown[] = new Array(n);
+    for (let i = 0; i < n; i++) { const v = metas[i]?.[key]; vals[i] = v == null || v === "" ? undefined : v; }
+    const present = vals.filter((v) => v !== undefined);
+    if (!present.length) continue;
+    const count = (p: (v: unknown) => boolean) => present.reduce((a: number, v) => a + (p(v) ? 1 : 0), 0);
+    const nBool = count((v) => typeof v === "boolean"), nNum = count((v) => typeof v === "number" && Number.isFinite(v));
+    const nStr = count((v) => typeof v === "string"), nArr = count((v) => Array.isArray(v));
+    const majority = Math.max(nBool, nNum, nStr, nArr);
+    if (majority === 0) continue;   // objects and other unencodable shapes: no honest column to build
+    const values: MetaColValue[] = new Array(n);
+    if (nArr === majority) {        // arrays of strings → categorical multi
+      for (let i = 0; i < n; i++) values[i] = Array.isArray(vals[i]) ? (vals[i] as unknown[]).map(String).filter(Boolean) : undefined;
+      out.push({ key, label: key, type: "categorical", multi: true, values });
+    } else if (nBool === majority) {
+      for (let i = 0; i < n; i++) values[i] = typeof vals[i] === "boolean" ? (vals[i] as boolean) : undefined;
+      out.push({ key, label: key, type: "boolean", values });
+    } else if (nNum === majority) {
+      for (let i = 0; i < n; i++) values[i] = typeof vals[i] === "number" && Number.isFinite(vals[i] as number) ? (vals[i] as number) : undefined;
+      out.push({ key, label: key, type: "scalar", values });
+    } else {
+      const strs = present.filter((v): v is string => typeof v === "string");
+      // temporal: the column's strings overwhelmingly look like dates AND parse as dates
+      const nDate = strs.reduce((a, s) => a + (ISO_DATE.test(s.trim()) && !isNaN(Date.parse(s)) ? 1 : 0), 0);
+      if (nDate >= strs.length * 0.8) {
+        for (let i = 0; i < n; i++) { const s = vals[i]; const t = typeof s === "string" ? Date.parse(s) : NaN; values[i] = isNaN(t) ? undefined : t; }
+        out.push({ key, label: key, type: "temporal", values });
+        continue;
+      }
+      // comma-multivalue, detected by sampling: enough values carry a comma, and the split tokens are
+      // short labels (not prose that happens to contain commas)
+      const withComma = strs.filter((s) => s.includes(","));
+      const tokens = withComma.flatMap((s) => s.split(",").map((t) => t.trim()).filter(Boolean));
+      const shortTokens = tokens.reduce((a, t) => a + (t.length <= 40 ? 1 : 0), 0);
+      const multi = withComma.length >= Math.max(3, strs.length * 0.05) && tokens.length > 0 && shortTokens >= tokens.length * 0.95;
+      if (multi) {
+        for (let i = 0; i < n; i++) { const s = vals[i]; values[i] = typeof s === "string" ? s.split(",").map((t) => t.trim()).filter(Boolean) : undefined; }
+        out.push({ key, label: key, type: "categorical", multi: true, values });
+      } else {
+        for (let i = 0; i < n; i++) values[i] = typeof vals[i] === "string" ? (vals[i] as string) : undefined;
+        out.push({ key, label: key, type: "categorical", values });
+      }
+    }
+  }
+  return out;
 }
 
 // The human-readable full card: title + restatement + every axis placement, concatenated into ONE

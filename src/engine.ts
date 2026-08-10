@@ -9,7 +9,7 @@ import { cardCorpus, type Card } from "./card.ts";
 import { nameLevels, type Region } from "./regions.ts";
 import { Store } from "./llm.ts";
 import {
-  cardText, projectionScores, rawProjectionScores, buildMetaFields, projectAndCluster,
+  cardText, projectionScores, rawProjectionScores, buildMetaFields, buildCols, projectAndCluster,
   type Knn, type LayoutKnnApprox,
 } from "./geometry.ts";
 import type { Doc } from "./corpus-core.ts";
@@ -132,7 +132,7 @@ export async function buildMap(docs: Doc[], embeddings: number[][], opts: BuildO
 // descend recomputes all of it for the child anyway).
 export type DescendParent = Pick<MapContract,
   "ids" | "titles" | "cores" | "vectors" | "cite" | "citec" | "urls" | "sources" | "siteNames"
-  | "authors" | "tags" | "dates" | "read" | "folders" | "provenance" | "derivedBy">;
+  | "authors" | "tags" | "dates" | "read" | "folders" | "cols" | "provenance" | "derivedBy">;
 
 export type DescendOpts = {
   llm?: any;                 // absent → PC axis names + term region labels (no call is attempted)
@@ -195,6 +195,8 @@ export async function descendMap(P: DescendParent, selIds: string[], opts: Desce
     cite, citec: sub(P.citec ?? undefined),
     urls: sub(P.urls), sources: sub(P.sources), siteNames: sub(P.siteNames), authors: sub(P.authors),
     tags: sub(P.tags), dates: sub(P.dates), read: sub(P.read), folders: sub(P.folders),
+    // the generic column store descends with the selection: same columns, subset values
+    cols: P.cols?.map((c) => ({ ...c, values: idx.map((i) => c.values[i]) })),
     vectors: { data: flat, dim: vdim },
   };
   // provenance — the child introduces itself AS a descent: parent map, selection size, date (about pane)
@@ -234,6 +236,9 @@ export function assembleContract(a: {
     authors: deck.map((c) => c.author), tags: deck.map((c) => c.tags), dates: deck.map((c) => c.date),
     read: deck.map((c) => (c.readProgress != null ? c.readProgress > 0.05 : undefined)),
   };
+  // the GENERIC column store (eid-xmf0): whatever row metadata the connector attached rides the deck
+  // into typed, node-indexed columns; buildMetaFields (below) declares each as a dimension.
+  { const cols = buildCols(deck.map((c) => c.meta)); if (cols.length) D.cols = cols; }
   // Positions ARE the deterministic PCA projection — the LLM never scores. Honesty is the variance each
   // axis explains: a "minor" axis (<2%) is a real but thin direction — surfaced and flagged.
   D.axes.forEach((ax, i) => { ax.weak = axes[i].var < 0.02; });

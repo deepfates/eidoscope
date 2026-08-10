@@ -74,16 +74,27 @@ const yamlSafe = (s: string) => s.replace(/[\r\n"]+/g, " ").replace(/\s+/g, " ")
 
 // Pure mapping: rows → IngestFile[]. Title from the id column when present, else "<dataset> · row N";
 // frontmatter carries id + title so parseSourceFile keeps them without polluting the body text.
+// EVERY non-text column rides along as IngestFile.meta (eid-xmf0) — numbers as numbers, strings as
+// strings, booleans, arrays of primitives — and becomes a typed column on the map (MapContract.cols).
+// Type inference (scalar / temporal from ISO-date strings / boolean / categorical, comma-multivalue
+// detected by sampling the WHOLE column) happens once, corpus-wide, in buildCols — not per page here.
 export function rowsToFiles(p: Pick<HFPreview, "dataset" | "config" | "split" | "idColumn">, rows: { row_idx: number; row: Record<string, unknown> }[], column: string): IngestFile[] {
   return rows.map((r) => {
     const text = String(r.row?.[column] ?? "");
     const rawTitle = p.idColumn ? String(r.row?.[p.idColumn] ?? "") : "";
     const title = yamlSafe(rawTitle) || `${p.dataset} · row ${r.row_idx}`;
     const name = `row-${r.row_idx}.md`;
+    let meta: Record<string, unknown> | undefined;
+    for (const [k, v] of Object.entries(r.row ?? {})) {
+      if (k === column || v == null) continue;
+      const prim = (x: unknown) => typeof x === "number" || typeof x === "string" || typeof x === "boolean";
+      if (prim(v) || (Array.isArray(v) && v.every(prim))) (meta ??= {})[k] = v;   // nested objects/blobs: no honest column
+    }
     return {
       path: `hf://${p.dataset}/${p.config}/${p.split}/${name}`,
       name,
       text: `---\nid: hf-${r.row_idx}\ntitle: "${title}"\n---\n${text}\n`,
+      ...(meta ? { meta } : {}),
     };
   });
 }

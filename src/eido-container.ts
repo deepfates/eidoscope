@@ -13,9 +13,12 @@ export const MAGIC = "EIDOBIN1";
 // v2: `type` gains "f16" (half-precision, for carried embedding vectors — measured lossless for cosine ranking
 // at half the bytes). Width derives from type, so old readers that assumed 4 bytes stay correct for f32/i32.
 // v2.1: `type` gains "u8" (raw bytes — used for the ragged utf8 notes buffer, decoded lazily per card).
-export type BufType = "f32" | "i32" | "f16" | "u8";
+// v2.2 (eid-xmf0): `type` gains "f64" — the generic column store's numeric block carries scalar AND
+// temporal columns, and temporal values are epoch MILLISECONDS (~2^41): f32's 24-bit mantissa would
+// round them by minutes. f64 is exact for both; the block is small (numeric cols × n).
+export type BufType = "f32" | "i32" | "f16" | "u8" | "f64";
 export type BufSpec = { key: string; type: BufType; length: number; offset: number };
-export const WIDTH: Record<BufType, number> = { f32: 4, i32: 4, f16: 2, u8: 1 };
+export const WIDTH: Record<BufType, number> = { f32: 4, i32: 4, f16: 2, u8: 1, f64: 8 };
 
 // f32<->f16 (IEEE half) — no Float16Array we can rely on on either side, so convert by hand.
 // Round-to-nearest-even; handles subnormals/inf/nan.
@@ -113,7 +116,7 @@ const ragged = (rows: number[][]): { vals: Int32Array; offs: Int32Array } => {
 
 export function encodeContainer(D: MapContract): Uint8Array {
   const n = D.ids.length;
-  const bufs: { key: string; arr: Float32Array | Int32Array | Uint16Array | Uint8Array; type: BufType }[] = [];
+  const bufs: { key: string; arr: Float32Array | Float64Array | Int32Array | Uint16Array | Uint8Array; type: BufType }[] = [];
   bufs.push({ key: "xy", arr: flat(D.xy, 2), type: "f32" });
   bufs.push({ key: "xyz", arr: flat(D.xyz, 3), type: "f32" });
   bufs.push({ key: "hub", arr: Float32Array.from(D.hub), type: "f32" });
@@ -226,6 +229,25 @@ export function encodeContainer(D: MapContract): Uint8Array {
   const vi = rowsBuf(vids);
   bufs.push({ key: "vid_v", arr: vi.vals, type: "u8" }, { key: "vid_o", arr: vi.offs, type: "i32" });
 
+  // v2.2 (eid-xmf0): the GENERIC COLUMN STORE. Descriptors (key/label/type/multi — O(#cols), never n)
+  // ride the meta as `mcols`, in D.cols order; values ride two fixed buffers, consumed in that order:
+  //   numeric columns (scalar | temporal) → mcolnum_v, ONE f64 block, column-major (col c's values at
+  //     [c*n, (c+1)*n)), NaN = absent (a real value is never NaN — NaN can't mean anything else here);
+  //   row columns (categorical | boolean, multi or not) → mcolrow_v/mcolrow_o, ragged utf8 JSON rows,
+  //     n rows per column (same machinery as prow_*), null = absent.
+  // Both buffers are always present when D.cols is declared (even empty), so cols: [] round-trips as [].
+  if (D.cols) {
+    const numeric = (t: string) => t === "scalar" || t === "temporal";
+    const numCols = D.cols.filter((c) => numeric(c.type));
+    const nums = new Float64Array(numCols.length * n).fill(NaN);
+    numCols.forEach((c, ci) => { for (let i = 0; i < n; i++) { const v = c.values[i]; if (typeof v === "number") nums[ci * n + i] = v; } });
+    const mrows: string[] = [];
+    for (const c of D.cols) if (!numeric(c.type)) for (let i = 0; i < n; i++) mrows.push(JSON.stringify(c.values[i] ?? null));
+    const mr = rowsBuf(mrows);
+    bufs.push({ key: "mcolnum_v", arr: nums, type: "f64" });
+    bufs.push({ key: "mcolrow_v", arr: mr.vals, type: "u8" }, { key: "mcolrow_o", arr: mr.offs, type: "i32" });
+  }
+
   // lay buffers out 4-byte aligned; build the manifest
   const manifest: BufSpec[] = []; const chunks: Uint8Array[] = []; let offset = 0;
   for (const b of bufs) {
@@ -248,6 +270,7 @@ export function encodeContainer(D: MapContract): Uint8Array {
     clustersN: D.clusters.length,
     hasGhosts: !!D.ghosts, ghostsN: (D.ghosts ?? []).length,
     hasViews: !!D.views, viewsN: (D.views ?? []).length,
+    mcols: D.cols?.map((c) => ({ key: c.key, label: c.label, type: c.type, ...(c.multi ? { multi: true } : {}) })),
     hasLevels: !!D.levels, hasCite: !!D.cite, hasVectors: !!(D.vectors && vdim), vdim, hasColor: !!D.colorCoords?.length, notesBlock: NOTES_BLOCK,
     buffers: manifest,
   };
@@ -290,7 +313,7 @@ function* decodeGen(buf: Uint8Array): Generator<void, MapContract> {
   // Materialize one buffer, COPY CHUNKED: buf.buffer.slice() of a whole column is itself an unbounded
   // main-thread pass (1M docs × 384 f16 dims = 732MiB in one memcpy). The allocation is one lazily
   // zero-paged step; the copy proceeds 8MiB per yield (~sub-ms each).
-  function* getOptG(key: string): Generator<void, Float32Array | Int32Array | Uint16Array | Uint8Array | undefined> {
+  function* getOptG(key: string): Generator<void, Float32Array | Float64Array | Int32Array | Uint16Array | Uint8Array | undefined> {
     const s: BufSpec | undefined = meta.buffers.find((b: BufSpec) => b.key === key);
     if (!s) return undefined;
     const bytes = s.length * (WIDTH[s.type] ?? 4);
@@ -298,11 +321,11 @@ function* decodeGen(buf: Uint8Array): Generator<void, MapContract> {
     const out = new Uint8Array(bytes);
     const COPY_CHUNK = 1 << 23;
     for (let o = 0; o < bytes; o += COPY_CHUNK) { out.set(src.subarray(o, Math.min(bytes, o + COPY_CHUNK)), o); yield; }
-    return s.type === "f32" ? new Float32Array(out.buffer) : s.type === "f16" ? new Uint16Array(out.buffer) : s.type === "u8" ? out : new Int32Array(out.buffer);
+    return s.type === "f32" ? new Float32Array(out.buffer) : s.type === "f64" ? new Float64Array(out.buffer) : s.type === "f16" ? new Uint16Array(out.buffer) : s.type === "u8" ? out : new Int32Array(out.buffer);
   }
-  function* getG(key: string): Generator<void, Float32Array | Int32Array> {
+  function* getG(key: string): Generator<void, Float32Array | Float64Array | Int32Array | Uint8Array> {
     const b = yield* getOptG(key); if (!b) throw new Error(`eidoscope: required buffer '${key}' missing from .eido`);
-    return b as Float32Array | Int32Array;
+    return b as Float32Array | Float64Array | Int32Array | Uint8Array;
   }
   const n = meta.n;
   function* unflat(a: ArrayLike<number>, w: number): Generator<void, number[][]> {
@@ -438,6 +461,27 @@ function* decodeGen(buf: Uint8Array): Generator<void, MapContract> {
     }
   }
 
+  // v2.2 (eid-xmf0): the generic column store — descriptors from meta.mcols, values from the two fixed
+  // buffers, consumed in descriptor order (numeric cols from the f64 block, row cols from the ragged
+  // utf8 JSON rows), chunk-parsed with yields like every other per-row pass. NaN/null = absent.
+  let cols: MapContract["cols"];
+  if (meta.mcols) {
+    const nums = (yield* getG("mcolnum_v")) as Float64Array;
+    const mv = (yield* getG("mcolrow_v")) as Uint8Array, mo = (yield* getG("mcolrow_o")) as Int32Array;
+    cols = [];
+    let ni = 0, ri = 0;
+    for (const d of meta.mcols) {
+      const values = new Array(n);
+      if (d.type === "scalar" || d.type === "temporal") {
+        for (let i = 0; i < n; i++) { const v = nums[ni * n + i]; values[i] = Number.isNaN(v) ? undefined : v; if (i % (ROW_CHUNK * 4) === ROW_CHUNK * 4 - 1) yield; }
+        ni++;
+      } else {
+        for (let i = 0; i < n; i++) { const v = JSON.parse(td.decode(mv.subarray(mo[ri], mo[ri + 1]))); values[i] = v === null ? undefined : v; ri++; if (ri % 2048 === 0) yield; }
+      }
+      cols.push({ key: d.key, label: d.label, type: d.type, ...(d.multi ? { multi: true } : {}), values });
+    }
+  }
+
   return {
     version: meta.version, provenance: meta.provenance, derivedBy: meta.derivedBy, metaFields: meta.metaFields, ids, titles, cores, notes,
     axes: meta.axes, scores, rawScores, xy, xyz, xyzAgree: meta.xyzAgree,
@@ -445,7 +489,7 @@ function* decodeGen(buf: Uint8Array): Generator<void, MapContract> {
     levelLabels, levelBlurbs, clusters,
     hub, nbr, cite, citec, vectors,
     urls, sources, siteNames, authors, tags, dates, read, ghosts, folders,
-    views,
+    cols, views,
   };
 }
 

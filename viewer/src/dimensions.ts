@@ -47,6 +47,14 @@ const nameOf = (f: MetaField) => f.label;
 // Resolve one MetaField.source to a per-card accessor. `col:<field>` reads the named parallel column;
 // `derived:<k>` is something the viewer computes (folder from urls, length from cores).
 function resolve(D: MapContract, f: MetaField): ((i: number) => unknown) | null {
+  // Two DISJOINT column namespaces (eid-xmf0), no fallthrough between them: `mcol:<key>` reads ONLY the
+  // generic store (D.cols), `col:<field>` reads ONLY the named hand-declared top-level property. An
+  // incoming generic column named `authors` therefore coexists with the native authors dimension —
+  // each source resolves its own data, neither can shadow the other.
+  if (f.source.startsWith("mcol:")) {
+    const gc = D.cols?.find((c) => c.key === f.source.slice(5));
+    return gc ? (i) => gc.values[i] : null;
+  }
   if (f.source.startsWith("col:")) {
     const arr = (D as unknown as Record<string, unknown[]>)[f.source.slice(4)];
     if (!Array.isArray(arr)) return null;

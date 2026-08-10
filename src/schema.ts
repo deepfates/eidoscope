@@ -42,7 +42,9 @@ export type GhostDef = { title: string; arxiv: string; url: string; n: number; c
 // v2 — a TYPED declaration of one encodable dimension (the substrate of the channel grammar). The pipeline
 // declares each corpus field + its TYPE; the viewer offers only type-appropriate visual channels for it and
 // resolves `source` to values with its own accessors (no derivation logic duplicated into the file).
-//   source: "col:<field>"  read the named per-node column (authors/siteNames/tags/dates/read/hub/citec)
+//   source: "col:<field>"  read the named HAND-DECLARED per-node column (authors/siteNames/tags/dates/read/hub/citec)
+//           "mcol:<key>"   read the generic column store (MapContract.cols) — a DISJOINT namespace from
+//                          col:, so a source column named like a native field can never shadow it
 //           "axis:<key>"    a discovered axis's per-node score (a scalar dimension)
 //           "derived:<k>"   the viewer derives it (e.g. folder from urls, length from cores)
 export type MetaField = {
@@ -51,6 +53,23 @@ export type MetaField = {
   type: "categorical" | "scalar" | "temporal" | "boolean";
   multi?: boolean;              // value is a list (e.g. tags)
   source: string;
+};
+
+// ── GENERIC METADATA COLUMNS (eid-xmf0) ──────────────────────────────────────────────────────────────
+// ONE generic per-node column store for whatever metadata a corpus source carries (an HF dataset's
+// non-text columns, a folder's file mtimes, …). Each column is typed + parallel to `ids`; the manifest
+// (`metaFields`, source "mcol:<key>" — its OWN namespace, disjoint from the hand-declared fields'
+// "col:<field>") points at it; the hand-declared top-level fields (authors/tags/dates/…) stay as
+// they are for now (unifying them into this store is a follow-up, kept out of this diff for review).
+//   scalar/temporal → number (temporal = epoch ms); boolean → boolean;
+//   categorical → string (string[] when `multi`). undefined = the doc doesn't carry this field.
+export type MetaColValue = string | string[] | number | boolean | undefined;
+export type MetaCol = {
+  key: string;
+  label: string;
+  type: "categorical" | "scalar" | "temporal" | "boolean";
+  multi?: boolean;              // categorical whose value is a list (e.g. a comma-multivalue genre)
+  values: MetaColValue[];       // node-indexed, parallel to ids
 };
 
 // ── SAVED VIEWS (eid-thbs) ───────────────────────────────────────────────────────────────────────────
@@ -156,6 +175,10 @@ export type MapContract = {
   nbr: number[][];                         // per node: nearest-neighbor node indices
   cite?: number[][];                       // per node: intra-corpus citation edges (node indices)
   citec?: number[];                        // per node: external citation impact
+
+  // v2.2 OPTIONAL — the generic column store (see MetaCol above): source-carried metadata columns,
+  // typed and node-indexed. metaFields entries with source "mcol:<key>" resolve here — and ONLY here.
+  cols?: MetaCol[];
 
   // optional per-node metadata (columnar on the wire); any may be absent/sparse
   urls?: (string | undefined)[];           // the canonical link (e.g. the Readwise reader link)
