@@ -40,6 +40,7 @@ function fullMap(): MapContract {
     derivedBy: { cardModel: "m", embedder: { id: "e", dim }, geometryBasis: "card", pipelineVersion: "p", generated: 1 },
     metaFields: [{ key: "authors", label: "Author", type: "categorical", source: "col:authors" }],
     vectors: { data: new Float32Array(n * dim).fill(0.5), dim },
+    colorCoords: [[0.1, 0.2], [-0.5, 0.5], [0.9, -0.1]],
     ids: ["a", "b", "c"], titles: ["A", "B", "C"], cores: ["ca", "cb", "cc"],
     notes: [{ x1: "na" }, { x1: "nb" }, { x1: "nc" }],
     axes: [{ key: "x1", name: "Axis", low: "lo", high: "hi" }],

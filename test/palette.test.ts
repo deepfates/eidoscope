@@ -1,5 +1,5 @@
 import { expect, test, describe } from "bun:test";
-import { derivePalette, buildRegionTree, treeHues, anchorHueOf, treeThemePalette, type ThemeTokens } from "../viewer/src/palette";
+import { derivePalette, anchorHueOf, centroidHues, separateHues, coordPalette, themeGamut, type ThemeTokens } from "../viewer/src/palette";
 import { converter } from "culori";
 
 // Fixtures are the token sets verbatim from daisyui/theme/*.css — the same values the browser hands
@@ -76,60 +76,101 @@ describe("theme-derived palette", () => {
 });
 
 // ---------------------------------------------------------------------------
-// TREE HUES (eid-yhj7): region colours follow the grain tree — hue = ancestry.
-describe("grain-tree hues", () => {
-  // a nested 3-level ladder over 12 nodes: 2 → 3 → 5 regions (region 1 never splits)
-  const levels = [
-    [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1],
-    [0, 0, 0, 0, 1, 1, 1, 2, 2, 2, 2, 2],
-    [0, 0, 3, 3, 1, 1, 4, 2, 2, 2, 2, 2],
-  ];
-  const tree = buildRegionTree(levels)!;
+// COLOR-COORDINATE HUES (eid-zsij): group hue = member-centroid angle on the colour disc,
+// order-preservingly separated, pushed through the theme engine with hues pinned.
+describe("colour-coordinate palette", () => {
   const hueDist = (a: number, b: number) => { const d = Math.abs(a - b) % 360; return Math.min(d, 360 - d); };
+  const angleAt = (deg: number, r = 0.8): [number, number] => [r * Math.cos((deg * Math.PI) / 180), r * Math.sin((deg * Math.PI) / 180)];
+  // 3 groups of cards clustered around 10°, 20° (near-aliased) and 200° on the disc
+  const coords = [angleAt(5), angleAt(15), angleAt(18), angleAt(22), angleAt(195), angleAt(205)];
+  const assign = [0, 0, 1, 1, 2, 2];
 
-  test("tree derives parents/sizes from the levels arrays; real nesting has zero violations", () => {
-    expect(tree.counts).toEqual([2, 3, 5]);
-    expect(tree.parents[1]).toEqual([0, 0, 1]);
-    expect(tree.parents[2]).toEqual([0, 1, 2, 0, 1]);
-    expect(tree.sizes[0]).toEqual([7, 5]);
-    expect(tree.violations).toBe(0);
-    // a broken ladder is detected, not silently coloured
-    expect(buildRegionTree([[0, 0, 1, 1], [0, 1, 0, 1]])!.violations).toBeGreaterThan(0);
+  test("centroidHues: a group's hue is its members' centroid angle; empty groups are inert", () => {
+    const h = centroidHues(coords, assign, 4);
+    expect(hueDist(h[0], 10)).toBeLessThan(1);
+    expect(hueDist(h[1], 20)).toBeLessThan(1);
+    expect(hueDist(h[2], 200)).toBeLessThan(1);
+    expect(h[3]).toBe(0);   // no members
+    // assign < 0 (no group) is skipped, not crashed on
+    expect(() => centroidHues(coords, [-1, 0, 0, 1, 1, 2], 3)).not.toThrow();
   });
 
-  test("hue = ancestry: children stay inside the parent's hue neighbourhood; an unsplit region keeps its exact hue", () => {
-    const hues = treeHues(tree, 0);
-    // every child's hue is nearer its OWN parent than any other parent (refinement, not reroll)
-    for (let l = 1; l < 3; l++) for (let r = 0; r < tree.counts[l]; r++) {
-      const p = tree.parents[l][r];
-      for (let q = 0; q < tree.counts[l - 1]; q++) if (q !== p) expect(hueDist(hues[l][r], hues[l - 1][p])).toBeLessThan(hueDist(hues[l][r], hues[l - 1][q]));
-    }
-    // region 1@L1 (= 2@L2) never splits: its hue is IDENTICAL at both grains
-    expect(hueDist(hues[2][2], hues[1][2])).toBeLessThan(1e-9);
-    // sibling guard gap: no two same-level hues coincide
-    for (const lvl of hues) for (let i = 0; i < lvl.length; i++) for (let j = i + 1; j < lvl.length; j++) expect(hueDist(lvl[i], lvl[j])).toBeGreaterThan(0.5);
+  test("separateHues: enforces the min gap WITHOUT reordering the ring", () => {
+    const raw = [10, 12, 200];   // two near-identical hues
+    const sep = separateHues(raw, 10);
+    const gaps: number[] = [];
+    const sorted = [...sep].sort((a, b) => a - b);
+    for (let i = 0; i < sorted.length; i++) gaps.push(((sorted[(i + 1) % sorted.length] - sorted[i]) % 360 + 360) % 360 || 360);
+    for (const g of gaps) expect(g).toBeGreaterThanOrEqual(10 - 1e-3);
+    // order preserved: hue 10's group still sits counter-clockwise of hue 12's
+    expect(sep[0]).toBeLessThan(sep[1]);
+    // already-separated hues pass through unchanged
+    expect(separateHues([0, 120, 240], 10)).toEqual([0, 120, 240]);
   });
 
-  test("anchor rotation lands the largest top-level region on the theme's primary hue", () => {
-    const anchor = anchorHueOf(THEMES.light);
-    const hues = treeHues(tree, anchor);
-    expect(hueDist(hues[0][0], anchor)).toBeLessThan(1e-9);   // region 0 is the largest (7 of 12)
+  // adversarial degenerate cases (codex review): the exact constrained placement must PROVABLY meet
+  // the promised gap — the old iterative nudging left 22 of 24 gaps under 10° on coincident input.
+  const circularGaps = (hs: number[]) => {
+    const sorted = [...hs].sort((a, b) => a - b);
+    return sorted.map((v, i) => (((sorted[(i + 1) % sorted.length] - v) % 360) + 360) % 360 || 360);
+  };
+
+  test("separateHues: 24 coincident hues meet the full 10° gap exactly", () => {
+    const sep = separateHues(new Array(24).fill(137), 10);   // 24·10 = 240 ≤ 360: 10° is feasible
+    for (const g of circularGaps(sep)) expect(g).toBeGreaterThanOrEqual(10 - 1e-6);
+    // deterministic
+    expect(separateHues(new Array(24).fill(137), 10)).toEqual(sep);
   });
 
-  test("tree palette: fixed hues survive the engine (chroma/lightness move, hue does not)", () => {
+  test("separateHues: 36 crowded hues get the honest achievable gap, exactly 360/36 = 10°", () => {
+    // 36 hues jammed into a 40° arc, asked for 12°: 36·12 > 360, so the promise is capped at 360/k
+    const raw = Array.from({ length: 36 }, (_, i) => 100 + (40 * i) / 35);
+    const sep = separateHues(raw, 12);
+    for (const g of circularGaps(sep)) expect(g).toBeGreaterThanOrEqual(360 / 36 - 1e-6);
+  });
+
+  test("separateHues: never reorders — circular order of a mixed crowded ring is preserved", () => {
+    const raw = [350, 351, 352, 5, 6, 90, 91, 92, 180, 181, 270, 271, 272, 273];
+    const sep = separateHues(raw, 10);
+    for (const g of circularGaps(sep)) expect(g).toBeGreaterThanOrEqual(10 - 1e-6);
+    // same circular order: walking the output ring from raw's minimum visits indices in the same
+    // sorted-by-input sequence (stable on ties)
+    const order = (hs: number[]) => hs.map((_, i) => i).sort((a, b) => hs[a] - hs[b]);
+    const rot = (seq: number[], to: number[]) => { const s = seq.indexOf(to[0]); return [...seq.slice(s), ...seq.slice(0, s)]; };
+    expect(rot(order(sep), order(raw))).toEqual(order(raw));
+    // coincident inputs keep input-index order along the ring
+    const co = separateHues([200, 200, 200], 10);
+    const gapsUp = (((co[1] - co[0]) % 360) + 360) % 360;
+    expect(gapsUp).toBeLessThan(180);   // index 1 sits clockwise of index 0
+    expect(((((co[2] - co[1]) % 360) + 360) % 360)).toBeLessThan(180);
+  });
+
+  test("coordPalette: similar groups wear similar (but distinct) theme-band colours in every theme", () => {
     const toOklch = converter("oklch") as any;
     for (const [name, tokens] of Object.entries(THEMES)) {
-      const hues = treeHues(tree, anchorHueOf(tokens));
-      for (let l = 0; l < 3; l++) {
-        const d = treeThemePalette(`${name}-t${l}`, tree, l, tokens);
-        expect(d).not.toBeNull();
-        expect(d!.colors.length).toBe(tree.counts[l]);
-        expect(d!.metrics.worstContrast).toBeGreaterThanOrEqual(2.9);
-        d!.colors.forEach((c, r) => {
-          const h = toOklch({ mode: "rgb", r: c[0] / 255, g: c[1] / 255, b: c[2] / 255 }).h ?? 0;
-          expect(hueDist(h, hues[l][r])).toBeLessThan(4);   // 8-bit quantization + clamp wobble only
-        });
-      }
+      const d = coordPalette(tokens, coords, assign, 3);
+      expect(d).not.toBeNull();
+      expect(d!.colors.length).toBe(3);
+      expect(d!.metrics.worstContrast).toBeGreaterThanOrEqual(2.9);
+      const hues = d!.colors.map((c) => toOklch({ mode: "rgb", r: c[0] / 255, g: c[1] / 255, b: c[2] / 255 }).h ?? 0);
+      // groups 0 and 1 (adjacent on the disc) wear nearer hues than either does to group 2 —
+      // the similarity signal survives the engine (name unused: coordPalette is pure of the DOM)
+      void name;
+      expect(hueDist(hues[0], hues[1])).toBeLessThan(hueDist(hues[0], hues[2]));
+      expect(hueDist(hues[0], hues[1])).toBeGreaterThan(5);   // ...but separated past the gap floor
     }
+  });
+
+  test("themeGamut: personality chroma + a contrast-clearing band, per theme ground", () => {
+    for (const tokens of Object.values(THEMES)) {
+      const g = themeGamut(tokens)!;
+      expect(g).not.toBeNull();
+      expect(g.C).toBeGreaterThanOrEqual(0.085); expect(g.C).toBeLessThanOrEqual(0.19);
+      expect(g.lo).toBeLessThan(g.hi);
+    }
+    expect(themeGamut(THEMES.black)!.dark).toBe(true);
+    expect(themeGamut(THEMES.light)!.dark).toBe(false);
+    expect(themeGamut({})).toBeNull();
+    expect(anchorHueOf(THEMES.light)).toBeGreaterThan(0);   // light's primary is chromatic
   });
 });

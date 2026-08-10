@@ -171,7 +171,8 @@ export async function descendMap(P: DescendParent, selIds: string[], opts: Desce
   const rawScores = rawProjectionScores(projections, axes);
 
   on({ stage: "layout", cards: idx.length });
-  const { xy, xyz, xyzAgree, cluster, k, di, levels, counts, hub, nbr, knnMethod } = await projectAndCluster(vectors, { knn: opts.knn });
+  // descend mints FRESH colour coordinates for the child's own space (ruled: precedent = axes)
+  const { xy, xyz, xyzAgree, cluster, k, di, levels, counts, hub, nbr, knnMethod, colorCoords } = await projectAndCluster(vectors, { knn: opts.knn });
 
   const axLite = axes.map((a) => ({ key: a.key, name: a.name, low: a.pole_low, high: a.pole_high }));
   // llm absent → nameLevels(null): the deterministic contrastive layer still runs, the phrasing call is
@@ -190,7 +191,7 @@ export async function descendMap(P: DescendParent, selIds: string[], opts: Desce
     ids: selIds.slice(), titles, cores,
     notes: idx.map(() => ({})),   // parent notes are placements on the PARENT's axes — honest is empty, not misfiled
     axes: axes.map((a) => ({ key: a.key, name: a.name, low: a.pole_low, high: a.pole_high, variance: a.var, weak: a.var < 0.02 })),
-    scores, rawScores, xy, xyz, xyzAgree, cluster, k, di, levels, counts, levelLabels, levelBlurbs, clusters, hub, nbr,
+    scores, rawScores, xy, xyz, xyzAgree, cluster, k, di, levels, counts, levelLabels, levelBlurbs, clusters, hub, nbr, colorCoords,
     cite, citec: sub(P.citec ?? undefined),
     urls: sub(P.urls), sources: sub(P.sources), siteNames: sub(P.siteNames), authors: sub(P.authors),
     tags: sub(P.tags), dates: sub(P.dates), read: sub(P.read), folders: sub(P.folders),
@@ -213,7 +214,7 @@ export async function descendMap(P: DescendParent, selIds: string[], opts: Desce
 // One implementation for both hosts, so a page-built map and a CLI-built map cannot drift in shape.
 export function assembleContract(a: {
   deck: Card[]; axes: Axis[]; scores: Record<string, number[]>; rawScores: Record<string, number[]>;
-  geo: { xy: number[][]; xyz: number[][]; xyzAgree: number; cluster: number[]; k: number; di: number; levels: number[][]; counts: number[]; hub: number[]; nbr: number[][]; knnMethod: string };
+  geo: { xy: number[][]; xyz: number[][]; xyzAgree: number; cluster: number[]; k: number; di: number; levels: number[][]; counts: number[]; hub: number[]; nbr: number[][]; knnMethod: string; colorCoords: number[][] };
   levelLabels: string[][]; levelBlurbs: string[][]; regionsByLevel: Region[][];
   embs: number[][]; useRaw: boolean; name?: string; source?: string; cardModel?: string; embedderId?: string;
 }): MapContract {
@@ -224,7 +225,7 @@ export function assembleContract(a: {
     notes: deck.map((c) => Object.fromEntries(axes.map((ax) => [ax.key, c.axes[ax.key]?.note || ""]))),
     axes: axes.map((ax) => ({ key: ax.key, name: ax.name, low: ax.pole_low, high: ax.pole_high, variance: ax.var })),
     scores: a.scores, rawScores: a.rawScores,
-    xy: geo.xy, xyz: geo.xyz, xyzAgree: geo.xyzAgree, cluster: geo.cluster, k: geo.k, di: geo.di, hub: geo.hub, nbr: geo.nbr,
+    xy: geo.xy, xyz: geo.xyz, xyzAgree: geo.xyzAgree, cluster: geo.cluster, k: geo.k, di: geo.di, hub: geo.hub, nbr: geo.nbr, colorCoords: geo.colorCoords,
     clusters, levels: geo.levels, counts: geo.counts, levelLabels: a.levelLabels, levelBlurbs: a.levelBlurbs,
     urls: deck.map((c) => c.url || (c.path ? "file://" + c.path : undefined)),
     // parent-directory facet, carried explicitly (docs with web urls would otherwise lose it — schema.ts)

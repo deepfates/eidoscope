@@ -1,14 +1,23 @@
-import { schemeTableau10, interpolateSinebow, interpolateViridis } from "d3-scale-chromatic";
+import { schemeTableau10, interpolateSinebow } from "d3-scale-chromatic";
 import { rgb } from "d3-color";
-import { themePalette, treeThemePalette, buildRegionTree, type RegionTree, type RGB } from "./palette";
+import { themePalette, coordPalette, themeGamut, themeTokensOf, oklchToRgb, type Gamut, type RGB } from "./palette";
 
 // Encodings: how a card's region/metadata/axis-position becomes colour and size. Kept out of the render
 // core so the control panel + legend and the deck layers share ONE source of truth for what a colour means.
+//
+// ONE colour system (eid-zsij, approved 2026-08-10). The theme derives the gamut (palette.ts); the
+// engine mints per-card COLOR COORDINATES (a dedicated projection of the card vectors onto the unit
+// disc, carried in the .eido); every aggregate wears its members' colour centre:
+//   · region at any grain      → hue = member-centroid angle, order-preserving ΔE separation
+//   · categorical value        → the same recipe over the value's members
+//   · scalar dimension         → theme-derived monotone-lightness OKLCH ramp
+//   · bipolar (discovered) axis→ diverging ramp whose pole hues are the colour centres of the
+//                                top/bottom-decile cards on that axis
+// A file without colour coordinates (foreign/hand-built) falls back to the spread-k themed ring.
 
 export type { RGB };
-// Categorical palette: DERIVED FROM THE LIVE THEME (see palette.ts) so the map's ink and the chrome's
-// theme are one colour system. The fixed Tableau-10 + Sinebow ramp below stays as the FALLBACK for a
-// pathological custom theme whose tokens can't yield a legible band.
+// The fixed Tableau-10 + Sinebow ramp stays ONLY as the fallback for a pathological custom theme
+// whose tokens can't yield a legible band (derivePalette returns null).
 const toRGB = (s: string): RGB => { const c = rgb(s); return [Math.round(c.r), Math.round(c.g), Math.round(c.b)]; };
 export const PAL: RGB[] = schemeTableau10.map(toRGB);
 export const PALX: RGB[] = (() => {
@@ -23,57 +32,130 @@ export const PALX: RGB[] = (() => {
 // setActiveTheme() is called once per theme switch (App.svelte, right after data-theme is stamped) and
 // bumps paletteVer so reactive readers and deck updateTriggers can invalidate off ONE number.
 let activeTheme = "";
-// The palette is sized to the categorical count actually on the colour channel (region count at the
-// current grain, or a categorical dimension's value count) — set reactively by App. No fixed size,
-// no modulo recycling: every region gets its own colour, as separated as the engine can make k of them.
-let paletteK = 24;
-// REGION-TREE COLOUR MODE (eid-yhj7): when the colour channel shows regions and the map carries a
-// nested grain ladder, hues come from the GRAIN TREE (ancestry-stable across grain levels) rather
-// than the spread-k ring. Categorical dims (no tree) keep the spread-k path below.
-let regionTree: RegionTree | null = null;
-let treeSrc: number[][] | undefined;           // identity guard: rebuild only when the map changes
-let mode: "flat" | "tree" = "flat";
-let grainLevel = 0;
 export let paletteVer = 0;
-export const palette = (name: string = activeTheme): RGB[] => {
-  if (!name) return PALX;
-  if (mode === "tree" && regionTree) return treeThemePalette(name, regionTree, grainLevel)?.colors ?? PALX;
-  return themePalette(name, undefined, paletteK)?.colors ?? PALX;
-};
+
+// The current map's colour coordinates (null = file carries none → spread-k fallback), and the
+// current colour-channel GROUPS: per-card group index (region id at the live grain, or a categorical
+// value index; < 0 = no group) with the group count. setColorGroups() recomputes the palette from
+// these; everything else just reads `col(c)`.
+let colorCoords: number[][] | null = null;
+let groups: ArrayLike<number> | null = null;
+let groupK = 24;
+let colors: RGB[] | null = null;   // the computed palette for (theme, coords, groups, k)
+
+function rebuild(): void {
+  colors = null;
+  if (!activeTheme) return;
+  if (colorCoords && groups) {
+    const d = coordPalette(themeTokensOf(activeTheme), colorCoords, groups, groupK);
+    if (d) {
+      const m = d.metrics;
+      console.info(`[eido] coord palette "${activeTheme}" (${groupK} groups): minΔEOK ${m.minDEok.toFixed(4)} · deuter ${m.minDEokDeuter.toFixed(4)} · contrast ${m.worstContrast.toFixed(2)}:1`);
+      colors = d.colors;
+      return;
+    }
+  }
+  colors = themePalette(activeTheme, undefined, groupK)?.colors ?? null;   // spread-k ring (no coords / unusable theme)
+}
+
+export const palette = (): RGB[] => colors ?? PALX;
 export function setActiveTheme(name: string): number {
   if (name === activeTheme) return paletteVer;
   activeTheme = name;
-  palette(name);   // generate + log the canary metrics now, while the DOM carries this theme
+  rampMemo = new WeakMap();
+  rebuild();
   return ++paletteVer;
 }
-export function setPaletteK(k: number): number {
-  const kk = Math.max(2, Math.floor(k) || 2);
-  if (kk === paletteK && mode === "flat") return paletteVer;
-  paletteK = kk; mode = "flat";
-  if (activeTheme) themePalette(activeTheme, undefined, kk);
+/** Hand the current map's colour coordinates to the colour engine (undefined = none / map closed). */
+export function setColorData(coords?: number[][]): number {
+  if ((coords ?? null) === colorCoords) return paletteVer;
+  colorCoords = coords ?? null;
+  rampMemo = new WeakMap();
+  rebuild();
   return ++paletteVer;
 }
-/** Hand the current map's grain ladder to the colour engine (undefined = no ladder / map closed). */
-export function setRegionTree(levels?: number[][]): number {
-  if (levels === treeSrc) return paletteVer;
-  treeSrc = levels;
-  regionTree = levels ? buildRegionTree(levels) : null;
-  if (regionTree?.violations) console.warn(`[eido] grain ladder is not nested (${regionTree.violations} nodes) — tree hues may mislead`);
-  return ++paletteVer;
-}
-/** Colour channel = region at `level`: tree hues when the map has a ladder, else spread-k over `fallbackK`. */
-export function setColorRegion(level: number, fallbackK: number): number {
-  if (!regionTree) return setPaletteK(fallbackK);
-  if (mode === "tree" && grainLevel === level) return paletteVer;
-  mode = "tree"; grainLevel = level;
-  if (activeTheme) treeThemePalette(activeTheme, regionTree, level);
+/** The colour channel's group assignment: per-card group index + group count. Region colouring
+ *  passes the grain's region assignment; a categorical dimension passes its value indices. */
+export function setColorGroups(assign: ArrayLike<number> | undefined, k: number): number {
+  const kk = Math.max(1, Math.floor(k) || 1);
+  if ((assign ?? null) === groups && kk === groupK) return paletteVer;
+  groups = assign ?? null; groupK = kk;
+  rebuild();
   return ++paletteVer;
 }
 export const activeThemeName = () => activeTheme;
 // index directly — ids at the current grain are < k by construction; modulo survives only as a guard
 // for out-of-band callers (ghost/legend edge ids), never as the sizing mechanism.
 export const col = (c: number): RGB => { const p = palette(); return p[((c % p.length) + p.length) % p.length]; };
-// continuous axis gradient (low → high) = Viridis, the ecosystem-standard perceptually-uniform,
-// colourblind-friendly sequential scale. Deliberately NOT theme-derived: most themes' tokens make a
-// degenerate (non-monotone, low-range) ramp, and a dishonest ramp is worse than an off-palette one.
-export const axisColor = (t: number): RGB => toRGB(interpolateViridis(Math.max(0, Math.min(1, t))));
+
+// ---------------------------------------------------------------------------
+// SCALAR RAMPS — theme-derived OKLCH, replacing the Viridis carve-out (eid-zsij).
+//
+// Monotonic dimensions (metrics, queries, derived): monotone LIGHTNESS through the theme's own hue
+// neighbourhood (the anchor hue) — low values sit at the band's bg-near end, high values at the
+// far end, chroma growing with value so "more" reads as more ink in every theme.
+//
+// Bipolar (discovered) axes: a DIVERGING ramp. The two pole hues are the colour-coordinate centroids
+// of the top/bottom-decile cards on that axis — the poles wear their own members' colours, the same
+// law as regions. Lightness is symmetric about the middle; the neutral middle keeps a low-chroma
+// tint (25% of the theme's chroma personality) so it stays distinguishable from disabled/greyed UI
+// ink, and recedes toward the band's bg-near end (a neutral middle should carry the least emphasis).
+// Without colour coordinates the poles fall back to the anchor hue and its complement — still
+// theme-derived, never Viridis.
+const gamutMemo = new Map<string, Gamut | null>();
+function gamutOf(): Gamut | null {
+  if (!activeTheme) return null;
+  let g = gamutMemo.get(activeTheme);
+  if (g === undefined) { g = themeGamut(themeTokensOf(activeTheme)); gamutMemo.set(activeTheme, g); }
+  return g;
+}
+const FALLBACK_RAMP = (t: number): RGB => {   // pathological theme: grey lightness ramp, still monotone
+  const v = Math.round(60 + 160 * Math.max(0, Math.min(1, t)));
+  return [v, v, v];
+};
+const hueOfCentroid = (idxs: number[]): number => {
+  let x = 0, y = 0;
+  for (const i of idxs) { x += colorCoords![i][0]; y += colorCoords![i][1]; }
+  return ((Math.atan2(y / (idxs.length || 1), x / (idxs.length || 1)) * 180) / Math.PI + 360) % 360;
+};
+
+// Memoized per (scores array identity, bipolar) per theme — scores01 returns a cached array per
+// (dimension, props), so identity is a real key. Cleared on theme/coords change.
+let rampMemo = new WeakMap<object, Map<string, (t: number) => RGB>>();
+export function scalarRamp(scores: number[] | undefined, bipolar: boolean): (t: number) => RGB {
+  const g = gamutOf();
+  if (!g) return FALLBACK_RAMP;
+  const memoKey = (scores as object) ?? PAL;
+  let byKind = rampMemo.get(memoKey); if (!byKind) rampMemo.set(memoKey, (byKind = new Map()));
+  const key = `${activeTheme}:${bipolar ? "div" : "mono"}`;
+  const hit = byKind.get(key); if (hit) return hit;
+  const { C, lo, hi, dark, anchor } = g;
+  const clamp01 = (t: number) => Math.max(0, Math.min(1, t));
+  let ramp: (t: number) => RGB;
+  if (!bipolar) {
+    // monotone lightness: bg-near end → far end (dark ground brightens upward, light ground darkens)
+    ramp = (t0: number) => {
+      const t = clamp01(t0);
+      const L = dark ? lo + t * (hi - lo) : hi - t * (hi - lo);
+      return oklchToRgb(L, C * (0.45 + 0.55 * t), anchor);
+    };
+  } else {
+    // pole hues from the axis's OWN members' colour centres (top/bottom decile by score)
+    let hLo = anchor, hHi = (anchor + 180) % 360;
+    if (colorCoords && scores?.length) {
+      const order = scores.map((v, i) => i).sort((a, b) => scores[a] - scores[b]);
+      const dec = Math.max(1, Math.floor(order.length / 10));
+      hLo = hueOfCentroid(order.slice(0, dec));
+      hHi = hueOfCentroid(order.slice(-dec));
+    }
+    const Lp = (lo + hi) / 2;   // poles sit mid-band (full chroma carries them); middle recedes bg-ward
+    ramp = (t0: number) => {
+      const t = clamp01(t0);
+      const s = Math.abs(t - 0.5) * 2;   // 0 = neutral middle → 1 = pole
+      const L = dark ? Lp - (1 - s) * (Lp - lo) * 0.7 : Lp + (1 - s) * (hi - Lp) * 0.7;
+      return oklchToRgb(L, C * (0.25 + 0.75 * s), t < 0.5 ? hLo : hHi);
+    };
+  }
+  byKind.set(key, ramp);
+  return ramp;
+}

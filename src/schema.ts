@@ -131,6 +131,15 @@ export type MapContract = {
   // time. Surfaced in the viewer's about pane (eid-ovo7). Optional: absent in pre-existing files.
   xyzAgree?: number;
 
+  // COLOR COORDINATES (eid-zsij, v2.2 field) — per-card [x, y] on the unit disc: a DEDICATED 2D
+  // projection of the card vectors (same UMAP family/params as the layout with its own seed; below
+  // UMAP's neighbor floor, n < 5, a seeded PCA of the same vectors — always vector-derived), centred
+  // and 90th-percentile-normalized (src/geometry.ts toUnitDisc). View-independent: NOT the xy/xyz
+  // layout — colour derived from it survives switching between neighbor map, axis scatter and 3D.
+  // Region/categorical hues come from member-centroid angles; bipolar ramp poles from decile
+  // centroids (viewer/src/encode.ts). Absent (foreign/hand-built file) → the viewer's spread-k ring.
+  colorCoords?: number[][];
+
   // the nested grain ladder (clumps-all-the-way-down). `cluster` is the default level = levels[di].
   // The ladder is GENERATED, not hand-tuned — see the GRAIN_* constants below and src/cluster.ts.
   cluster: number[];                       // per node: region index at the default grain

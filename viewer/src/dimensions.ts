@@ -1,5 +1,5 @@
 import type { MapContract, MetaField } from "../../src/schema";
-import { col, axisColor, type RGB } from "./encode";
+import { col, scalarRamp, type RGB } from "./encode";
 
 // THE DIMENSION REGISTRY — one abstraction for "a per-card value", from three sources (discovered PCA axes,
 // metadata, semantic queries), replacing the three parallel registries (data.axes/scores, facets, metaVals).
@@ -139,11 +139,17 @@ export function scores01(dim: Dimension, props: DimProps): number[] {
 
 // ---- channel accessors: a dimension + its props → a per-card colour / size / position value ----
 const DIM = [58, 58, 58] as RGB; // missing categorical value
+// A scalar/temporal dimension's ramp under its props: theme-derived OKLCH (encode.scalarRamp) —
+// monotone lightness for monotonic dims, diverging (pole hues = the axis's own members' colour
+// centres) for bipolar discovered axes. Shared by the deck accessor and the legend swatches.
+export function rampFor(dim: Dimension, props: DimProps): (t: number) => RGB {
+  return scalarRamp(dim.raw ? scores01(dim, props) : undefined, !!dim.bipolar);
+}
 export function colorAccessor(dim: Dimension | undefined, props: DimProps, regionAssign?: number[]): (i: number) => RGB {
   if (!dim) { const a = regionAssign ?? []; return (i) => col(a[i] ?? 0); } // fallback = region
   if (dim.kind === "categorical") return (i) => { const v = dim.cat!(i); return v == null ? DIM : col(dim.idx![v] ?? 0); };
-  const s = scores01(dim, props);
-  return (i) => axisColor((s[i] ?? 50) / 100);
+  const s = scores01(dim, props), ramp = rampFor(dim, props);
+  return (i) => ramp((s[i] ?? 50) / 100);
 }
 export function sizeAccessor(dim: Dimension | undefined, props: DimProps): (i: number) => number {
   if (!dim || dim.kind !== "scalar") return () => 2.6; // uniform (categorical/none can't size)

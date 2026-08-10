@@ -56,7 +56,7 @@ will reproduce the neighbor map faithfully but can only approximate the axes. A 
 came from so a tool can do that when the source is reachable. The `derivedBy.geometryBasis`
 field declares which basis the file's own geometry was built on.
 
-Fields: `vectors` (buffer), `axes`, `scores`, `rawScores`, `xy`, `xyz`, `xyzAgree`, `cluster`,
+Fields: `vectors` (buffer), `color` (buffer), `axes`, `scores`, `rawScores`, `xy`, `xyz`, `xyzAgree`, `cluster`,
 `k`, `di`, `levels`, `counts`, `levelLabels`, `levelBlurbs`, `clusters`, `hub`, `nbr`, `cite`,
 and the recipe record `derivedBy` (card model, embedder id/dimension, geometry basis, pipeline
 version, generation time).
@@ -136,6 +136,7 @@ Stratum letters: **S** = source truth, **C** = cache, **W** = work, **F** = file
 | `hasLevels` | boolean | yes | F | whether the `levels_v`/`levels_o` buffers are present |
 | `hasCite` | boolean | yes | F | whether the `cite_v`/`cite_o` buffers are present |
 | `hasVectors` | boolean | yes | F | whether the `vectors` buffer is present (false in a "lite" emit) |
+| `hasColor` | boolean | yes | F | whether the `color` buffer (per-card colour coordinates) is present |
 | `vdim` | number | yes | F | embedding dimension of `vectors` (0 when absent) |
 | `notesBlock` | number | yes | F | cards per gzipped notes block (currently 512); readers must use this, never a hard-coded constant |
 | `buffers` | array | yes | F | the buffer manifest, below |
@@ -176,6 +177,7 @@ Every buffer key the encoder can emit:
 | `levels_v` / `levels_o` | i32 | if `hasLevels` | C | ragged: per cluster-ladder level, per-node region assignment |
 | `cite_v` / `cite_o` | i32 | if `hasCite` | C | ragged: per-node intra-corpus citation edges (node indices) |
 | `vectors` | f16 | if `hasVectors` | C | card embedding matrix, row-major `n × vdim`; node `i`'s vector is elements `i*vdim .. (i+1)*vdim` |
+| `color` | f16 | if `hasColor` | C | per-card colour coordinates, row-major `n × 2`, unit-disc values in [-1, 1]: a dedicated 2D projection of the card vectors (independent of `xy`/`xyz`) that data colours derive from — region/categorical hue = member-centroid angle |
 | `notes_z` | u8 | yes | S | concatenated gzip blocks of placement notes (below) |
 | `notes_zi` | i32 | yes | S | block byte offsets into `notes_z` (`blockCount + 1` entries) |
 | `notes_o` | i32 | yes | S | each row's byte offset within its *decompressed* block (`n` entries) |

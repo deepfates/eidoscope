@@ -53,9 +53,10 @@ connectors, in-app DESCEND, save/open `.eido` incl. FSA in-place, export menu), 
 pure document (`docs/EIDO-FORMAT.md` + anti-rot test), WebGPU in-page embedding (17× measured), OPFS
 persistent caches, views carried in the file, and the competitive study recorded (`eid-zz8n`, closed).
 In review now: the Web-Worker engine (tab never freezes, one-format v2.2 container) and honest kNN
-(exact WebGPU whenever a GPU exists; calibrated hnswlib-wasm as the no-GPU fallback). Approved and
-queued: the similarity-arranged theme-derived color system (`eid-zsij` — replaces tree hues, spread-k
-region path, and the Viridis carve-out), the matklad QA gate rework (`eid-6egl`), ingest reachable
+(exact WebGPU whenever a GPU exists; calibrated hnswlib-wasm as the no-GPU fallback). Built (in review): the similarity-arranged theme-derived color system (`eid-zsij` — the engine mints
+per-card color coordinates carried in the `.eido`; region/categorical hues from member centroids;
+theme-derived scalar ramps; tree hues, the spread-k region path, and the Viridis carve-out deleted).
+Approved and queued: the matklad QA gate rework (`eid-6egl`), ingest reachable
 from any app state (`eid-9rdy`), and arbitrary per-row metadata columns (`eid-xmf0`).
 
 Recovered from the full conversation history and now tracked (things asked for that had fallen out
