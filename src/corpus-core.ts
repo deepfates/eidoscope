@@ -66,10 +66,51 @@ export function parseSourceFile(path: string, name: string, raw: string, opts: {
   const author = (front.match(/^author:\s*"?([^"\n]+)/m) || [])[1]?.trim();
   const tagsRaw = (front.match(/^tags:\s*(.+)$/m) || [])[1]?.trim();
   const tags = tagsRaw ? tagsRaw.replace(/[[\]"']/g, "").split(/,\s*/).map((t) => t.trim()).filter(Boolean) : undefined;
+  const meta = frontMeta(front);
   return {
-    doc: { id, title, body, date: parseDate(front), url: url || undefined, source: source || undefined, siteName: siteName || undefined, arxiv: arxiv || undefined, author: author || undefined, tags: tags?.length ? tags : undefined, path, readProgress: parseNum(front, "reading_progress") },
+    doc: { id, title, body, date: parseDate(front), url: url || undefined, source: source || undefined, siteName: siteName || undefined, arxiv: arxiv || undefined, author: author || undefined, tags: tags?.length ? tags : undefined, path, readProgress: parseNum(front, "reading_progress"), meta: Object.keys(meta).length ? meta : undefined },
     vaultKept,
   };
+}
+
+// EVERY OTHER frontmatter key becomes generic metadata (eid-ovsw). The keys above are LIFTED into
+// named contract fields because the app has always understood them; everything else used to be
+// dropped on the floor, which made rich metadata a HuggingFace-only privilege. Now a folder's own
+// frontmatter rides the same `meta` → `cols` → `mcol:` path a dataset column does, so any corpus
+// can be coloured, faceted and windowed by whatever its files actually carry.
+// Deliberately shallow: `key: value` lines and one-level lists (inline `[a, b]` or `- item` blocks).
+// Nested maps and block scalars are skipped rather than half-parsed — a wrong value is worse than
+// an absent one, and buildCols infers types from the values corpus-wide.
+const LIFTED = new Set(["id", "title", "url", "source", "source_url", "site_name", "author", "tags", "date", "created", "published", "reading_progress", "axes"]);
+export function frontMeta(front: string): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const lines = front.split("\n");
+  const scalar = (raw: string): unknown => {
+    const s = raw.trim().replace(/^["']|["']$/g, "");
+    if (!s) return undefined;
+    if (/^(true|yes)$/i.test(s)) return true;
+    if (/^(false|no)$/i.test(s)) return false;
+    if (/^-?\d+(\.\d+)?$/.test(s)) return Number(s);
+    return s;
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^([A-Za-z_][\w .-]*):\s*(.*)$/);   // top-level keys only (no indent)
+    if (!m) continue;
+    const key = m[1].trim(), rest = m[2].trim();
+    if (LIFTED.has(key.toLowerCase())) continue;
+    if (rest.startsWith("[")) {                                   // inline list
+      const items = rest.replace(/^\[|\]$/g, "").split(",").map((x) => scalar(x)).filter((x) => x !== undefined);
+      if (items.length) out[key] = items;
+    } else if (!rest) {                                           // block list, or a nested map we skip
+      const items: unknown[] = [];
+      while (i + 1 < lines.length && /^\s*-\s+/.test(lines[i + 1])) { const v = scalar(lines[++i].replace(/^\s*-\s+/, "")); if (v !== undefined) items.push(v); }
+      if (items.length) out[key] = items;
+    } else {
+      const v = scalar(rest);
+      if (v !== undefined) out[key] = v;
+    }
+  }
+  return out;
 }
 
 // dedupe exact content twins (same title + body): exporters (e.g. Readwise) emit the same document
@@ -127,8 +168,10 @@ export function docsFromFiles(
     const r = parseSourceFile(f.path, f.name, f.text, { minChars: opts.minChars });
     if (r.skip) { if (r.skip === "binary") warn(`  ⚠ skipped binary-looking file (not text): ${f.path}`); else skipped++; continue; }
     if (r.vaultKept) vaultKept++;
-    // connector-carried row metadata rides the file → the doc (eid-xmf0); the parser needn't know
-    if (f.meta) r.doc.meta = f.meta;
+    // connector-carried row metadata rides the file → the doc (eid-xmf0), MERGED over whatever the
+    // file's own frontmatter carried (eid-ovsw): the connector knows the row, the file knows itself,
+    // and a key the connector supplies wins because it is the more specific source.
+    if (f.meta) r.doc.meta = { ...(r.doc.meta ?? {}), ...f.meta };
     docs.push(r.doc);
   }
   // never drop docs silently: a corpus of short structured entries (reference cards, stat blocks) can
