@@ -37,9 +37,15 @@ const mulberry32 = (a: number) => () => {
 
 export type EfCalibration = { ok: boolean; ef: number; holdoutRecall: number };
 
-// `claim` is injectable ONLY so tests can force the failure path (an impossible claim exercises the
-// exact-brute-force fallback in both callers); production callers never pass it.
-export function calibrateEf(X: number[][], K: number, search: (i: number, k: number, ef: number) => number[], seed = 7, claim = EF_RECALL_CLAIM): EfCalibration {
+// TEST-ONLY escape hatch, module-private state — never a parameter on any production signature.
+// Tests set an impossible claim to force the failure path through the REAL callers (exercising their
+// exact-brute-force fallback), then MUST reset to null. Production code cannot reach this without
+// importing a symbol whose name says exactly what it is.
+let claimOverrideForTests: number | null = null;
+export const __setClaimOverrideForTests = (c: number | null) => { claimOverrideForTests = c; };
+
+export function calibrateEf(X: number[][], K: number, search: (i: number, k: number, ef: number) => number[], seed = 7): EfCalibration {
+  const claim = claimOverrideForTests ?? EF_RECALL_CLAIM;
   const n = X.length, d = X[0].length;
   const S = Math.max(1, Math.min(EF_SAMPLE, Math.floor(n / 2)));
   const rnd = mulberry32(seed);

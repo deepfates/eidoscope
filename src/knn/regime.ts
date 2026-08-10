@@ -19,15 +19,21 @@ import { gpuAdapterFor, exactGpuKnn } from "./kernel.ts";
 export type RegimeOpts = {
   // the host's GPU entry point (browser: navigator.gpu; node: the `webgpu` Dawn package) — null = none
   gpu?: GPU | null;
-  // the host's hnsw implementation in seam shape (without `method`) — absent = exact only
-  hnsw?: (X: number[][], K: number) => Promise<Omit<KnnResult, "method">> | Omit<KnnResult, "method">;
-  hnswMethod?: string;                 // provenance name: "hnswlib-node" | "hnswlib-wasm"
+  // the host's hnsw implementation in seam shape; it MAY name its own `method` (e.g. "exact-cpu"
+  // when its internal calibration failed and exact brute force answered) — absent = exact only
+  hnsw?: (X: number[][], K: number) => Promise<Omit<KnnResult, "method"> & { method?: string }> | (Omit<KnnResult, "method"> & { method?: string });
+  hnswMethod?: string;                 // provenance name when the impl doesn't say: "hnswlib-node" | "hnswlib-wasm"
 };
 
 // The regime chooser IS the seam implementation hosts inject into projectAndCluster.
 export function makeKnn(o: RegimeOpts): Knn {
   const hnsw = o.hnsw
-    ? async (X: number[][], K: number): Promise<KnnResult> => ({ ...(await o.hnsw!(X, K)), method: o.hnswMethod ?? "hnsw" })
+    ? async (X: number[][], K: number): Promise<KnnResult> => {
+        const r = await o.hnsw!(X, K);
+        // provenance is whatever ACTUALLY answered: the impl's own name wins (exact fallback inside
+        // a failed calibration must not be labeled hnsw)
+        return { ...r, method: r.method ?? o.hnswMethod ?? "hnsw" };
+      }
     : null;
   return async (X, K) => {
     const n = X.length;

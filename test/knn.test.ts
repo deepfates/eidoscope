@@ -11,7 +11,7 @@ import { knnIndex, nodeGpu } from "../src/map.ts";
 import { hnswWasmKnn } from "../vendor/hnswlib-wasm/hnsw.ts";
 import { SEED } from "../src/axes.ts";
 import { rowDefects, strictRecall } from "../src/knn/recall.ts";
-import { calibrateEf } from "../src/knn/ef.ts";
+import { calibrateEf, __setClaimOverrideForTests } from "../src/knn/ef.ts";
 
 // GPU availability decided ONCE, up front: a receipt that cannot run must be a SKIPPED test, never a
 // silent pass (adversarial-review finding — the production gate false-greened on non-GPU CI in 0.04ms)
@@ -96,18 +96,29 @@ test.skipIf(!hasGpuProd)("PRODUCTION SCALE: hnsw recall ≥ 0.99 at n=30k, d=384
 // THE FAILURE PATH IS EXERCISED, not just written (adversarial-review round-3): calibration that
 // cannot demonstrate the claim must return ok:false, and BOTH callers must then answer with exact
 // brute force — asserted equal to knnExact row-for-row.
-test("calibration failure is never certified: both callers fall back to exact brute force", async () => {
+test("calibration failure is never certified: both callers fall back to exact brute force, labeled exact", async () => {
   const X = clustered(1000, 32);
   const e = await knnExact(X, K);
   // a search that returns garbage can never clear the claim → ok:false at the ef ceiling
   expect(calibrateEf(X, K, () => [], SEED).ok).toBe(false);
-  // an impossible claim (test-only injection) forces ok:false inside each real caller
-  const nat = knnIndex(X, K, 1.01);
-  expect(nat.idx).toEqual(e.idx);
-  expect(nat.dst).toEqual(e.dst);
-  const wasm = await hnswWasmKnn(X, K, SEED, 1.01);
-  expect(wasm.idx).toEqual(e.idx);
-  expect(wasm.dst).toEqual(e.dst);
+  // an impossible claim (module-private test hook, NOT a public parameter) forces ok:false inside
+  // each REAL caller — and the answer must carry honest provenance: exact answered, not hnsw
+  __setClaimOverrideForTests(1.01);
+  try {
+    const nat = knnIndex(X, K);
+    expect(nat.method).toBe("exact-cpu");
+    expect(nat.idx).toEqual(e.idx);
+    expect(nat.dst).toEqual(e.dst);
+    const wasm = await hnswWasmKnn(X, K, SEED);
+    expect(wasm.method).toBe("exact-cpu");
+    expect(wasm.idx).toEqual(e.idx);
+    expect(wasm.dst).toEqual(e.dst);
+    // and the SEAM's provenance is honest too: makeKnn must surface the impl's own method
+    const viaSeam = await makeKnn({ gpu: null, hnsw: knnIndex, hnswMethod: "hnswlib-node" })(clustered(HNSW_MIN + 100, 16), 8);
+    expect(viaSeam.method).toBe("exact-cpu");
+  } finally {
+    __setClaimOverrideForTests(null);
+  }
 }, 60000);
 
 test("regime chooser: exact under HNSW_MIN on every host; above it the branch is ENVIRONMENT (adapter), never data scale", async () => {

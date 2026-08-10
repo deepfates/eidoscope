@@ -39,18 +39,27 @@ try {
   const r: any = await p.evaluate("window.runKnnProbe()", { timeout: 0 } as any);
   console.log("  probe:", JSON.stringify(r));
 
-  const wantMethod = r.gpuSupported ? "exact-gpu" : "exact-cpu";
+  // without an adapter the environment chooser hands n>HNSW_MIN to the supplied wasm hnsw (see
+  // src/knn/regime.ts makeKnn + viewer/src/knn.ts — exact-cpu only answers when hnsw is absent too)
+  const wantMethod = r.gpuSupported ? "exact-gpu" : "hnswlib-wasm";
   if (r.gpuSupported) {
     ok(r.seamMethod === "exact-gpu", `above HNSW_MIN the page seam answered with exact-gpu (got ${r.seamMethod})`);
     ok(r.deterministic === true, "two GPU kernel runs are byte-identical (indices AND distances) — deterministic layouts");
   } else {
-    skip("exact-gpu seam + GPU determinism receipts — this Chromium exposes no WebGPU (seam degraded to exact-cpu)");
-    ok(r.seamMethod === "exact-cpu", `without WebGPU the seam still answers exactly, with exact-cpu (got ${r.seamMethod})`);
+    skip("exact-gpu seam + GPU determinism receipts — this Chromium exposes no WebGPU adapter");
+    ok(r.seamMethod === "hnswlib-wasm", `without an adapter the seam answers with the calibrated wasm hnsw (got ${r.seamMethod})`);
   }
-  ok(r.seamBadRows === 0 && r.seamRowDefects === 0, `seam neighbors ≡ exact truth up to f32 ties (${r.seamBadRows} bad rows, ${r.seamRowDefects} row defects, recall ${r.seamRecall})`);
+  // exactness receipts hold only when an exact implementation answered (GPU branch); on the hnsw
+  // branch the honest gate is the calibrated ≥0.99 strict recall — same claim the unit tests hold
+  if (r.gpuSupported) {
+    ok(r.seamBadRows === 0 && r.seamRowDefects === 0, `seam neighbors ≡ exact truth up to f32 ties (${r.seamBadRows} bad rows, ${r.seamRowDefects} row defects, recall ${r.seamRecall})`);
+    ok(r.engineNbrBadRows === 0 && r.engineNbrRowDefects === 0, `end-to-end in-page engine: emitted nbr ≡ exact truth over the card vectors (${r.engineNbrBadRows} bad rows, ${r.engineNbrRowDefects} row defects, recall ${r.engineNbrRecall}, engine ${r.engineMs}ms)`);
+  } else {
+    ok(r.seamRowDefects === 0 && r.seamRecall >= 0.99, `seam (calibrated wasm hnsw) strict recall ${r.seamRecall} ≥ 0.99, ${r.seamRowDefects} row defects`);
+    ok(r.engineNbrRowDefects === 0 && r.engineNbrRecall >= 0.99, `end-to-end in-page engine strict recall ${r.engineNbrRecall} ≥ 0.99, ${r.engineNbrRowDefects} row defects (engine ${r.engineMs}ms)`);
+  }
   ok(r.wasmRowDefects === 0 && r.wasmRecall >= 0.99, `vendored hnswlib wasm strict recall ${r.wasmRecall} ≥ 0.99, ${r.wasmRowDefects} row defects (${r.wasmMs}ms @ 6000)`);
   ok(r.neighborsProvenance === wantMethod, `the emitted map's derivedBy.neighbors says which regime built it ("${r.neighborsProvenance}")`);
-  ok(r.engineNbrBadRows === 0 && r.engineNbrRowDefects === 0, `end-to-end in-page engine: emitted nbr ≡ exact truth over the card vectors (${r.engineNbrBadRows} bad rows, ${r.engineNbrRowDefects} row defects, recall ${r.engineNbrRecall}, engine ${r.engineMs}ms)`);
 } catch (e) {
   fails.push("harness error: " + e);
   console.error(e);

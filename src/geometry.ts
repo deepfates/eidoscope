@@ -94,10 +94,10 @@ const unit = (v: number[]) => { let n = 0; for (const x of v) n += x * x; n = Ma
 // kNN on unit vectors (cosine = dot). THE seam every layout goes through: umap-js's internal
 // nn-descent path is dead here — measured recall 0.36 @ 10k / 0.15 @ 50k against exact truth, i.e. it
 // was quietly poisoning browser-built maps — so projectAndCluster ALWAYS hands UMAP a precomputed
-// graph from a Knn implementation. Below the measured crossover that's exact (GPU when a WebGPU
-// adapter is present — src/knn/kernel.ts, recall 1.0 by construction — else CPU brute force under
-// HNSW_MIN); above it, hnswlib (node: hnswlib-node in src/map.ts; page: our vendored wasm build in
-// viewer/src/knn.ts — same algorithm, neighbors verified bit-identical at identical params).
+// graph from a Knn implementation. The choice is environment-only (src/knn/regime.ts): exact GPU
+// whenever a WebGPU adapter is present (src/knn/kernel.ts, recall 1.0 by construction), CPU brute
+// force under HNSW_MIN, and hnswlib without a GPU (node: hnswlib-node in src/map.ts; page: our
+// vendored wasm build in viewer/src/knn.ts — same algorithm, verified bit-identical at identical params).
 // `method` names which implementation answered — it flows into derivedBy.neighbors (provenance).
 export const HNSW_MIN = 3000; // max n where O(n²·d) CPU brute force stays affordable (no-GPU fallback bound)
 // Self-inclusive rows ([i, ...K neighbors]) + matching euclidean-on-the-unit-sphere distances

@@ -1,7 +1,7 @@
 // The NODE FACE of the geometry stages. The stage logic itself is host-free in src/geometry.ts (shared
 // verbatim with the in-page ingest); this file binds it to the node host: the on-disk embedding cache,
-// the local MiniLM (src/embed.ts), and the kNN regimes (exact WebGPU below the measured crossover via
-// the `webgpu` Dawn package, hnswlib-node above it — src/knn/regime.ts). Existing callers keep
+// the local MiniLM (src/embed.ts), and the kNN regimes (exact WebGPU whenever an adapter exists via
+// the `webgpu` Dawn package, hnswlib-node without one — src/knn/regime.ts). Existing callers keep
 // importing everything from here — the re-exports below ARE the node API.
 import type { Card } from "./card.ts";
 import { SEED, type Axis } from "./axes.ts";
@@ -45,9 +45,7 @@ export async function embedDocs(docs: Doc[], opts: { embed?: Embedder } = {}): P
 // as one of nNeighbors, distance 0). Callers that want plain neighbor lists slice the self column off.
 // Deterministic: hnswlib's level RNG is seeded, points are inserted sequentially in corpus order, and
 // search is exact given the built graph — same vectors in, same graph and neighbors out, every run.
-// `recallClaim` is a TEST-ONLY override (an impossible claim forces calibration failure so the exact
-// fallback below is exercisable) — production callers never pass it.
-export const knnIndex = (X: number[][], K: number, recallClaim?: number): { idx: number[][]; dst: number[][] } => {
+export const knnIndex = (X: number[][], K: number): { idx: number[][]; dst: number[][]; method?: string } => {
   const index = new HierarchicalNSW("cosine", X[0].length);
   index.initIndex(X.length, 16, 200, SEED);
   for (let i = 0; i < X.length; i++) index.addPoint(X[i], i);
@@ -56,13 +54,13 @@ export const knnIndex = (X: number[][], K: number, recallClaim?: number): { idx:
   const cal = calibrateEf(X, Math.min(K, X.length - 1), (i, k, e) => {
     index.setEf(Math.max(e, k + 1));
     return index.searchKnn(X[i], Math.min(X.length, k + 1)).neighbors.filter((j) => j !== i).slice(0, k);
-  }, SEED, recallClaim);
+  }, SEED);
   if (!cal.ok) {
     // the index cannot reach the recall claim even with the whole graph as candidates — never certify
     // failure: exact brute force IS affordable here (ef hit n, so n is small)
     console.error(`hnsw ef calibration failed (holdout recall ${cal.holdoutRecall.toFixed(4)} at ef=${cal.ef}) — answering with exact brute force`);
     const e = knnExact(X, K) as { idx: number[][]; dst: number[][] };
-    return { idx: e.idx, dst: e.dst };
+    return { idx: e.idx, dst: e.dst, method: "exact-cpu" }; // honest provenance: exact answered, not hnsw
   }
   console.error(`hnsw ef calibrated: ef=${cal.ef}, holdout recall ${cal.holdoutRecall.toFixed(4)} (n=${X.length})`);
   index.setEf(Math.max(cal.ef, K + 1));
@@ -109,8 +107,8 @@ export function nodeGpu(): Promise<GPU | null> {
   })());
 }
 
-// The node face of the kNN seam: exact-GPU below the measured crossover, hnswlib-node above / without
-// a GPU, CPU brute force for small corpora when neither applies (src/knn/regime.ts holds the curves).
+// The node face of the kNN seam: exact-GPU whenever an adapter exists, hnswlib-node without one,
+// CPU brute force for small corpora (src/knn/regime.ts holds the environment-only chooser).
 export const nodeKnn: Knn = async (X, K) =>
   makeKnn({ gpu: await nodeGpu(), hnsw: knnIndex, hnswMethod: "hnswlib-node" })(X, K);
 
