@@ -9,6 +9,7 @@
 // @ts-ignore -- generated emscripten module (no types; the surface is 5 C functions)
 import createHnswModule from "./hnswlib.mjs";
 import { calibrateEf } from "../../src/knn/ef.ts";
+import { knnExact } from "../../src/geometry.ts";
 
 let modP: Promise<any> | null = null;
 const mod = () => (modP ??= createHnswModule());
@@ -34,8 +35,15 @@ export async function hnswWasmKnn(X: number[][], K: number, seed: number): Promi
       for (let t = 0; t < got && out.length < k; t++) if (labels[t] !== i) out.push(labels[t]);
       return out;
     };
-    const { ef } = calibrateEf(X, Kc, searchAt);
-    m._hnsw_set_ef(Math.max(ef, Kc + 1));
+    const cal = calibrateEf(X, Kc, searchAt, seed);
+    if (!cal.ok) {
+      // never certify failure — exact brute force is affordable when ef reached n (src/knn/ef.ts)
+      console.error(`hnsw-wasm ef calibration failed (holdout recall ${cal.holdoutRecall.toFixed(4)} at ef=${cal.ef}) — answering with exact brute force`);
+      const e = knnExact(X, Kc) as { idx: number[][]; dst: number[][] };
+      return { idx: e.idx, dst: e.dst };
+    }
+    console.error(`hnsw-wasm ef calibrated: ef=${cal.ef}, holdout recall ${cal.holdoutRecall.toFixed(4)} (n=${n})`);
+    m._hnsw_set_ef(Math.max(cal.ef, Kc + 1));
     const idx: number[][] = [], dst: number[][] = [];
     for (let i = 0; i < n; i++) {
       m.HEAPF32.set(X[i], vPtr >> 2);

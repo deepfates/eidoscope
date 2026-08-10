@@ -21,9 +21,14 @@
 // STATIC EXACTNESS MARGIN: at the boundary we accept exact answers costing up to 1.5× the approximate
 // ones before switching — recall 1.0 is worth a constant factor, and the margin also dwarfs the ~20%
 // run-to-run GPU variance we measured (nothing here is runtime state, so nothing can flap; this is a
-// bias, not hysteresis). On this hardware class the boundary solves to ≈ 2.11M docs (native B) /
-// 2.66M (wasm B) — i.e. WITH a GPU, exact neighbors win the whole practical range; hnsw is the no-GPU
-// regime and the guard beyond ~two million docs.
+// bias, not hysteresis).
+// WHAT IS MEASURED vs WHAT IS SOLVED (be honest about the difference): the GPU curve has three
+// measured points (10k/100k/230k); the hnsw-with-calibration curve has ONE (10k, uniform vectors —
+// bin/knn-calibrate.ts — while calibrated ef is data-dependent, so clustered corpora can sit off this
+// curve). The fixed point of those fits lands around 2.1M docs (native B) / 2.7M (wasm B), far
+// OUTSIDE the measured range — treat that as "the crossover, if it exists, is beyond anything we
+// measured", not as a measured boundary. The claim the numbers do support: WITH a GPU, exact
+// neighbors won at every n we benched (10k–230k); hnsw is the no-GPU regime and the far-out guard.
 import { knnExact, type Knn, type KnnResult, HNSW_MIN } from "../geometry.ts";
 import { gpuAdapterFor, exactGpuKnn } from "./kernel.ts";
 

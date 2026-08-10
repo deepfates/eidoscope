@@ -10,6 +10,13 @@ import { makeKnn, exactGpuCrossover, HNSW_SECONDS_PER_NLOGN_NATIVE, HNSW_SECONDS
 import { knnIndex, nodeGpu } from "../src/map.ts";
 import { hnswWasmKnn } from "../vendor/hnswlib-wasm/hnsw.ts";
 import { SEED } from "../src/axes.ts";
+import { rowDefects, strictRecall } from "../src/knn/recall.ts";
+
+// GPU availability decided ONCE, up front: a receipt that cannot run must be a SKIPPED test, never a
+// silent pass (adversarial-review finding — the production gate false-greened on non-GPU CI in 0.04ms)
+const _gpu = await nodeGpu();
+const hasGpuSmall = !!(await gpuAdapterFor(_gpu, 4000, 64));
+const hasGpuProd = !!(await gpuAdapterFor(_gpu, 30000, 384));
 
 const mulberry = (a: number) => () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 const clustered = (n: number, d: number, seed = 7) => {
@@ -21,31 +28,17 @@ const clustered = (n: number, d: number, seed = 7) => {
     return v.map((x) => x / s);
   });
 };
-// STRICT recall: the denominator is n×K (a truncated row loses recall, never dodges it), and every
-// row must be exactly K+1 UNIQUE self-inclusive entries first — an implementation returning one good
-// neighbor per row must score ~1/K, not 1.0 (adversarial-review finding, 2026-08).
-const assertRows = (rows: number[][], n: number, K: number) => {
-  expect(rows.length).toBe(n);
-  rows.forEach((row, i) => {
-    expect(row.length).toBe(K + 1);
-    expect(row[0]).toBe(i);
-    expect(new Set(row).size).toBe(K + 1);
-    row.forEach((j) => { expect(j).toBeGreaterThanOrEqual(0); expect(j).toBeLessThan(n); });
-  });
-};
-const recall = (got: number[][], truth: number[][], K: number) => {
-  let hit = 0;
-  for (let i = 0; i < got.length; i++) { const t = new Set(truth[i].slice(1)); for (const j of got[i].slice(1)) if (t.has(j)) hit++; }
-  return hit / (got.length * K);
-};
+// STRICT recall lives in ONE shared module (src/knn/recall.ts) used by these tests AND the browser
+// probe — a parallel copy is how a forgiving denominator survived one review round.
+const assertRows = (rows: number[][], n: number, K: number) => expect(rowDefects(rows, n, K)).toBe(0);
+const recall = strictRecall;
 
 const K = 14; // eidoscope's UMAP graph K (nNeighbors 15, self-inclusive)
 const dot = (a: number[], b: number[]) => { let s = 0; for (let d = 0; d < a.length; d++) s += a[d] * b[d]; return s; };
 
-test("exact-gpu kNN IS the exact answer (recall 1.0 up to f32 ties) and its distances match CPU brute force", async () => {
+test.skipIf(!hasGpuSmall)("exact-gpu kNN IS the exact answer (recall 1.0 up to f32 ties) and its distances match CPU brute force (skips without a WebGPU adapter)", async () => {
   const gpu = await nodeGpu();
   const X = clustered(4000, 64);
-  if (!(await gpuAdapterFor(gpu, X.length, 64))) { console.warn("⚠ no WebGPU adapter on this host — exact-gpu receipt not exercised here"); return; }
   const g = await exactGpuKnn(gpu!, X, K);
   const e = await knnExact(X, K);
   // every GPU neighbor must be a true top-K member OR tied with the K-th at f32 precision (the kernel
@@ -83,10 +76,9 @@ test("hnswlib wasm ≡ hnswlib-node per-row neighbor SETS at identical params, a
 // THE PRODUCTION-SCALE GATE (adversarial-review P1): at 30k×384 — real corpus scale, real embedding
 // dimension — a fixed ef=64 measured recall 0.933; the per-index ef calibration (src/knn/ef.ts) must
 // bring BOTH hnsw builds back over the 0.99 claim against exact truth. Truth comes from the exact GPU
-// kernel (recall 1.0, itself gated above); without a GPU this receipt cannot run here and says so.
-test("PRODUCTION SCALE: hnsw recall ≥ 0.99 at n=30k, d=384, K=14 (calibrated ef) vs exact truth", async () => {
+// kernel (recall 1.0, itself gated above); without a GPU this receipt is a SKIPPED test, never a pass.
+test.skipIf(!hasGpuProd)("PRODUCTION SCALE: hnsw recall ≥ 0.99 at n=30k, d=384, K=14 (calibrated ef) vs exact truth (skips without a WebGPU adapter)", async () => {
   const gpu = await nodeGpu();
-  if (!(await gpuAdapterFor(gpu, 30000, 384))) { console.warn("⚠ no WebGPU adapter — production-scale recall receipt not exercised on this host"); return; }
   const X = clustered(30000, 384);
   const truth = await exactGpuKnn(gpu!, X, K);
   const nat = knnIndex(X, K);

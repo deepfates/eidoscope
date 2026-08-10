@@ -11,7 +11,7 @@ import { getTextEmbeddings, EmbeddingCache } from "./embed.ts";
 import { HierarchicalNSW } from "hnswlib-node";
 import {
   cardText, projectionScores, rawProjectionScores, buildMetaFields, poolEmbedWith, knnBrute, layoutKnn as layoutKnnCore,
-  xyzOverlap as xyzOverlapCore, normPct, projectAndCluster as projectAndClusterCore, HNSW_MIN, type Knn,
+  xyzOverlap as xyzOverlapCore, normPct, projectAndCluster as projectAndClusterCore, HNSW_MIN, type Knn, knnExact,
 } from "./geometry.ts";
 import { makeKnn, HNSW_SECONDS_PER_NLOGN_NATIVE } from "./knn/regime.ts";
 import { calibrateEf } from "./knn/ef.ts";
@@ -51,11 +51,19 @@ export const knnIndex = (X: number[][], K: number): { idx: number[][]; dst: numb
   for (let i = 0; i < X.length; i++) index.addPoint(X[i], i);
   // ef is CALIBRATED per index against sampled exact truth (src/knn/ef.ts) — a fixed ef=64 measured
   // recall 0.933 at 30k×384, silently under the ≥0.99 claim exactly where hnsw is the map's truth
-  const { ef } = calibrateEf(X, Math.min(K, X.length - 1), (i, k, e) => {
+  const cal = calibrateEf(X, Math.min(K, X.length - 1), (i, k, e) => {
     index.setEf(Math.max(e, k + 1));
     return index.searchKnn(X[i], Math.min(X.length, k + 1)).neighbors.filter((j) => j !== i).slice(0, k);
-  });
-  index.setEf(Math.max(ef, K + 1));
+  }, SEED);
+  if (!cal.ok) {
+    // the index cannot reach the recall claim even with the whole graph as candidates — never certify
+    // failure: exact brute force IS affordable here (ef hit n, so n is small)
+    console.error(`hnsw ef calibration failed (holdout recall ${cal.holdoutRecall.toFixed(4)} at ef=${cal.ef}) — answering with exact brute force`);
+    const e = knnExact(X, K) as { idx: number[][]; dst: number[][] };
+    return { idx: e.idx, dst: e.dst };
+  }
+  console.error(`hnsw ef calibrated: ef=${cal.ef}, holdout recall ${cal.holdoutRecall.toFixed(4)} (n=${X.length})`);
+  index.setEf(Math.max(cal.ef, K + 1));
   const idx: number[][] = [], dst: number[][] = [];
   for (let i = 0; i < X.length; i++) {
     const r = index.searchKnn(X[i], Math.min(X.length, K + 1));

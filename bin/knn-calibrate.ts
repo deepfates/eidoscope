@@ -16,8 +16,17 @@ const D = 384, K = 14; // eidoscope layout params (MiniLM dim, UMAP nNeighbors-1
 const nGpu = parseInt(process.argv[2] ?? "30000", 10), nHnsw = parseInt(process.argv[3] ?? "10000", 10);
 
 const mb = (a: number) => () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
-const rnd = mb(7);
-const make = (n: number) => Array.from({ length: n }, () => { const v = Array.from({ length: D }, () => rnd() - 0.5); const s = Math.sqrt(v.reduce((a, x) => a + x * x, 0)); return v.map((x) => x / s); });
+// CLUSTERED vectors, same generator as test/knn.test.ts — calibrated ef is data-dependent, so the
+// cost curve must be measured on structured data like real card embeddings, not uniform noise
+const make = (n: number, seed = 7) => {
+  const rnd = mb(seed);
+  const centers = Array.from({ length: 8 }, () => Array.from({ length: D }, () => (rnd() - 0.5) * 2));
+  return Array.from({ length: n }, (_, i) => {
+    const c = centers[i % 8], v = c.map((x) => x + (rnd() + rnd() + rnd() - 1.5) * 0.6);
+    const s = Math.sqrt(v.reduce((a, x) => a + x * x, 0)) || 1;
+    return v.map((x) => x / s);
+  });
+};
 const time = async <T>(f: () => Promise<T> | T) => { const t0 = performance.now(); await f(); return (performance.now() - t0) / 1000; };
 
 console.error(`generating ${Math.max(nGpu, nHnsw)} x ${D} vectors…`);
