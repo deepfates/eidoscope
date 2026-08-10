@@ -216,7 +216,8 @@ test("mapbin: binary codec round-trips the contract losslessly and is much small
   expect(back.siteNames).toEqual(D.siteNames);                      // and their labels
   expect(back.provenance).toEqual(D.provenance);                    // provenance (so a file introduces itself) survives
   expect(back.xyzAgree).toBe(2.7);                                  // the 2D↔3D neighbor-agreement honesty number (eid-ovo7)
-  expect(bin.byteLength).toBeLessThan(JSON.stringify(D).length);    // smaller than the JSON form
+  // (the smaller-than-JSON size guard lives in the 1200-doc v2.1 test below — at THIS 3-doc toy scale
+  // the v2.2 per-row offsets are pure constant overhead and the comparison measures nothing real)
   expect(back.rawScores).toBeUndefined();                          // absent when the map carries no raw projections
 });
 
@@ -233,6 +234,7 @@ test("mapbin v2.1: notes ride as lazy gzip blocks — exact across block boundar
     hub: Array.from({ length: n }, () => 1), nbr: Array.from({ length: n }, (_, i) => [(i + 1) % n]),
   };
   const back = decodeMap(encodeMap(D));
+  expect(encodeMap(D).byteLength).toBeLessThan(JSON.stringify(D).length);  // the binary form beats JSON at real scale
   expect(back.notes.length).toBe(n);
   // exact round-trip on EVERY row, including the first/last card of each block and the ragged tail
   for (let i = 0; i < n; i++) expect(back.notes[i]).toEqual(D.notes[i]);

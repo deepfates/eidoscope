@@ -135,10 +135,15 @@ try {
   mockDelayMs = 500;   // stretch naming calls: a real in-flight window (~seconds), same deterministic answers
   await p.evaluate(() => {
     // long-animation-frame + a rAF clock — the same two instruments as ingest.e2e.ts (see that rig's
-    // comment for why "longtask" was dropped); unsupported LoAF must fail loudly, so __ltOK is asserted.
+    // comment for why "longtask" was dropped); unsupported LoAF must fail loudly, so __ltOK is asserted
+    // — and requires supportedEntryTypes to include the entry type (observe() ignores, not throws).
     (window as any).__lt = []; (window as any).__gaps = []; (window as any).__ltOK = false;
     (function tick(prev: number) { requestAnimationFrame((now) => { if (prev && now - prev > 100) (window as any).__gaps.push(Math.round(now - prev)); tick(now); }); })(0);
-    try { new PerformanceObserver((l: any) => { for (const e of l.getEntries()) (window as any).__lt.push(Math.round(e.duration)); }).observe({ entryTypes: ["long-animation-frame"] }); (window as any).__ltOK = true; } catch {}
+    try {
+      if (!(PerformanceObserver.supportedEntryTypes || []).includes("long-animation-frame")) throw new Error("LoAF unsupported");
+      new PerformanceObserver((l: any) => { for (const e of l.getEntries()) (window as any).__lt.push(Math.round(e.duration)); }).observe({ entryTypes: ["long-animation-frame"] });
+      (window as any).__ltOK = true;
+    } catch {}
   });
   await p.click('[data-testid="sel-descend"]');
   await p.waitForTimeout(250);   // the run is now in flight (axes naming is delayed 500ms)

@@ -112,8 +112,13 @@ await p.addInitScript(`
   window.__loaf = []; window.__gaps = []; window.__labels = []; window.__est = []; window.__loafOK = false;
   (function tick(prev) { requestAnimationFrame((now) => { if (prev && now - prev > 100) window.__gaps.push(Math.round(now - prev)); tick(now); }); })(0);
   // if LoAF is unsupported the receipt must FAIL loudly (an unobserved run is indistinguishable from a
-  // clean one otherwise) — __loafOK is asserted below.
-  try { new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__loaf.push(Math.round(e.duration)); }).observe({ entryTypes: ["long-animation-frame"] }); window.__loafOK = true; } catch {}
+  // clean one otherwise). observe() not throwing is NOT proof — unsupported entry types are ignored,
+  // not thrown (round 3) — so the sentinel requires the entry type in supportedEntryTypes too.
+  try {
+    if (!(PerformanceObserver.supportedEntryTypes || []).includes("long-animation-frame")) throw new Error("LoAF unsupported");
+    new PerformanceObserver((l) => { for (const e of l.getEntries()) window.__loaf.push(Math.round(e.duration)); }).observe({ entryTypes: ["long-animation-frame"] });
+    window.__loafOK = true;
+  } catch {}
   setInterval(() => {
     const s = document.querySelector('[data-testid=ingest-status]')?.textContent?.trim();
     if (s && window.__labels[window.__labels.length - 1] !== s) window.__labels.push(s);
