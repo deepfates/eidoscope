@@ -270,6 +270,15 @@ export class ViewModel {
     if (this.#termIx?.cores !== cores) this.#termIx = { cores, ix: buildTermIndex(cores) };
     return this.#termIx.ix;
   }
+  // …and build it while nobody is waiting. Memoising made every lasso after the first cheap, but the
+  // FIRST one still paid the whole build inside its own frame — measured 487ms of the 556ms it took to
+  // hold a set on the 19,299-card map. A reader is looking at the map for seconds before they draw
+  // anything, so spend it there instead. Idle-time, so it yields to anything the reader actually does.
+  warmTermIndex() {
+    const cores = this.data?.cores; if (!cores || this.#termIx?.cores === cores) return;
+    const build = () => { try { if (this.data?.cores === cores) this.termIndex(cores); } catch {} };
+    (globalThis as any).requestIdleCallback ? (globalThis as any).requestIdleCallback(build, { timeout: 4000 }) : setTimeout(build, 1200);
+  }
   selectionTerms = $derived.by((): string[] => {
     const D = this.data, sel = this.selection;
     if (!D || !sel?.length) return [];
@@ -431,6 +440,7 @@ export class ViewModel {
   mount(D: MapContract) {
     this.data = D;
     this.resetViewState();
+    this.warmTermIndex();   // the explain index, built while the reader is still looking at the map
   }
   // Everything view-shaped back to this corpus's defaults — shared by mount() and by `view.open`, which
   // must apply a saved state EXACTLY (residue from the view you were just in would make the opened view
