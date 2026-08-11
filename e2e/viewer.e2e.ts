@@ -5,6 +5,11 @@
 // not a mock. Hermetic (no fixture, no 15k run, deterministic — no RNG).
 // Run: bun run e2e/viewer.e2e.ts   (exits non-zero on any failure). Requires `cd viewer && bun run build`.
 import { chromium } from "playwright";
+// NOTE on the optional intro dismissal below: the "explore →" button only exists while the intro is
+// showing, and the intro now introduces itself ONCE per browser profile (eid-z4m7). A .click() with
+// Playwright's default 30s timeout therefore waited out the full timeout on every mount after the
+// first — 16 of them, silently swallowed by .catch(), which is most of why this suite took 547s.
+// Optional actions get an optional timeout.
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { encodeMap } from "../src/mapbin.ts";
@@ -228,7 +233,7 @@ try {
   // state. Set each through the real UI, read the URL it minted, then load that URL FRESH and assert the
   // view comes back — the same round-trip discipline as ?sel= / ?d=.
   await p.goto(`${base}/index.html`); await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
-  await btn(/explore/i).click().catch(() => {}); await p.waitForTimeout(200);
+  await btn(/explore/i).click({ timeout: 1200 }).catch(() => {}); await p.waitForTimeout(200);
   await menu("layout"); await p.click('[data-opt="bar:overlay:cite"]'); await p.waitForTimeout(120);
   await menu("layout"); await p.click('[data-opt="bar:overlay:ghosts"]'); await p.waitForTimeout(120); await closeMenus();
   await btn(/^labels$/).click(); await p.waitForTimeout(120);                      // labels OFF
@@ -256,7 +261,7 @@ try {
 
   // 11d. FOCUS TRAP: opening the deck moves focus inside it and Tab stays trapped (eid-vxm2)
   await p.goto(`${base}/index.html`); await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
-  await btn(/explore/i).click().catch(() => {}); await p.waitForTimeout(150);
+  await btn(/explore/i).click({ timeout: 1200 }).catch(() => {}); await p.waitForTimeout(150);
   await btn(/^deck$/).click(); await p.waitForTimeout(300);
   const inDeck = () => p.evaluate(() => { const d = document.querySelector('[role="dialog"][aria-label="deck reader"]'); return !!d && d.contains(document.activeElement); });
   ok(await inDeck(), "opening the deck moves focus inside the modal");
@@ -265,7 +270,7 @@ try {
 
   // 11e. FACET ISOLATE: colour by a facet, click a facet legend row → isolates just that value (eid-zvh9)
   await p.goto(`${base}/index.html`); await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
-  await btn(/explore/i).click().catch(() => {}); await p.waitForTimeout(150);
+  await btn(/explore/i).click({ timeout: 1200 }).catch(() => {}); await p.waitForTimeout(150);
   await setControl("color", "author"); await p.waitForTimeout(250);  // dimension KEY (the registry replaced the old meta: prefix)
   const facetRow = p.locator('button[aria-label^="isolate author"]').first();   // the colour popover stays open after the pick
   await facetRow.click(); await p.waitForTimeout(250);
@@ -278,7 +283,7 @@ try {
 
   // 11f. MISSING METADATA: the bare card (no author/date/url/source) still renders cleanly — no empty '·', no broken links (eid-m107)
   await p.goto(`${base}/index.html`); await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
-  await btn(/explore/i).click().catch(() => {}); await p.waitForTimeout(150);
+  await btn(/explore/i).click({ timeout: 1200 }).catch(() => {}); await p.waitForTimeout(150);
   await btn(/^deck$/).click(); await p.waitForTimeout(250);
   await p.locator('input[placeholder="find in list…"]').fill("Doc 2.29");   // unique to the bare last card
   await p.waitForTimeout(250);
@@ -298,7 +303,7 @@ try {
   const slo = 1_700_000_000_000, shi = 1_700_000_000_000 + 9 * 86_400_000;
   await p.goto(`${base}/index.html?sk=date&slo=${slo}&shi=${shi}&find=${encodeURIComponent("Doc 0.1")}`);
   await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
-  await btn(/explore/i).click().catch(() => {}); await p.waitForTimeout(400);
+  await btn(/explore/i).click({ timeout: 1200 }).catch(() => {}); await p.waitForTimeout(400);
   s = await st();
   ok(s.filters.includes("date 2023-11 – 2023-11"), `the window chip states the chosen range, not "<dim> window" — filters=${JSON.stringify(s.filters)}`);
   ok(JSON.stringify(s.filterCounts) === JSON.stringify([11, 10]), `each chip carries ITS OWN match count ("Doc 0.1" alone = 11, the date window alone = 10) — got ${JSON.stringify(s.filterCounts)}`);
@@ -317,7 +322,7 @@ try {
   // absent, not disabled. alt.eido carries ONE cluster level, no read-state, no cite/ghosts, no vectors
   // and no dates, so every control fed by those is gone (the default synth map proves the presence side:
   // grain at #2, cite/frontier at #8, unread-only at #10, + axis just below at #13).
-  await btn(/explore/i).click().catch(() => {}); await p.waitForTimeout(150);
+  await btn(/explore/i).click({ timeout: 1200 }).catch(() => {}); await p.waitForTimeout(150);
   ok((await p.locator("[data-testid=grain]").count()) === 0, "grain slider absent when the hierarchy has a single level");
   ok((await p.locator('[data-menu="bar:axis"]').count()) === 0, "+ axis (query) absent when the file carries no card vectors");
   await menu("layout");
@@ -349,7 +354,7 @@ try {
   // ═══ 14. SELECT (eid-r8t6) — circle dots → a held, materialized set → verbs ═══════════════════════
   await p.goto(`${base}/index.html`);
   await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
-  await btn(/explore/i).click().catch(() => {});
+  await btn(/explore/i).click({ timeout: 1200 }).catch(() => {});
   await p.waitForTimeout(200);
 
   // 14a. it is an explicit MODE: the toolbar button, the `s` key and Escape all drive the same state
@@ -511,7 +516,7 @@ try {
   // whole-viewport lasso == the cards that are on-screen AND in front, with the mirrored ones excluded.
   await p.goto(`${base}/index.html?layout=orbit`);
   await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
-  await btn(/explore/i).click().catch(() => {});
+  await btn(/explore/i).click({ timeout: 1200 }).catch(() => {});
   await p.waitForTimeout(300);
   const [ox, oy] = await proj([0, 0]);
   await p.mouse.move(ox, oy);
@@ -558,7 +563,7 @@ try {
   const mst = () => mp.evaluate(() => (window as any).__eido());
   await mp.goto(`${base}/index.html`);
   await mp.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
-  await mp.locator("button", { hasText: /explore/i }).first().click().catch(() => {});
+  await mp.locator("button", { hasText: /explore/i }).first().click({ timeout: 1200 }).catch(() => {});
   await mp.waitForTimeout(300);
   await mp.click('[data-menu="sheet:open"]'); await mp.waitForTimeout(300);
   await mp.click('[data-testid="sheet:select"]'); await mp.waitForTimeout(200);
@@ -612,7 +617,7 @@ try {
   // ═══ 15. SECOND BINDINGS (eid-hsy3, M-A) — every critical command gets an expert route ═══════════
   await p.goto(`${base}/index.html`);
   await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
-  await btn(/explore/i).click().catch(() => {});
+  await btn(/explore/i).click({ timeout: 1200 }).catch(() => {});
   await p.waitForTimeout(250);
 
   // 15a. `l` toggles region labels (M-A3)
@@ -652,7 +657,7 @@ try {
   // 15e. shift+arrows orbit in 3D (M-A5)
   await p.goto(`${base}/index.html?layout=orbit`);
   await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
-  await btn(/explore/i).click().catch(() => {});
+  await btn(/explore/i).click({ timeout: 1200 }).catch(() => {});
   await p.waitForTimeout(250);
   s = await st(); const rot0 = s.rot, rotX0 = s.rotX;
   await p.keyboard.press("Shift+ArrowRight"); await p.waitForTimeout(150);
@@ -665,7 +670,7 @@ try {
   // double-clicking a member point, reachable without a pointer gesture.
   await p.goto(`${base}/index.html`);
   await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
-  await btn(/explore/i).click().catch(() => {});
+  await btn(/explore/i).click({ timeout: 1200 }).catch(() => {});
   await p.waitForTimeout(250);
   const gDrill = (await st()).grain;
   await menu("color");
@@ -695,7 +700,7 @@ try {
   // NO reference to URL capacity anywhere — it rides in the file as full ids.
   await p.goto(`${base}/index.html`);
   await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
-  await btn(/explore/i).click().catch(() => {});
+  await btn(/explore/i).click({ timeout: 1200 }).catch(() => {});
   await p.waitForTimeout(300);
   await p.keyboard.press("s"); await p.waitForTimeout(150);
   await p.evaluate((path) => (window as any).__eidoLasso(path), circle(bx, by, rad));
@@ -739,7 +744,7 @@ try {
   // reopen the downloaded file via the existing DROP path, on a fresh page (nothing carried over)
   await p.goto(`${base}/index.html`);
   await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
-  await btn(/explore/i).click().catch(() => {});
+  await btn(/explore/i).click({ timeout: 1200 }).catch(() => {});
   await p.evaluate((b64) => {
     const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
     const file = new File([bytes], "saved.eido", { type: "application/octet-stream" });
@@ -747,7 +752,7 @@ try {
     document.querySelector('[role="application"]')!.dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
   }, savedBytes.toString("base64"));
   await p.waitForFunction(() => (window as any).__eido?.()?.views === 1, null, { timeout: 15000 });
-  await btn(/explore/i).click().catch(() => {});   // a freshly opened file introduces itself
+  await btn(/explore/i).click({ timeout: 1200 }).catch(() => {});   // a freshly opened file introduces itself
   await p.waitForTimeout(300);
   s = await st();
   ok(s.derived === 0 && s.selection === 0 && s.color === "region", `views: the dropped file opens on a CLEAN slate (views wait to be opened) — derived=${s.derived} sel=${s.selection} color=${s.color}`);
@@ -807,7 +812,7 @@ try {
   console.log("16. priority collapse — the toolbar folds, it never clips");
   await p.goto(`${base}/index.html`);
   await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
-  await btn(/explore/i).click().catch(() => {});
+  await btn(/explore/i).click({ timeout: 1200 }).catch(() => {});
   for (const w of [1960, 1280, 1100, 900]) {
     await p.setViewportSize({ width: w, height: 1050 });
     await p.waitForTimeout(250);
