@@ -186,7 +186,9 @@
   // ?region= deep link re-frame the view the sharer had chosen). The camera moves only when the user
   // asks: the `fit` button in the pane, or `reset view`. Releasing an isolate likewise leaves the camera.
   function applyCamera(op: CameraOp) { if (op?.kind === "reset") return; /* deliberately ignore `fit` — see above */ }
-  const togglePin = (c: number) => { const op = m.togglePin(c); if (m.pinned === null) handle?.setHighlight(null); applyCamera(op); };
+  // choosing a region from the legend BRUSHES it: the others dim, its pane opens, nothing is excluded and
+  // nothing moves. Excluding is a verb in that pane.
+  const togglePin = (c: number) => { const op = m.togglePin(c); handle?.setHighlight(m.pinned); applyCamera(op); };
   const toggleFacetPin = (v: string) => applyCamera(m.toggleFacetPin(v));
   const fitTo = (idx: number[]) => handle?.fitToIndices(idx);   // the explicit, user-asked-for camera move
 
@@ -584,11 +586,10 @@
     const ch = m.channels;
     handle = createMap(canvas, D, {
       getColor: m.colorGet(dims0, ch.color, D.levels?.[m.grain] ?? D.cluster), getRadius: m.sizeGet(dims0, ch.size), getX: m.posGet(dims0, ch.x), getY: m.posGet(dims0, ch.y), getZ: m.posGet(dims0, ch.z), posSig: m.posSig, layout: m.layout, showLabels: labelsOn, grain: m.grain, theme: themeName,
-      // A MISS DOES NOT PUNISH YOU (eid-kzv2). Clicking a dot opens it; clicking the empty ground
-      // between dots used to close the reading pane and lose your place — a few pixels of aim cost you
-      // what you were reading, with no way back but an undiscoverable Back. Nothing you are holding
-      // moves unless you move it: the pane closes on Escape or its own ✕, never on a near-miss.
-      onClick: (i) => { if (m.selectMode || i < 0) return; focusCard(i); },
+      // Clicking the ground puts the card down. This is the convention every canvas, map and node editor
+      // shares, and the near-miss that made me break it is handled where it belongs — in deck's picking
+      // tolerance, not by taking the meaning away from an empty click.
+      onClick: (i) => { if (m.selectMode) return; focusCard(i < 0 ? null : i); },
       // drilling changes the GRAIN and nothing else: close the card the first click of the double-click
       // optimistically opened, so the reading pane does not sit over the map you just drilled into
       onDrill: () => focusCard(null),
@@ -773,6 +774,9 @@
         if (e.key === "+" || e.key === "=") { handle?.zoomBy(0.25); return; }
         if (e.key === "-" || e.key === "_") { handle?.zoomBy(-0.25); return; }
       }
+      // ⌘Z / ctrl-Z puts back the last thing a keypress or a stray click took away — a held selection, an
+      // isolation, a filter. No new chrome: the convention IS the affordance.
+      if ((e.metaKey || e.ctrlKey) && (e.key === "z" || e.key === "Z") && !typing) { if (m.undo()) e.preventDefault(); return; }
       if (e.key !== "Escape") return;
       if (document.querySelector('[data-menu][data-state="open"]')) return;
       // Escape leaves the lasso before it touches the overlay stack — the mode you're IN is what you meant.
@@ -1021,7 +1025,7 @@
         <ul class="menu thin-sb menu-sm min-h-0 w-full flex-1 flex-nowrap overflow-y-auto p-1 pt-0">
           {#if m.channels.color === "region"}
             {#each curClusters as c}
-              {@render legendRow(rgb(colOf(c.c)), c.label, c.n, pinned === c.c, "isolate region " + c.label, () => togglePin(c.c), () => { if (pinned === null) handle?.setHighlight(c.c); }, () => { if (pinned === null) handle?.setHighlight(null); })}
+              {@render legendRow(rgb(colOf(c.c)), c.label, c.n, pinned === c.c, "show region " + c.label, () => togglePin(c.c), () => { if (pinned === null) handle?.setHighlight(c.c); }, () => { if (pinned === null) handle?.setHighlight(null); })}
             {/each}
           {:else if colorDim?.kind === "categorical"}
             {#each colorDim.ord!.slice(0, 16) as v}
@@ -1304,11 +1308,15 @@
             <span class="max-w-[11rem] truncate">{chip.label}</span><span class="opacity-60">· {chip.n}</span><span class="opacity-60">✕</span>
           </button>
         {/each}
-        {#if chips.length > 1}<button onclick={() => m.clearFilters()} aria-label="clear all filters" class="btn btn-ghost btn-xs normal-case">clear all filters</button>{/if}
+        <!-- the way out appears whenever the filters have emptied the map, not only when there are several
+             of them: at zero cards the chips ARE the explanation, and this is how you undo them. -->
+        {#if chips.length > 1 || (chips.length && visibleCount === 0)}<button onclick={() => m.clearFilters()} aria-label="clear all filters" class="btn btn-ghost btn-xs normal-case">clear all filters</button>{/if}
         <!-- a restored view that named a dimension this map lacks reports here, in the row that already
              carries scope — the toolbar has no room and long text collided with its controls. -->
         {#if viewNote}<button data-view-note onclick={() => (viewNote = "")} aria-label="dismiss" class="badge badge-sm badge-warning max-w-full gap-1 whitespace-normal text-left font-mono text-[10px]">{viewNote} ✕</button>{/if}
-        <span data-scope class="ml-auto font-mono text-[10px] opacity-60">{visibleCount} / {data.ids.length} cards</span>
+        <!-- an emptied map says so HERE, where scope already lives, and says it by going warning-coloured
+             rather than by growing a panel of prose in the middle of the map. -->
+        <span data-scope data-empty={visibleCount === 0} class="ml-auto font-mono text-[10px] {visibleCount === 0 ? 'text-warning opacity-100' : 'opacity-60'}">{visibleCount} / {data.ids.length} cards</span>
       </div>
     </header>
   {/if}
@@ -1319,18 +1327,6 @@
       <!-- svelte-ignore a11y_no_interactive_element_to_noninteractive_role -->
       <!-- role="img"+aria-label is the intended pattern: present the canvas as one labeled image and route AT users to the deck list (the real accessible surface) -->
       <canvas bind:this={canvas} class="absolute inset-0 h-full w-full" role="img" aria-label="Document similarity map (visual). Use the deck list for a screen-reader-accessible view of the same cards."></canvas>
-      <!-- FILTERED DOWN TO NOTHING (eid-kzv2): an empty map reads as a broken one. Say that the
-           filters did it, name them, and offer the way back — the counter alone ("0 / 19,299") tells
-           you the fact but not what to do about it. -->
-      {#if data && visibleCount === 0 && chips.length}
-        <div data-testid="empty-scope" class="pointer-events-none absolute inset-0 grid place-items-center p-6">
-          <div class="pointer-events-auto rounded-box max-w-sm border border-base-300 bg-base-100/95 p-4 text-center shadow-lg">
-            <div class="text-sm">No cards are left after {chips.length === 1 ? "this filter" : `these ${chips.length} filters`}.</div>
-            <div class="mt-1 font-mono text-[10px] leading-snug opacity-60">{chips.map((c) => c.label).join(" · ")}</div>
-            <button class="btn btn-sm btn-primary mt-3 normal-case" data-testid="empty-scope-clear" onclick={() => m.clearFilters()}>clear {chips.length === 1 ? "it" : "them"}</button>
-          </div>
-        </div>
-      {/if}
 
       <!-- the live lasso: a plain SVG overlay, inked from the theme's own base-content. Kept OUT of the
            deck layer stack on purpose — it is gesture feedback, not data, and it must not force a GPU
@@ -1497,6 +1493,12 @@
           <div class="mb-2 font-mono text-[10px] opacity-60">region · {pinnedRegion.n} cards · grain {m.grain + 1}/{nLevels}</div>
           {#if pinnedBlurb}<div class="mb-2 text-xs leading-relaxed opacity-80">{pinnedBlurb}</div>{/if}
           <div class="mb-2 flex flex-wrap gap-1">
+            <!-- the hard act, by name and by hand — the same verb a lassoed set offers -->
+            {#if m.regionFiltered(pinnedRegion.c)}
+              <button data-testid="region-unfilter" class="btn btn-xs btn-active normal-case" onclick={() => m.removeFilter(m.filters.find((f) => f.kind === "region")!)}>stop filtering</button>
+            {:else}
+              <button data-testid="region-filter" class="btn btn-xs btn-primary normal-case" onclick={() => m.filterToRegion(pinnedRegion.c)}>filter to these</button>
+            {/if}
             <button data-testid="region-fit" class="btn btn-xs normal-case" onclick={() => fitTo(m.membersOf(pinnedRegion.c))}>fit</button>
             <!-- second binding for region.drill (M-A1): the pane already knows the region — same act as double-clicking one of its points -->
             {#if m.grain < nLevels - 1}

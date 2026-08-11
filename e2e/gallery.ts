@@ -51,7 +51,7 @@ const shots: Shot[] = [
   { name: "08-grain-coarse", caption: "Grain — coarsest (continents)", vp: DESKTOP, setup: async (p) => { await setGrain(p, 0); } },
   { name: "09-grain-fine", caption: "Grain — finest (towns); labels thin at the fit view, reveal on zoom", vp: DESKTOP, setup: async (p) => { await setGrain(p, await grainMax(p)); } },
   // ── drill into a region ──
-  { name: "10-isolate", caption: "Legend region isolated — convex hull + others dimmed", vp: DESKTOP, setup: async (p) => { await btn(p, /^isolate region/).click(); } },
+  { name: "10-isolate", caption: "Legend region chosen — the rest dims but stays; excluding is a verb in its pane", vp: DESKTOP, setup: async (p) => { await btn(p, /^show region/).click(); } },
   // ── tap a card → read it ──
   { name: "11-focus-detail", caption: "A card focused — neighbor spokes on the map + detail panel (dual links, ranked placements)", vp: DESKTOP, setup: async (p) => { await btn(p, /^deck$/).click(); await settle(p, 300); await p.locator(".grid button").first().click(); } },
   { name: "12-deck", caption: "Deck reader — the corpus as a sortable/filterable list (the a11y surface)", vp: DESKTOP, setup: async (p) => { await btn(p, /^deck$/).click(); } },
@@ -85,7 +85,7 @@ if (hasPf) shots.push(
   { name: "33-pf-core-zoom", caption: "Pathfinder — zoomed deep into the dense center: do the piled points separate?", map: "pathfinder.eido", vp: DESKTOP, setup: async (p) => { await p.mouse.move(700, 460); for (let i = 0; i < 22; i++) { await p.mouse.wheel(0, -150); await p.waitForTimeout(25); } await settle(p, 600); } },
   { name: "34-readwise-core-zoom", caption: "Readwise — zoomed deep into the densest cluster", map: "map.eido", vp: DESKTOP, setup: async (p) => { await p.mouse.move(720, 450); for (let i = 0; i < 22; i++) { await p.mouse.wheel(0, -150); await p.waitForTimeout(25); } await settle(p, 600); } },
   { name: "35-tldr-core-zoom", caption: "tldr — zoomed deep into the densest cluster", map: "tldr.eido", vp: DESKTOP, setup: async (p) => { await p.mouse.move(720, 450); for (let i = 0; i < 22; i++) { await p.mouse.wheel(0, -150); await p.waitForTimeout(25); } await settle(p, 600); } },
-  { name: "36-pf-region-zoom", caption: "Pathfinder — isolate one region, THEN zoom in: does isolate make the core legible?", map: "pathfinder.eido", vp: DESKTOP, setup: async (p) => { await btn(p, /^isolate region/).click(); await settle(p, 400); await p.mouse.move(700, 460); for (let i = 0; i < 16; i++) { await p.mouse.wheel(0, -150); await p.waitForTimeout(25); } await settle(p, 600); } },
+  { name: "36-pf-region-zoom", caption: "Pathfinder — choose one region, THEN zoom in: does brushing make the core legible?", map: "pathfinder.eido", vp: DESKTOP, setup: async (p) => { await btn(p, /^show region/).click(); await settle(p, 400); await p.mouse.move(700, 460); for (let i = 0; i < 16; i++) { await p.mouse.wheel(0, -150); await p.waitForTimeout(25); } await settle(p, 600); } },
   // transition mid-flight (settleMs=150 → screenshot 150ms AFTER the switch, mid a ~700ms transition):
   // if points are partway (a loose in-between cloud), it animates; if already the final layout, it hard-cuts/blips.
 );

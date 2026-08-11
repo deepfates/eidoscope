@@ -96,6 +96,9 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   // so every drill ended with a reading pane over the map and the whole cloud dimmed behind it. No window
   // now: pointerdown opens a new gesture, and the dblclick marks the current one as already spent.
   let gesture = 0, spentGesture = -1;
+  // The one perceptual constant here: how far from a dot a click still counts as aimed at it. Points draw
+  // between ~1 and ~5 pixels across, and aim error on a target that small runs well past deck's 8px default.
+  const FORGIVE_PX = 20;
   // The map's ink is read from the ACTIVE THEME's own tokens, not from a hardcoded dark/light binary:
   // ground = base-100, ink = base-content, and "dark" is simply L(base-100) < 0.5. Any theme — stock,
   // custom, one we've never seen — lands legible ink on its own canvas. Alpha levels are unchanged.
@@ -296,9 +299,38 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   // 3D (positions move with the camera) — just show them all, biggest-first; deck's depth sorts them.
   // region centroid in the ACTIVE 3D space — pos() so labels sit correctly in orbit (xyz) AND axes3d (axis coords)
   const centroid3 = (idx: number[]): number[] => { let x = 0, y = 0, z = 0; for (const i of idx) { const p = pos(i); x += p[0]; y += p[1]; z += p[2] || 0; } const k = idx.length || 1; return [x / k, y / k, z / k]; };
+  // WHICH 3D LABELS TO DRAW. This layer used to draw them ALL — fine at six regions, unreadable at
+  // eighteen, where a dozen names pile through each other in the middle of the cloud. The standard answer
+  // is two parts. Degree of interest: rank by how many cards a region actually has on screen, biggest
+  // first, and thin in SCREEN space against deck's live viewport (billboarded text occupies pixels, not
+  // world units). Hysteresis: a shown label survives until it overlaps badly, and a hidden one must clear
+  // by a wider margin before it comes back — so a slow orbit does not strobe names on and off at the
+  // threshold. Labels behind the camera are dropped outright: perspective mirrors them onto the screen.
+  const KEEP_PX = 10, ADD_PX = 14;        // drop when boxes overlap by more than KEEP; re-add only with ADD to spare
+  let shown3d = new Set<number>();
+  const declutter3d = (cand: any[]) => {
+    // deck ASSERTS (rather than returning nothing) if you ask for a viewport before its view manager is
+    // up — which happens on the very first paint and after finalize. Thrown from inside a layer build,
+    // that assertion escapes into Svelte's render and takes the whole right-hand pane down with it.
+    let vp: any = null;
+    try { vp = (deck as any)?.getViewports?.()?.[0] ?? null; } catch { vp = null; }
+    if (!vp) return cand;   // no viewport yet: draw them all this frame; the next paint thins them
+    const charPx = 8, lineH = 26;
+    const placed: any[] = [];
+    for (const d of cand) {
+      const q = vp.project(d.p);
+      if (!q || !Number.isFinite(q[0]) || (q[2] !== undefined && q[2] > 1)) continue;   // behind the camera
+      const hw = (d.label.length * charPx) / 2;
+      const margin = shown3d.has(d.c) ? KEEP_PX : ADD_PX;                                // hysteresis
+      const clear = placed.every((o) => Math.abs(o.q[0] - q[0]) > hw + o.hw + margin || Math.abs(o.q[1] - q[1]) > lineH);
+      if (clear) placed.push({ ...d, q, hw });
+    }
+    shown3d = new Set(placed.map((d) => d.c));
+    return placed;
+  };
   const label3dLayer = () => new TextLayer({
     id: "labels",
-    data: members.map((idx, c) => ({ c, label: dispLabel(labelOf(c)), full: labelOf(c), n: nShown(idx), p: centroid3(idx) })).filter((d) => d.n > 0 && d.label).sort((a, b) => b.n - a.n),
+    data: declutter3d(members.map((idx, c) => ({ c, label: dispLabel(labelOf(c)), full: labelOf(c), n: nShown(idx), p: centroid3(idx) })).filter((d) => d.n > 0 && d.label).sort((a, b) => b.n - a.n)),
     getPosition: (d: any) => d.p, getText: (d: any) => (d.c === hoverLabel ? d.full : d.label),
     getColor: (d: any) => [...col(d.c), highlight != null && d.c !== highlight ? 70 : 245] as any, getSize: 14, sizeUnits: "pixels", sizeMaxPixels: 22, billboard: true,
     fontFamily: "ui-monospace, monospace", fontWeight: 700, getTextAnchor: "middle", getAlignmentBaseline: "center", characterSet: "auto",
@@ -342,6 +374,12 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   // (measured, e2e/perf.ts). Reusing the other layer INSTANCES lets deck diff them as unchanged (no re-upload).
   let cur: any[] = layers();
   const paint = () => { cur = layers(); deck.setProps({ layers: cur }); };                                   // full rebuild (color/focus/layout change) — keeps `cur` fresh
+  // THE CAMERA MOVED, SO THE SCREEN-SPACE DECISIONS MUST BE REMADE. Which labels fit is decided in
+  // pixels, so every camera change can change the answer — and the camera moves by several routes: deck's
+  // own gestures, the keyboard, and setCamera restoring a saved view. Hooking only deck's events left the
+  // keyboard orbit drawing a stale set (measured: labels never re-thinned across a 120° turn, and 2 pairs
+  // ran into each other mid-turn). Every route ends here instead.
+  const cameraMoved = () => { if (showLabels) paintLabels(); };
   const paintLabels = () => { cur = cur.map((l: any) => (l && l.id === "labels" ? (is3d(layout) ? label3dLayer() : labelLayer()) : l)); deck.setProps({ layers: cur }); };
   const deck = new Deck({
     canvas, views: [view()], viewState,
@@ -355,8 +393,11 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     eventRecognizerOptions: { click: { interval: 0 } },   // deck names mjolnir's tap recogniser `click`
     onViewStateChange: ({ viewState: vs }: any) => {
       const zoomed = Math.abs((vs?.zoom ?? 0) - (viewState?.zoom ?? 0)) > 0.08;
+      // in 3D the thinning is decided in screen space, so ANY camera move can change the answer — orbit
+      // included, which zoom alone does not notice.
+      const turned = is3d(layout) && (Math.abs((vs?.rotationOrbit ?? 0) - (viewState?.rotationOrbit ?? 0)) > 1.5 || Math.abs((vs?.rotationX ?? 0) - (viewState?.rotationX ?? 0)) > 1.5);
       viewState = vs; deck.setProps({ viewState });
-      if (zoomed && showLabels) paintLabels();  // reveal/hide labels as zoom changes — label layer only, not the cloud
+      if (zoomed || turned) cameraMoved();  // reveal/hide labels as the view changes — label layer only, not the cloud
     },
     layers: cur,
     onClick: (info: any) => {
@@ -365,7 +406,17 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
       // the cloud must not eat the card click under it — re-pick with the label layer excluded.
       if (info?.layer?.id === "labels") info = (deck as any).pickObject({ x: info.x, y: info.y, radius: 8, layerIds: ["points", "ghosts"] }) ?? info;
       if (info?.layer?.id === "ghosts" && info.object?.url) { window.open(info.object.url, "_blank"); return; }  // ghosts open immediately
-      const idx = info?.layer?.id === "points" && info.index >= 0 ? info.index : -1;
+      let idx = info?.layer?.id === "points" && info.index >= 0 ? info.index : -1;
+      // A NEAR-MISS IS A TARGETING PROBLEM, NOT A CHANGE OF MEANING (Fitts). A dot is a small target, and
+      // missing one by a few pixels used to cost you the card you were reading — which was "fixed" by making
+      // a click on empty ground mean nothing at all, breaking the one convention every canvas tool shares.
+      // Instead, forgive the miss: look again in a wider circle (deck's picking returns the nearest hit) and
+      // only call it empty when nothing is near. In a dense area this changes nothing — something is already
+      // within the base radius. It only rescues the sparse areas, which is where the misses actually happen.
+      if (idx < 0 && info) {
+        const near = (deck as any).pickObject({ x: info.x, y: info.y, radius: FORGIVE_PX, layerIds: ["points"] });
+        if (near && near.index >= 0) idx = near.index;
+      }
       // OPTIMISTIC card-open (eid-54lx): fire immediately — no debounce taxing every click. If a dblclick
       // follows, its handler closes the card (onDrill) and drills instead.
       init.onClick?.(idx);
@@ -417,9 +468,10 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     const info = (deck as any).pickObject({ x: (e as MouseEvent).offsetX, y: (e as MouseEvent).offsetY, radius: 8, layerIds: ["points"] });  // labels/ghosts never drill
     // Drilling has its OWN channel, and this is why: it used to undo the optimistic card-open by calling
     // onClick(-1), i.e. by overloading "which card was clicked" with a sentinel meaning "close the card".
-    // When a click that hits empty space stopped closing the reading pane (a near-miss must not punish you),
-    // that sentinel quietly stopped meaning anything, and every drill left a card open over the map with
-    // the whole cloud dimmed behind it. One channel, two meanings, and the second one died in silence.
+    // For a while a click on empty space stopped closing the reading pane, and that sentinel quietly
+    // stopped meaning anything: every drill left a card open over the map with the cloud dimmed behind it.
+    // One channel, two meanings, and the second one died in silence. (Empty-click-deselects is back, and
+    // the near-miss it was working around is handled in picking tolerance instead.)
     if (info && info.layer?.id === "points" && info.index >= 0) { init.onDrill?.(); drill(info.index); }
   });
   return {
@@ -492,6 +544,14 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     // the only way a test can ask "do two region names overlap?", since a TextLayer draws to canvas and
     // leaves nothing in the DOM to measure.
     labelBoxes: () => {
+      if (is3d(layout)) {
+        let vp: any = null;
+        try { vp = (deck as any).getViewports?.()?.[0] ?? null; } catch { vp = null; }
+        if (!vp) return [];
+        const cand = members.map((idx, c) => ({ c, label: dispLabel(labelOf(c)), full: labelOf(c), n: nShown(idx), p: centroid3(idx) })).filter((d) => d.n > 0 && d.label).sort((a, b) => b.n - a.n);
+        const keep = shown3d;
+        return cand.filter((d) => keep.has(d.c)).map((d) => { const q = vp.project(d.p); return { c: d.c, text: d.label, sx: q[0], sy: q[1] }; });
+      }
       const scale = Math.pow(2, viewState?.zoom ?? 0), tx = viewState?.target?.[0] ?? 0, ty = viewState?.target?.[1] ?? 0;
       const H = canvas.clientHeight || canvas.height || 800;
       return (decluttered() as any[]).map((d) => ({ c: d.c, text: d.label as string, sx: d.sx as number, sy: H / 2 - (d.p[1] - ty) * scale }));
@@ -519,18 +579,20 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
       const t = viewState?.target ?? [0, 0, 0];
       viewState = { ...viewState, target: [t[0] + dxPx / scale, t[1] + dyPx / scale, t[2] ?? 0] };
       deck.setProps({ viewState });
+      cameraMoved();
     },
     zoomBy: (d) => {
       const h = home(layout);
       const z = Math.max(h.minZoom, Math.min(h.maxZoom, (viewState?.zoom ?? h.zoom) + d));
       viewState = { ...viewState, zoom: z };
       deck.setProps({ viewState });
-      if (showLabels && !is3d(layout)) paintLabels();   // reveal-on-zoom parity with the wheel path
+      cameraMoved();   // reveal-on-zoom parity with the wheel path (and re-thin in 3D)
     },
     orbitBy: (dAz, dEl) => {
       if (!is3d(layout)) return;
       viewState = { ...viewState, rotationOrbit: (viewState?.rotationOrbit ?? 0) + dAz, rotationX: Math.max(-89, Math.min(89, (viewState?.rotationX ?? 0) + dEl)) };
       deck.setProps({ viewState });
+      cameraMoved();
     },
     drillIndex: (i) => { if (i >= 0 && i < n) drill(i); },
     getCamera: () => ({ target: (viewState?.target ?? [0, 0, 0]).slice(), zoom: viewState?.zoom ?? 0, rot: viewState?.rotationOrbit ?? null, rotX: viewState?.rotationX ?? null }),
@@ -543,6 +605,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
         ...(is3d(layout) && c.rotX != null ? { rotationX: c.rotX } : {}),
       };
       deck.setProps({ viewState });
+      cameraMoved();
     },
     setFilterMask: (mask) => { filterMask = mask; filterVer++; paint(); },
     destroy: () => deck.finalize(),

@@ -49,7 +49,7 @@ try {
   out.push(`desktop hover over the cloud: ${hovered !== "none" ? "✓ fires (" + hovered + ")" : "✗ no hover fired in 6 probes"}`);
 
   // 4) COMBINATION: isolate a region, THEN change grain — does the stale pin clear cleanly?
-  await p.evaluate(() => { const b = [...document.querySelectorAll('[role="button"][aria-label^="isolate region"]')][0] as HTMLElement; b?.click(); });
+  await p.evaluate(() => { const b = [...document.querySelectorAll('[role="button"][aria-label^="show region"]')][0] as HTMLElement; b?.click(); });
   await p.waitForTimeout(300);
   const pinned = (await st()).pin;
   await p.evaluate(() => { const s = document.querySelector('input[type=range]') as HTMLInputElement; const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!; set.call(s, String(Number(s.max))); s.dispatchEvent(new Event("input", { bubbles: true })); });

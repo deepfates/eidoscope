@@ -212,36 +212,60 @@ export class ViewModel {
   facetMembers = (v: string) => this.facetMembersOf(this.colorDim?.key ?? "", v);
   facetMembersOf = (key: string, v: string) => { const out: number[] = []; const d = this.allDims.find((x) => x.key === key); if (!d?.cat || !this.data) return out; for (let i = 0; i < this.data.ids.length; i++) if (d.cat(i) === v) out.push(i); return out; };
 
-  // ---- filters ----
-  // Region isolate = a hard filter on the cluster at the current grain.
-  togglePin(c: number): CameraOp {
-    const i = this.filters.findIndex((f) => f.kind === "region" && f.cluster === c);
-    if (i >= 0) { this.filters = this.filters.filter((_, j) => j !== i); this.pinned = null; return { kind: "reset" }; }
-    this.filters = [...this.filters.filter((f) => f.kind !== "region"), { kind: "region", key: "region", label: this.curClusters.find((x) => x.c === c)?.label ?? "region " + c, cluster: c }];
-    this.pinned = c;
-    return { kind: "fit", indices: this.membersOf(c) };
+  // ── UNDO for the state you made BY HAND ────────────────────────────────────────────────────────────
+  // Reversibility beats confirmation: rather than argue about which key is allowed to destroy a lasso of
+  // 2,250 cards or an isolation you chose, make the destruction reversible. Every operation that DISCARDS
+  // hand-made state snapshots it first. This covers the Escape ladder for free, because Escape pops those
+  // states through these same methods.
+  #past: { filters: Filter[]; selection: number[] | null; pinned: number | null; query: string }[] = [];
+  #remember() {
+    this.#past.push({ filters: [...this.filters], selection: this.selection ? [...this.selection] : null, pinned: this.pinned, query: this.query });
+    if (this.#past.length > 32) this.#past.shift();   // a working memory, not a document history
   }
+  undo(): boolean {
+    const p = this.#past.pop(); if (!p) return false;
+    this.filters = p.filters; this.selection = p.selection; this.pinned = p.pinned; this.query = p.query;
+    return true;
+  }
+
+  // ---- regions: BRUSHING, then filtering ----
+  // Picking a region from the legend used to be a hard filter that also flew the camera — one click doing
+  // three things (choose, exclude everything else, move you). Interactive-graphics practice separates the
+  // two: SELECTION highlights, FILTERING excludes, and they are different acts. So a legend click now only
+  // says "this one" — the rest of the map dims, the region's pane opens with its verbs — and excluding the
+  // rest is one of those verbs, exactly as it already is for a set you lasso.
+  togglePin(c: number): CameraOp {
+    this.pinned = this.pinned === c ? null : c;
+    return null;                       // choosing a region is not a reason to move the camera; `fit` is
+  }
+  // the hard version, on purpose and by name — the same Filter object the chips row already understands
+  filterToRegion(c: number) {
+    this.#remember();
+    this.filters = [...this.filters.filter((f) => f.kind !== "region"), { kind: "region", key: "region", label: this.curClusters.find((x) => x.c === c)?.label ?? "region " + c, cluster: c }];
+  }
+  regionFiltered = (c: number): boolean => this.filters.some((f) => f.kind === "region" && f.cluster === c);
   // Facet isolate = a hard filter on a categorical dimension's value. A corpus command, not a channel one
   // (M-A4): it works on ANY categorical dimension, not only the one currently on colour.
   toggleFacet(key: string, v: string): CameraOp {
     if (!this.allDims.find((d) => d.key === key)?.cat) return null;
     const i = this.filters.findIndex((f) => f.kind === "cat" && f.key === key && f.value === v);
-    if (i >= 0) { this.filters = this.filters.filter((_, j) => j !== i); return { kind: "reset" }; }
+    if (i >= 0) { this.#remember(); this.filters = this.filters.filter((_, j) => j !== i); return { kind: "reset" }; }
     this.filters = [...this.filters.filter((f) => !(f.kind === "cat" && f.key === key)), { kind: "cat", key, label: v, value: v }];
     return { kind: "fit", indices: this.facetMembersOf(key, v) };
   }
   toggleFacetPin(v: string): CameraOp { const key = this.colorDim?.key; return key ? this.toggleFacet(key, v) : null; }
   // which value (if any) is isolated on a given dimension — the generalized read behind facetPin.
   facetPinOf = (key: string): string | null => (this.filters.find((x) => x.kind === "cat" && x.key === key) as Extract<Filter, { kind: "cat" }> | undefined)?.value ?? null;
-  removeFilter(f: Filter) { this.filters = this.filters.filter((x) => x !== f); if (f.kind === "region") this.pinned = null; if (f.kind === "text") this.query = ""; }
+  removeFilter(f: Filter) { this.#remember(); this.filters = this.filters.filter((x) => x !== f); if (f.kind === "region") this.pinned = null; if (f.kind === "text") this.query = ""; }
   // "clear all filters" clears FILTERS. A held selection is not a filter (it has no chip, and it only
   // becomes one via filterToSelection) — destroying it here silently ate a lasso the user had just drawn.
-  clearFilters() { this.filters = []; this.pinned = null; this.query = ""; this.resetScrub(); }
+  clearFilters() { this.#remember(); this.filters = []; this.pinned = null; this.query = ""; this.resetScrub(); }
   // Changing the grain re-cuts the regions, so a region filter naming cluster #N no longer means what the
   // user chose — the filter must go WITH the pointer. Doing half of it (nulling `pinned` only, as the
   // slider used to) left an invisible mask on a re-numbered cluster and dropped ?region= from the URL.
   setGrain(g: number) {
     if (g === this.grain) return;
+    if (this.pinned !== null || this.filters.some((f) => f.kind === "region")) this.#remember();   // the region filter goes with the grain — put it back on undo
     this.grain = g;
     this.pinned = null;
     this.filters = this.filters.filter((f) => f.kind !== "region");
@@ -249,7 +273,7 @@ export class ViewModel {
 
   // ── the SELECTION verbs ────────────────────────────────────────────────────────────────────────────
   setSelection(idx: number[]) { this.selection = idx.length ? [...idx].sort((a, b) => a - b) : null; }
-  clearSelection() { this.selection = null; }
+  clearSelection() { if (this.selection) this.#remember(); this.selection = null; }
   toggleSelectMode(on?: boolean) { this.selectMode = on ?? !this.selectMode; }
   selectionSet = $derived(this.selection ? new Set(this.selection) : null);
   // FILTER TO THESE: the selection stops being an emphasis and becomes a hard mask, as one more Filter.
@@ -257,6 +281,7 @@ export class ViewModel {
   // know how to handle a Filter.
   filterToSelection() {
     const sel = this.selection; if (!sel?.length) return;
+    this.#remember();
     this.filters = [...this.filters.filter((f) => f.kind !== "set"), { kind: "set", key: "set", label: "selection", idx: [...sel] }];
     this.clearSelection();
   }

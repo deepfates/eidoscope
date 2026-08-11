@@ -109,10 +109,15 @@ try {
   // 4. THE REGRESSION: legend-click isolates + zooms but must NOT change grain; re-click releases
   await btn(/^reset view$/).click(); await p.waitForTimeout(200); s = await st(); const g0 = s.grain, z0 = s.zoom;
   await menu("color");   // the legend IS the colour picker's popover now
-  const legendItem = p.locator('button[aria-label^="isolate region"]').first();
+  const legendItem = p.locator('button[aria-label^="show region"]').first();
+  const before = (await st()).visible;
   await legendItem.click(); await p.waitForTimeout(200); s = await st();
   ok(s.grain === g0, `legend-click leaves grain unchanged — grain ${g0}→${s.grain}`);
-  ok(s.pin !== null, "legend-click pins/isolates the region");
+  ok(s.pin !== null, "legend-click chooses the region");
+  // SELECTION HIGHLIGHTS, FILTERING EXCLUDES — they are different acts, and the legend does the first.
+  // Picking a region used to exclude every other card on the spot; now the rest dims and stays, and you
+  // can still see where the region sits inside the whole. Excluding is a verb you press.
+  ok(s.visible === before && s.filters.length === 0, `legend-click excludes nothing — ${before} cards still shown, no filter chip`);
   // THE INTERACTION LAW: isolating is a filter and must NOT move the camera (this assertion used to
   // demand the opposite — it was enforcing the incidental camera flight). The explicit `fit` button
   // in the region pane is the only thing that frames it.
@@ -125,6 +130,11 @@ try {
   await p.locator("[data-testid=region-fit]").first().click();
   await p.waitForTimeout(700); s = await st();
   ok(s.zoom > z0 * 1.15, `the region pane's fit button DOES zoom in — ${z0.toFixed(2)}→${s.zoom.toFixed(2)}`);
+  // …and the pane's own verb is what excludes, by name and by hand
+  await p.locator("[data-testid=region-filter]").first().click(); await p.waitForTimeout(500); s = await st();
+  ok(s.visible < before && s.filters.length === 1, `the region pane's "filter to these" is what excludes — ${before}→${s.visible} cards, chip "${s.filters[0]}"`);
+  await p.keyboard.press("Meta+z"); await p.waitForTimeout(400); s = await st();
+  ok(s.visible === before && s.filters.length === 0, "undo takes the region filter back off");
   await menu("color"); await legendItem.click(); await p.waitForTimeout(200); await closeMenus();   // release, back to a clean slate
 
   // 5. drill via map double-click steps grain finer (and does NOT open a card)
@@ -192,7 +202,7 @@ try {
   // region dots, and the legend swatches must be the SAME colours the canvas uses — one source of truth.
   const nordPal = (await st()).pal;
   const swatch = async () => p.evaluate(() => {
-    const b = document.querySelector('[aria-label^="isolate region"]') as HTMLElement | null;
+    const b = document.querySelector('[aria-label^="show region"]') as HTMLElement | null;
     const sw = b?.querySelector("span") as HTMLElement | null;
     return sw ? getComputedStyle(sw).backgroundColor : "";
   });
@@ -694,7 +704,7 @@ try {
   await p.waitForTimeout(250);
   const gDrill = (await st()).grain;
   await menu("color");
-  await p.locator('button[aria-label^="isolate region"]').first().click(); await p.waitForTimeout(200);
+  await p.locator('button[aria-label^="show region"]').first().click(); await p.waitForTimeout(200);
   await closeMenus();
   await p.locator("[data-testid=region-drill]").first().click(); await p.waitForTimeout(500);
   s = await st();
@@ -877,10 +887,16 @@ try {
   await p.evaluate(() => { const i = document.querySelector('input[type="search"]') as HTMLInputElement; const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!; set.call(i, "zzqqxxnothingmatches"); i.dispatchEvent(new Event("input", { bubbles: true })); });
   await p.waitForTimeout(500);
   ok((await st()).visible === 0, "zero-hit find: nothing is visible");
-  ok(await p.locator('[data-testid="empty-scope"]').isVisible(), "zero-hit find: the map says why it is empty instead of going blank");
+  ok(await p.locator("[data-scope][data-empty=true]").isVisible(), "zero-hit find: the scope readout marks itself empty — no panel of prose over the map");
   ok((await st()).labels === 0, "zero-hit find: no region label is left floating over an empty map");
-  await p.click('[data-testid="empty-scope-clear"]'); await p.waitForTimeout(400);
-  ok((await st()).visible > 0 && !(await p.locator('[data-testid="empty-scope"]').isVisible()), "zero-hit find: its own way out restores the corpus");
+  ok(await p.locator('[aria-label="clear all filters"]').isVisible(), "zero-hit find: the way out is offered even with a single filter");
+  await p.click('[aria-label="clear all filters"]'); await p.waitForTimeout(400);
+  ok((await st()).visible > 0, "zero-hit find: clearing the filters restores the corpus");
+  // …and what a keypress took away, undo puts back (reversibility over confirmation)
+  await p.keyboard.press("Meta+z"); await p.waitForTimeout(400);
+  ok((await st()).visible === 0, "undo restores the filter that clearing threw away");
+  await p.evaluate(() => { const i = document.querySelector('input[type="search"]') as HTMLInputElement; const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!; set.call(i, ""); i.dispatchEvent(new Event("input", { bubbles: true })); });
+  await p.waitForTimeout(400);
 
   await p.goto(`${base}/index.html?color=nosuchdimension`); await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
   await p.waitForTimeout(600);
