@@ -539,7 +539,11 @@
     const ch = m.channels;
     handle = createMap(canvas, D, {
       getColor: m.colorGet(dims0, ch.color, D.levels?.[m.grain] ?? D.cluster), getRadius: m.sizeGet(dims0, ch.size), getX: m.posGet(dims0, ch.x), getY: m.posGet(dims0, ch.y), getZ: m.posGet(dims0, ch.z), posSig: m.posSig, layout: m.layout, showLabels: labelsOn, grain: m.grain, theme: themeName,
-      onClick: (i) => { if (m.selectMode) return; focusCard(i < 0 ? null : i); },
+      // A MISS DOES NOT PUNISH YOU (eid-kzv2). Clicking a dot opens it; clicking the empty ground
+      // between dots used to close the reading pane and lose your place — a few pixels of aim cost you
+      // what you were reading, with no way back but an undiscoverable Back. Nothing you are holding
+      // moves unless you move it: the pane closes on Escape or its own ✕, never on a near-miss.
+      onClick: (i) => { if (m.selectMode || i < 0) return; focusCard(i); },
       onHover: (h, x, y) => (hovered = h == null ? null : { ...h, x, y }),
       onGrainChange: (g) => m.setGrain(g),
     });
