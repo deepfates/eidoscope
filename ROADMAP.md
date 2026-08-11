@@ -64,6 +64,13 @@ contract and the v2.2 container, threaded ingest → `cols` → dimensions in th
 the HuggingFace connector carries every non-text column; its full-corpus acceptance run is still
 outstanding) and the deletion of the last size-refusal (the page states honest estimates and
 proceeds at any corpus size, never refuses).
+Where the loop stands, measured on the live 19,299-review map (in-page stamps, not polling): arrive
+6.9s (transfer-bound — a 40MB already-compressed file, see `eid-ncrq`), a card opens in ~100-190ms,
+holding a lassoed set 74ms, the set explaining itself 70ms, derive acknowledging in 16ms and
+finishing in 74ms. Every step of the stranger's loop except arrival is under 200ms. The gate runs in
+339s (was 628s). See `docs/VERIFY.md` for how those numbers are taken and why the earlier ones were
+wrong.
+
 Queued next, in triage order: run durability (`eid-ext6` — a long paid ingest must survive a crash;
 prove cache survival free before spending again), folder-side metadata extraction (`eid-ovsw`, so
 metadata isn't a HuggingFace-only privilege), the Pitchfork acceptance run (`eid-xmf0`/`eid-6bd2`),

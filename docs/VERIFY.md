@@ -31,6 +31,18 @@ is findings with numbers attached, and those findings are what the polish ticket
 
 Rules that keep it honest:
 
+- **Suspect the instrument before the code.** Playwright's `waitForFunction` polls on animation
+  frames, so while the map runs its 700ms position transition the poll cannot land: it reports when
+  the view SETTLED, not when the app RESPONDED. The same event measured 650ms polled and 70ms
+  stamped from inside the page. Every timing in the walk is now stamped by in-page listeners.
+- **The walk measures the FIRST of everything.** When a fix does not move a number, ask whether it
+  moved the cold case or the warm one — the tf-idf index fix looked inert for hours because the walk
+  only ever measured the one lasso that pays for building it.
+- **Optional actions get optional timeouts.** Sixteen `.click().catch(() => {})` calls on a button
+  that no longer appears each waited out Playwright's 30-second default and swallowed the failure —
+  87% of the gate's runtime, invisible.
+- **Unminified builds name the slow function.** `npx vite build --minify false`, served locally with
+  the real `.eido`, turns long-animation-frame attribution from `ar:545ms` into `lassoUp:576ms`.
 - **Walk the deployed artifact**, in the state a visitor actually lands in. Tickets have been closed
   from reading code and were wrong (`eid-9rdy`: folder ingest was unreachable on the live site while
   its tests passed, because the tests started from a state no visitor ever sees).
