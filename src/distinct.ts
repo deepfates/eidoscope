@@ -15,13 +15,25 @@ export const tokenize = (s: string): string[] => (s.toLowerCase().match(/[a-z][a
 // their rate across the whole corpus (log-ratio), requiring the term to appear in several member docs
 // so a single doc's jargon can't headline a region. Terms that are common corpus-wide are filtered out
 // up front by document frequency — that is the mechanism that suppresses globally-frequent tokens.
-export function distinctiveTerms(cores: string[], groups: number[][], opts: { top?: number; minDocs?: number; maxDf?: number } = {}): string[][] {
-  const top = opts.top ?? 8, minDocs = opts.minDocs ?? 2, maxDf = opts.maxDf ?? 0.6;
-  const N = cores.length;
+// The corpus half of the calculation: tokens per document, corpus counts, document frequency. It does
+// not depend on WHICH set you are asking about, so it is built once per corpus and reused. Rebuilding
+// it per call cost 600ms on every lasso of the 19,299-card pitchfork map — the whole corpus
+// re-tokenised to explain 2,250 cards (measured 2026-08-11, walking the loop).
+export type TermIndex = { docToks: Map<string, number>[]; corpusCnt: Map<string, number>; df: Map<string, number>; corpusTot: number; N: number };
+export function buildTermIndex(cores: string[]): TermIndex {
   const docToks: Map<string, number>[] = cores.map((c) => { const m = new Map<string, number>(); for (const t of tokenize(c)) m.set(t, (m.get(t) || 0) + 1); return m; });
-  // corpus totals + document frequency
   const corpusCnt = new Map<string, number>(); const df = new Map<string, number>(); let corpusTot = 0;
   for (const m of docToks) for (const [t, c] of m) { corpusCnt.set(t, (corpusCnt.get(t) || 0) + c); corpusTot += c; df.set(t, (df.get(t) || 0) + 1); }
+  return { docToks, corpusCnt, df, corpusTot, N: cores.length };
+}
+
+export function distinctiveTerms(cores: string[], groups: number[][], opts: { top?: number; minDocs?: number; maxDf?: number } = {}): string[][] {
+  return distinctiveTermsFrom(buildTermIndex(cores), groups, opts);
+}
+
+export function distinctiveTermsFrom(ix: TermIndex, groups: number[][], opts: { top?: number; minDocs?: number; maxDf?: number } = {}): string[][] {
+  const top = opts.top ?? 8, minDocs = opts.minDocs ?? 2, maxDf = opts.maxDf ?? 0.6;
+  const { docToks, corpusCnt, df, corpusTot, N } = ix;
   const dfCut = maxDf * N;
   return groups.map((idx) => {
     const cnt = new Map<string, number>(); const inDocs = new Map<string, number>(); let tot = 0;

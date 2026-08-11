@@ -8,7 +8,7 @@
 
 import type { MapContract, ViewState } from "../../src/schema";
 import type { Layout } from "./deckmap";
-import { distinctiveTerms, distinctiveAxes } from "../../src/distinct";
+import { buildTermIndex, distinctiveTermsFrom, distinctiveAxes, type TermIndex } from "../../src/distinct";
 import { buildDimensions, sizeAccessor, colorAccessor, scores01, defaultProps, type Dimension, type DimProps } from "./dimensions";
 import { encodeIdxSet, fnv1a, parseIdSet, type UrlIdSet } from "./idset";
 
@@ -262,10 +262,18 @@ export class ViewModel {
   }
   // THE EXPLAIN STEP — a circled clump has to say what it IS, in the corpus's own variables. Same two
   // functions the pipeline uses to name a region (src/distinct.ts), pointed at the held set instead.
+  // The corpus half of the tf-idf is the same for every selection, so it is built ONCE per loaded map
+  // and reused: rebuilding it per lasso cost 613ms on the 19,299-card map, against 39ms with the index
+  // in hand (measured 2026-08-11). Lazy — a reader who never draws a lasso never pays for it.
+  #termIx: { cores: string[]; ix: TermIndex } | null = null;
+  private termIndex(cores: string[]): TermIndex {
+    if (this.#termIx?.cores !== cores) this.#termIx = { cores, ix: buildTermIndex(cores) };
+    return this.#termIx.ix;
+  }
   selectionTerms = $derived.by((): string[] => {
     const D = this.data, sel = this.selection;
     if (!D || !sel?.length) return [];
-    return distinctiveTerms(D.cores, [sel], { top: 8, minDocs: 2 })[0] ?? [];
+    return distinctiveTermsFrom(this.termIndex(D.cores), [sel], { top: 8, minDocs: 2 })[0] ?? [];
   });
   selectionAxes = $derived.by((): { name: string; pole: string; mean: number }[] => {
     const D = this.data, sel = this.selection;
