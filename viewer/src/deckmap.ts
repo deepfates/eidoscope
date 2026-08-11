@@ -328,11 +328,17 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
       if (zoomed && showLabels) paintLabels();  // reveal/hide labels as zoom changes — label layer only, not the cloud
     },
     layers: cur,
-    // NO deck onClick. deck routes clicks through its gesture recogniser, which holds every click for
-    // its double-tap interval: MEASURED 316-329ms between pointerup and the card opening on the
-    // 19,299-card map (2026-08-11), on top of ~80ms of picking. eid-54lx deleted OUR debounce for
-    // exactly this reason and the library quietly put one back. The optimistic open that comment
-    // describes now happens where it belongs — on the browser's own click event, below.
+    onClick: (info: any) => {
+      if (Date.now() < suppressClickUntil) return;  // ignore the click deck fires right after a double-click
+      // labels are hover-pickable (full-name reveal) but must be click-TRANSPARENT: a label floating over
+      // the cloud must not eat the card click under it — re-pick with the label layer excluded.
+      if (info?.layer?.id === "labels") info = (deck as any).pickObject({ x: info.x, y: info.y, radius: 8, layerIds: ["points", "ghosts"] }) ?? info;
+      if (info?.layer?.id === "ghosts" && info.object?.url) { window.open(info.object.url, "_blank"); return; }  // ghosts open immediately
+      const idx = info?.layer?.id === "points" && info.index >= 0 ? info.index : -1;
+      // OPTIMISTIC card-open (eid-54lx): fire immediately — no debounce taxing every click. If a dblclick
+      // follows, its handler undoes the open (onClick(-1)) and drills instead.
+      init.onClick?.(idx);
+    },
     onHover: (info: any) => {
       // region label under the pointer? swell it to its full name in place (and shrink the last one back)
       const overLabel = info?.layer?.id === "labels" && info.object ? (info.object.c as number) : null;
@@ -373,21 +379,9 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     fit(members[levels[newGrain][nodeIdx]] || []);
     init.onGrainChange?.(newGrain);
   };
-  // THE CLICK, on the browser's own event — no gesture recogniser between the release and the card.
-  // One pick, at the moment of the click (deck's own pick during pointerdown is its business; this is
-  // the one whose answer we use). Labels stay click-transparent, ghosts still open their source.
-  canvas.addEventListener("click", (e) => {
-    if (selectMode) return;                          // in select mode the pointer draws; it does not open
-    if (Date.now() < suppressClickUntil) return;     // the trailing click after a dblclick
-    const x = (e as MouseEvent).offsetX, y = (e as MouseEvent).offsetY;
-    let info: any = (deck as any).pickObject({ x, y, radius: 4 });
-    if (info?.layer?.id === "labels") info = (deck as any).pickObject({ x, y, radius: 8, layerIds: ["points", "ghosts"] }) ?? info;
-    if (info?.layer?.id === "ghosts" && info.object?.url) { window.open(info.object.url, "_blank"); return; }
-    init.onClick?.(info?.layer?.id === "points" && info.index >= 0 ? info.index : -1);
-  });
   canvas.addEventListener("dblclick", (e) => {
     if (selectMode) return;   // in select mode the pointer draws; it does not drill
-    suppressClickUntil = Date.now() + 350;  // swallow the trailing click the browser fires right after a dblclick
+    suppressClickUntil = Date.now() + 350;  // swallow the trailing onClick deck fires right after a dblclick
     const info = (deck as any).pickObject({ x: (e as MouseEvent).offsetX, y: (e as MouseEvent).offsetY, radius: 8, layerIds: ["points"] });  // labels/ghosts never drill
     if (info && info.layer?.id === "points" && info.index >= 0) { init.onClick?.(-1); drill(info.index); }  // undo the optimistic card-open, then drill
   });
