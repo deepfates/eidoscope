@@ -13,7 +13,7 @@ import { buildMap, descendMap, type EngineProgress, type DescendParent } from ".
 import { poolEmbedWith } from "../../src/geometry";
 import { discoverAxes, type Axis, type AxesProgress } from "../../src/axes";
 import { Store } from "../../src/llm";
-import { DEFAULT_MODEL, DEFAULT_API_URL, DEFAULT_EMBED_MODEL, DEFAULT_MAX_DOC_CHARS } from "../../src/defaults";
+import { CARD_CONCURRENCY, DEFAULT_MODEL, DEFAULT_API_URL, DEFAULT_EMBED_MODEL, DEFAULT_MAX_DOC_CHARS } from "../../src/defaults";
 import type { MapContract } from "../../src/schema";
 import { embedItems, type EmbedProgress } from "./embedder";
 import { opfsStore, cacheFileName, persistSummary, requestDurableStorage } from "./opfs";
@@ -242,7 +242,7 @@ export class IngestRun {
         discovered: this.axes,   // discovery already ran above (deterministic) — not re-spent
         embedCardTexts: (texts) => poolEmbedWith(texts, embedChunks("embedding cards")),
         cardCache: this.cardCache!, regionCache: this.regionCache!,
-        concurrency: 8,
+        concurrency: CARD_CONCURRENCY,
         name: this.name,
         source: this.source ?? `folder (in-page ingest) · ${this.fileCount} files`,
         cardModel: DEFAULT_MODEL, embedderId: DEFAULT_EMBED_MODEL,

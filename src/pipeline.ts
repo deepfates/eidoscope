@@ -12,6 +12,7 @@ import { buildReport } from "./report.ts";
 import { fetchFrontier, buildGhosts } from "./frontier.ts";
 import { llmUsageLine } from "./signatures.ts";
 import { CFG, cachePath, cacheRoot, cacheStore, fileStore } from "./config.ts";
+import { CARD_CONCURRENCY } from "./defaults.ts";
 import { type MapContract } from "./schema.ts";
 import { loadFixture, type Doc } from "./corpus.ts";
 import { buildMap, regionCentroids, descendMap as engineDescend, type EngineProgress } from "./engine.ts";
@@ -27,7 +28,7 @@ export async function run(docs: Doc[], embeddings: number[][], opts: { frontier?
   const slug = slugify(opts.name);
   const outDir = opts.out || join("out", slug);
   mkdirSync(outDir, { recursive: true });
-  const conc = Number(process.env.EIDOSCOPE_CONCURRENCY || 48); // measured sweet spot (~8.7 cards/s; throughput collapses past ~64)
+  const conc = Number(process.env.EIDOSCOPE_CONCURRENCY || CARD_CONCURRENCY); // see defaults.ts for the measurement
   const useCache = opts.cacheDir !== null;
   const say = (s: string) => console.error(s);
   // stderr narration from the engine's honest progress stream — the CLI's face of the same events a UI shows
