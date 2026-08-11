@@ -543,7 +543,11 @@
     const D = S.map();
     m.mount(D);                                       // per-corpus state reset + x/y/z parked on this file's axes
     status = "";
-    if (opts?.intro) showIntro = true;                    // a freshly-opened file introduces itself
+    // A freshly-opened file introduces itself — ONCE, to someone who has never seen the introduction.
+    // It used to be forced on every mount, so descending into a selection re-explained the instrument
+    // to a reader who had just used it (eid-z4m7), and the explanation arrived as a modal over the map
+    // they had come to look at. Whoever has dismissed it once is not a stranger any more.
+    if (opts?.intro) { try { showIntro = !localStorage.getItem("eido-seen"); } catch { showIntro = true; } }
     const dims0 = buildDimensions(D);   // build the registry ONCE for this mount's accessors
     const ch = m.channels;
     handle = createMap(canvas, D, {
