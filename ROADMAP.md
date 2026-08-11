@@ -71,12 +71,21 @@ finishing in 74ms. Every step of the stranger's loop except arrival is under 200
 339s (was 628s). See `docs/VERIFY.md` for how those numbers are taken and why the earlier ones were
 wrong.
 
-Queued next, in triage order: run durability (`eid-ext6` — a long paid ingest must survive a crash;
-prove cache survival free before spending again), folder-side metadata extraction (`eid-ovsw`, so
-metadata isn't a HuggingFace-only privilege), the Pitchfork acceptance run (`eid-xmf0`/`eid-6bd2`),
-the matklad QA gate rework (`eid-6egl`), then the micro-UX live items (`eid-kzv2`). The interface
-era's brief lives on `eid-rcm8` (ingest as workspace; provider/compute as user choices) and
-`eid-ef7e` (tools not buttons; the analogy field).
+Also closed since: run durability, gated by an e2e that kills the browser and re-ingests
+(`eid-ext6`); folder-side metadata extraction, so metadata is no longer a HuggingFace-only privilege
+(`eid-ovsw`); the Pitchfork acceptance run — 19,299 reviews mapped for $80.96, live, with genre,
+score, artist and author riding as placeable dimensions (`eid-xmf0`); scale swaps, closed by
+measurement under the ≤100k ruling (`eid-cl83`).
+
+WHAT REMAINS FOR v1 IS TASTE AND FOUR DESIGN RULINGS, all waiting on deepfates, none to be built
+unilaterally: separable parts, so a map can mount from its geometry while the cards stream in
+(`eid-ncrq` — this is also the answer to the 6.9s arrival); what a million documents should do when
+someone drops them on it (`eid-jgjb`); ingest as a workspace rather than a wizard, with the model
+and the compute as the reader's own choices (`eid-rcm8`); and the shell as an instrument of tools
+rather than a row of labelled buttons (`eid-ef7e`, which also holds the analogy field and the
+question of whether an introduction should be a modal at all). The e2e consolidation (`eid-6egl`)
+awaits a ruling too — the measurement that justified it evaporated, so the proposal on the ticket is
+to keep the suites and add the walk as a ninth.
 
 Recovered from the full conversation history and now tracked (things asked for that had fallen out
 of the record): the micro-UX inventory (`eid-kzv2` — multiple filter slicers, a real status bar,
