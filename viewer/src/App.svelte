@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, untrack } from "svelte";
+  import { onMount, untrack, tick } from "svelte";
   import RangeSlider from "svelte-range-slider-pips";
   import { DropdownMenu, Popover } from "bits-ui";
   import { loadMap, mapUrl, decodeEido, type Store } from "./loader";
@@ -59,7 +59,8 @@
   const FOLD_MAX = 4;
   const FOLDED = "pointer-events-none invisible absolute";
   const foldCls = (scope: string, tier: number) => (scope === "bar" && tier > 0 && fold >= tier ? FOLDED : "");
-  function measureFold(row: HTMLElement) {
+  let foldRun = 0;
+  async function measureFold(row: HTMLElement) {
     const GAP = 4, SLACK = 40;   // the strip's gap-1, + the row's paddings/dividers not itemized below
     const els = [...row.querySelectorAll<HTMLElement>("[data-fold]")];
     if (!els.length) return;
@@ -73,7 +74,20 @@
       for (const el of els) { const t = +(el.dataset.fold || 0); if (t === 0 || t > f) need += el.getBoundingClientRect().width + GAP; }
       if (need <= avail) break;
     }
-    if (f !== fold) fold = f;
+    fold = f;
+    // …AND THEN THE PIXELS DECIDE. The sum above is a LOWER BOUND: it adds up item boxes but cannot know
+    // what the flex layout actually spends on paddings, dividers and the groups' own gaps. Measured on the
+    // live map it under-counted by 53px at 1900 and 94px at 1280, so the strip "fit" on paper while its
+    // middle group really overflowed — "+ axis" drew on top of "open". The estimate now only picks the
+    // starting guess; we fold one more tier at a time until nothing overflows for real. Bounded by
+    // FOLD_MAX, one render per step, and a token so overlapping resize runs can't fight each other.
+    const mine = ++foldRun;
+    while (fold < FOLD_MAX) {
+      await tick();
+      if (mine !== foldRun) return;                 // a newer measurement started; that one owns `fold`
+      if (![...row.children].some((c) => c.scrollWidth > c.clientWidth + 1)) break;
+      fold++;
+    }
   }
   function foldWatch(node: HTMLElement) {
     const run = () => measureFold(node);
@@ -412,6 +426,21 @@
       if (p.find !== undefined) m.onFind(p.find);
       if (p.card !== undefined && data) { const i = data.ids.indexOf(p.card); if (i >= 0) focusCard(i); }
       if (selIdx?.length) m.setSelection(selIdx);   // resolved above, applied once the graph settles
+      // A VIEW THAT NAMES A DIMENSION THIS MAP DOES NOT HAVE used to do nothing at all: the channel kept a
+      // key nothing matched, the map quietly drew its default, and the reader was never told why the link
+      // they were sent does not look like the one the sender saw (eid-kzv2 item 11). Same rule as the
+      // selection and derived paths above — drop it rather than fake it — but say that you dropped it.
+      // Pending keys are NOT missing: queries embed asynchronously and mint q0, q1… in patch order.
+      if (p.channels) {
+        const pending = new Set([...(p.queries ?? []).map((_, i) => "q" + i), ...(p.derived ?? []).map((d) => d.key).filter((k): k is string => !!k)]);
+        const known = new Set([...m.allDims.map((d) => d.key), ...pending, "region", "uniform", "hub", ""]);
+        const gone = (["color", "size", "x", "y", "z", "scrub", "sort"] as const).filter((c) => { const k = p.channels![c]; return !!k && !known.has(k); });
+        if (gone.length) {
+          for (const c of gone) m.channels[c] = INITIAL_CHANNEL[c];
+          viewNote = `this map has no ${gone.map((c) => `${c} ${p.channels![c]}`).join(", ")} — ${gone.length > 1 ? "those channels are" : "that channel is"} back to default`;
+          setTimeout(() => (viewNote = ""), 12000);
+        }
+      }
       // camera LAST, after deck has consumed the (possibly new) layout. A 2D↔3D crossing runs a ~700ms
       // camera-continuity ease that would override an immediate set, so wait it out in that one case.
       const cam = p.camera;
@@ -461,6 +490,9 @@
   // holds the per-browser truth (FSA write-in-place on Chromium, filename-preserving download elsewhere).
   let dirty = $state(false);
   let saveNote = $state("");   // transient, honest: "saved" (in place) vs "downloaded <name>"
+  let viewNote = $state("");   // transient, honest: a restored view named a dimension this map does not have
+  // what a channel falls back to when the view names a dimension that is not here
+  const INITIAL_CHANNEL = { color: "region", size: "hub", x: "", y: "", z: "", scrub: "", sort: "hub" } as const;
   let recents = $state<RecentFile[]>([]);
   let fileInput = $state<HTMLInputElement | null>(null);   // the non-FSA open fallback
   const exportBase = () => currentFileName().replace(/\.eido$/i, "") || "eidoscope";
@@ -1267,6 +1299,9 @@
           </button>
         {/each}
         {#if chips.length > 1}<button onclick={() => m.clearFilters()} aria-label="clear all filters" class="btn btn-ghost btn-xs normal-case">clear all filters</button>{/if}
+        <!-- a restored view that named a dimension this map lacks reports here, in the row that already
+             carries scope — the toolbar has no room and long text collided with its controls. -->
+        {#if viewNote}<button data-view-note onclick={() => (viewNote = "")} aria-label="dismiss" class="badge badge-sm badge-warning max-w-full gap-1 whitespace-normal text-left font-mono text-[10px]">{viewNote} ✕</button>{/if}
         <span data-scope class="ml-auto font-mono text-[10px] opacity-60">{visibleCount} / {data.ids.length} cards</span>
       </div>
     </header>
@@ -1278,6 +1313,18 @@
       <!-- svelte-ignore a11y_no_interactive_element_to_noninteractive_role -->
       <!-- role="img"+aria-label is the intended pattern: present the canvas as one labeled image and route AT users to the deck list (the real accessible surface) -->
       <canvas bind:this={canvas} class="absolute inset-0 h-full w-full" role="img" aria-label="Document similarity map (visual). Use the deck list for a screen-reader-accessible view of the same cards."></canvas>
+      <!-- FILTERED DOWN TO NOTHING (eid-kzv2): an empty map reads as a broken one. Say that the
+           filters did it, name them, and offer the way back — the counter alone ("0 / 19,299") tells
+           you the fact but not what to do about it. -->
+      {#if data && visibleCount === 0 && chips.length}
+        <div data-testid="empty-scope" class="pointer-events-none absolute inset-0 grid place-items-center p-6">
+          <div class="pointer-events-auto rounded-box max-w-sm border border-base-300 bg-base-100/95 p-4 text-center shadow-lg">
+            <div class="text-sm">No cards are left after {chips.length === 1 ? "this filter" : `these ${chips.length} filters`}.</div>
+            <div class="mt-1 font-mono text-[10px] leading-snug opacity-60">{chips.map((c) => c.label).join(" · ")}</div>
+            <button class="btn btn-sm btn-primary mt-3 normal-case" data-testid="empty-scope-clear" onclick={() => m.clearFilters()}>clear {chips.length === 1 ? "it" : "them"}</button>
+          </div>
+        </div>
+      {/if}
 
       <!-- the live lasso: a plain SVG overlay, inked from the theme's own base-content. Kept OUT of the
            deck layer stack on purpose — it is gesture feedback, not data, and it must not force a GPU

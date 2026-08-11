@@ -563,7 +563,12 @@ try {
   const mst = () => mp.evaluate(() => (window as any).__eido());
   await mp.goto(`${base}/index.html`);
   await mp.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
-  await mp.locator("button", { hasText: /explore/i }).first().click({ timeout: 1200 }).catch(() => {});
+  // A FRESH CONTEXT ALWAYS SEES THE INTRO (localStorage is per-context), so this dismissal is NOT optional
+  // and must not be budgeted like one: the intro cannot render until the map has mounted, and mounting on
+  // an emulated mobile device blocks the main thread — measured 29ms on one run and 1206ms on the next,
+  // straddling the old fixed 1200ms budget. When it lost the race the modal stayed up and ate the next
+  // click. Wait for the thing itself.
+  await mp.locator("button", { hasText: /explore/i }).first().click();
   await mp.waitForTimeout(300);
   await mp.click('[data-menu="sheet:open"]'); await mp.waitForTimeout(300);
   await mp.click('[data-testid="sheet:select"]'); await mp.waitForTimeout(200);
@@ -845,6 +850,48 @@ try {
   ok(await p.evaluate(() => (window as any).__eido().visible >= 0 && !document.querySelector('[data-opt="sheet:size:length"]')), "fold: sheet + its menus dismiss cleanly");
   const foldedSize = await p.evaluate(() => (document.querySelector('[data-menu="bar:size"]') as HTMLElement)?.textContent?.trim());
   ok(!!foldedSize && !foldedSize.includes("uniform"), `fold: a folded control still works from the sheet — size channel now "${foldedSize}"`);
+  await p.setViewportSize({ width: 2200, height: 1050 }); await p.waitForTimeout(250);
+
+  // ── eid-kzv2 micro-UX: an honest map never shows a state it cannot explain ──────────────────────
+  // (a) filtered down to nothing: the map used to go blank while region labels still floated over the
+  //     empty space, so it read as broken rather than as empty. (b) a view that names a dimension this
+  //     map does not have used to be a silent no-op. (c) the toolbar folded on an ESTIMATE that
+  //     under-counted, so controls overlapped instead of folding.
+  await p.goto(`${base}/index.html`); await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
+  await p.waitForTimeout(400);
+  await p.evaluate(() => { const i = document.querySelector('input[type="search"]') as HTMLInputElement; const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!; set.call(i, "zzqqxxnothingmatches"); i.dispatchEvent(new Event("input", { bubbles: true })); });
+  await p.waitForTimeout(500);
+  ok((await st()).visible === 0, "zero-hit find: nothing is visible");
+  ok(await p.locator('[data-testid="empty-scope"]').isVisible(), "zero-hit find: the map says why it is empty instead of going blank");
+  ok((await st()).labels === 0, "zero-hit find: no region label is left floating over an empty map");
+  await p.click('[data-testid="empty-scope-clear"]'); await p.waitForTimeout(400);
+  ok((await st()).visible > 0 && !(await p.locator('[data-testid="empty-scope"]').isVisible()), "zero-hit find: its own way out restores the corpus");
+
+  await p.goto(`${base}/index.html?color=nosuchdimension`); await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
+  await p.waitForTimeout(600);
+  ok(await p.locator("[data-view-note]").isVisible(), "restored view naming a missing dimension: says so instead of silently ignoring it");
+  ok((await st()).color === "region", "restored view naming a missing dimension: the channel falls back to its default");
+  await p.goto(`${base}/index.html?color=length`); await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
+  await p.waitForTimeout(600);
+  ok((await p.locator("[data-view-note]").count()) === 0 && (await st()).color === "length", "restored view naming a REAL dimension: no false alarm");
+
+  for (const w of [1280, 1600, 1900, 2200]) {
+    await p.setViewportSize({ width: w, height: 1050 }); await p.waitForTimeout(700);
+    const overlaps = await p.evaluate(() => {
+      const row = document.querySelector("[data-fold-trigger]")!.closest("div")!.parentElement!;
+      // folded controls are `invisible absolute` — in the layout but stacked; only visible ones can collide
+      const els = [...row.querySelectorAll<HTMLElement>("[data-fold],[data-fold-fixed],[data-fold-trigger]")]
+        .filter((e) => e.getBoundingClientRect().width > 0 && getComputedStyle(e).visibility !== "hidden");
+      let n = 0;
+      for (let i = 0; i < els.length; i++) for (let j = i + 1; j < els.length; j++) {
+        if (els[i].contains(els[j]) || els[j].contains(els[i])) continue;
+        const a = els[i].getBoundingClientRect(), b = els[j].getBoundingClientRect();
+        if (Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1) n++;
+      }
+      return n;
+    });
+    ok(overlaps === 0, `fold @${w}: no two visible controls overlap (${overlaps} collisions)`);
+  }
   await p.setViewportSize({ width: 2200, height: 1050 }); await p.waitForTimeout(250);
 
   ok(consoleErrs.length === 0, "no console errors during the run" + (consoleErrs.length ? " — " + consoleErrs[0] : ""));

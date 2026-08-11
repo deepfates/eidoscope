@@ -48,6 +48,18 @@ Rules that keep it honest:
   its tests passed, because the tests started from a state no visitor ever sees).
 - **Every fix gets re-walked.** A fix that does not change what a stranger experiences is not a fix;
   the number it was filed with is the number that has to move.
+- **Hidden is not gone.** A check for overlapping toolbar controls reported collisions at every width.
+  False alarm: folded controls are `invisible absolute`, so they stay in the layout stacked at one spot.
+  Anything that reads geometry has to ask what is genuinely visible, not merely what is in the tree.
+- **Never budget a guaranteed action like an optional one.** The mobile case opens a fresh browser
+  context, so it always meets the introduction — but it dismissed it with the same optional 1200ms click
+  used where the intro may not appear. The intro cannot render until the map has mounted, which blocks
+  the main thread: 29ms on one run, 1206ms on the next, straddling the budget. When it lost, the modal
+  stayed up and ate the next click. Wait for the thing itself; optional timeouts are only for genuinely
+  optional things.
+- **A screenshot is a test.** Two live bugs this pass came from looking at a picture, not from an
+  assertion: region labels floating over a map filtered down to nothing, and a status message drawn on
+  top of the controls beside it. Both passed every check we had.
 - **Measure the expensive path, not the cheap one.** A lasso timing that only measured
   `pointInPolygon` on random points said "fast" while skipping the projection work the real path
   pays. Falsify by measuring the thing that would hurt.

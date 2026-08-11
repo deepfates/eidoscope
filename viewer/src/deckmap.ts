@@ -153,6 +153,13 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   // fine grain overlapped and clipped off-screen). On-map labels are truncated so a wide name near the
   // edge can't run past the viewport — the full name lives in the legend + detail panel.
   const dispLabel = (s: string) => (s.length > 26 ? s.slice(0, 25) + "…" : s);
+  // A LABEL NAMES WHAT YOU CAN SEE. Region membership ignores the filter, so without this a region whose
+  // cards are all filtered out kept its name floating over empty space — at zero hits the map looked fully
+  // populated with named regions and no points (eid-kzv2). A region with nothing visible loses its label,
+  // and label priority follows the visible count. Position stays at the FULL centroid on purpose: moving it
+  // to the visible centroid would make every label drift whenever any filter changes, which is the
+  // interaction law's side-effect trap. Whether it should drift is a taste call, open on eid-kzv2.
+  const nShown = (idx: number[]) => (filterMask ? idx.reduce((a, i) => a + (filterMask![i] ? 1 : 0), 0) : idx.length);
   // hovering a region label reveals its FULL name in place (eid-kzv2 item 3) — the label itself expands;
   // no tooltip, no extra chrome. Cleared when the pointer leaves the label.
   let hoverLabel: number | null = null;
@@ -163,7 +170,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   // revealed nothing and fine grain dropped most labels even when the screen had room.
   const decluttered = () => {
     const scale = Math.pow(2, viewState?.zoom ?? 0);          // deck ortho: pixels per world unit at this zoom
-    const cand = members.map((idx, c) => ({ c, label: dispLabel(labelOf(c)), full: labelOf(c), n: idx.length, p: centroid(idx) })).filter((d) => d.n > 0 && d.label).sort((a, b) => b.n - a.n);
+    const cand = members.map((idx, c) => ({ c, label: dispLabel(labelOf(c)), full: labelOf(c), n: nShown(idx), p: centroid(idx) })).filter((d) => d.n > 0 && d.label).sort((a, b) => b.n - a.n);
     const charPx = 8;                                             // ~monospace advance at 13px bold
     const hw = (len: number) => (len * charPx) / 2 + charPx * 1.0; // half-width + ~1-char gap between neighbours
     const lineH = 30;                                             // vertical clearance in px (row spacing; long region names stack otherwise)
@@ -265,7 +272,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     fontFamily: "ui-monospace, monospace", fontWeight: 700, getTextAnchor: "middle", getAlignmentBaseline: "center", characterSet: "auto",   // default set is ASCII-only and silently DROPS the truncation ellipsis
     getPixelOffset: (d: any) => [d.dx || 0, 0],  // keep edge labels on-screen
     getBackgroundColor: labelBg(), background: true, backgroundPadding: [4, 2], pickable: true,
-    updateTriggers: { getPosition: [posVer], data: [posVer], getColor: [highlight, themeVer], getText: [hoverLabel], getPixelOffset: [posVer], getBackgroundColor: themeVer },
+    updateTriggers: { getPosition: [posVer, filterVer], data: [posVer, filterVer], getColor: [highlight, themeVer], getText: [hoverLabel], getPixelOffset: [posVer], getBackgroundColor: themeVer },
   });
   // 3D region labels: billboarded at each region's 3D centroid, so the fly-through stays isomorphic with the
   // 2D map (same regions, colours, names — one mental map at a different angle). No screen-space declutter in
@@ -274,12 +281,12 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   const centroid3 = (idx: number[]): number[] => { let x = 0, y = 0, z = 0; for (const i of idx) { const p = pos(i); x += p[0]; y += p[1]; z += p[2] || 0; } const k = idx.length || 1; return [x / k, y / k, z / k]; };
   const label3dLayer = () => new TextLayer({
     id: "labels",
-    data: members.map((idx, c) => ({ c, label: dispLabel(labelOf(c)), full: labelOf(c), n: idx.length, p: centroid3(idx) })).filter((d) => d.n > 0 && d.label).sort((a, b) => b.n - a.n),
+    data: members.map((idx, c) => ({ c, label: dispLabel(labelOf(c)), full: labelOf(c), n: nShown(idx), p: centroid3(idx) })).filter((d) => d.n > 0 && d.label).sort((a, b) => b.n - a.n),
     getPosition: (d: any) => d.p, getText: (d: any) => (d.c === hoverLabel ? d.full : d.label),
     getColor: (d: any) => [...col(d.c), highlight != null && d.c !== highlight ? 70 : 245] as any, getSize: 14, sizeUnits: "pixels", sizeMaxPixels: 22, billboard: true,
     fontFamily: "ui-monospace, monospace", fontWeight: 700, getTextAnchor: "middle", getAlignmentBaseline: "center", characterSet: "auto",
     getBackgroundColor: labelBg(), background: true, backgroundPadding: [4, 2], pickable: true,
-    updateTriggers: { getPosition: [posVer, grain], data: [posVer, grain], getColor: [highlight, themeVer], getText: [hoverLabel], getBackgroundColor: themeVer },
+    updateTriggers: { getPosition: [posVer, grain, filterVer], data: [posVer, grain, filterVer], getColor: [highlight, themeVer], getText: [hoverLabel], getBackgroundColor: themeVer },
   });
   // frontier telescope (only for --frontier arxiv corpora; absent otherwise): intra-corpus citation edges
   // + "ghost" papers cited-but-not-in-corpus, placed near the work that cites them, sized by citation count.

@@ -77,6 +77,13 @@ Also closed since: run durability, gated by an e2e that kills the browser and re
 score, artist and author riding as placeable dimensions (`eid-xmf0`); scale swaps, closed by
 measurement under the ≤100k ruling (`eid-cl83`).
 
+Micro-UX sweep since (`eid-kzv2`, `Hac-2hjp`): a map filtered down to nothing now says so and offers the
+way out, and stops drawing region labels over the empty space; a restored view naming a dimension this
+map does not have reports it instead of silently drawing the default; and the toolbar's fold now decides
+on measured overflow rather than an estimate that under-counted by 53-94px and let controls overlap. Pole
+labelling in the reading pane and in the axis legend was already correct — verified live rather than
+closed on faith. Each is gated by a new assertion in the viewer suite.
+
 WHAT REMAINS FOR v1 IS TASTE AND FOUR DESIGN RULINGS, all waiting on deepfates, none to be built
 unilaterally: separable parts, so a map can mount from its geometry while the cards stream in
 (`eid-ncrq` — this is also the answer to the 6.9s arrival); what a million documents should do when
