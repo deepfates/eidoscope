@@ -339,15 +339,24 @@
     if (selection.length === data.ids.length) return "the selection is the whole corpus — there is nothing to contrast it against";
     return "";
   });
-  function deriveAxis() {
+  // DERIVE says it is working before it works. The maths is synchronous — a delta-centroid over the
+  // held set, then a cosine against every card (measured 636ms on 19,299 cards) — and a synchronous
+  // block cannot paint, so a spinner set in the same tick would never appear. Set the state, hand the
+  // browser two frames to draw it, THEN compute. Honest feedback, not fake speed.
+  let deriving = $state(false);
+  async function deriveAxis() {
     const D = data, sel = selection;
-    if (!D || !sel?.length || deriveWhyNot) return;
-    const V = store?.vectors();
-    const dir = deriveDirection(V, sel);
-    if (!dir) { deriveErr = "these cards don't point anywhere the rest of the corpus doesn't"; return; }
-    deriveErr = "";
-    mintedKey = m.addDerived((deriveLabel.trim() || deriveDefault), sel.map((i) => D.ids[i]), cosineAll(dir, V!));
-    deriveLabel = "";
+    if (!D || !sel?.length || deriveWhyNot || deriving) return;
+    deriving = true;
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    try {
+      const V = store?.vectors();
+      const dir = deriveDirection(V, sel);
+      if (!dir) { deriveErr = "these cards don't point anywhere the rest of the corpus doesn't"; return; }
+      deriveErr = "";
+      mintedKey = m.addDerived((deriveLabel.trim() || deriveDefault), sel.map((i) => D.ids[i]), cosineAll(dir, V!));
+      deriveLabel = "";
+    } finally { deriving = false; }
   }
   const mintedDim = $derived(mintedKey ? m.derivedDims.find((d) => d.key === mintedKey) : undefined);
 
@@ -1345,8 +1354,8 @@
             <button data-testid="sel-fit" class="btn btn-xs normal-case" onclick={() => fitTo(selection!)}>fit</button>
             <button data-testid="sel-descend" class="btn btn-xs normal-case" disabled={!!descendWhyNot || !!descending}
               title={descendWhyNot || "re-map these cards as their own space (local axes, in this tab)"} onclick={descendSelection}>descend</button>
-            <button data-testid="sel-derive" class="btn btn-xs normal-case" disabled={!!deriveWhyNot}
-              onclick={deriveAxis}>derive axis</button>
+            <button data-testid="sel-derive" class="btn btn-xs normal-case" disabled={!!deriveWhyNot || deriving}
+              onclick={deriveAxis}>{#if deriving}<span class="loading loading-spinner loading-xs"></span>deriving…{:else}derive axis{/if}</button>
             <button data-testid="sel-clear" class="btn btn-ghost btn-xs normal-case" onclick={() => { m.clearSelection(); mintedKey = null; }}>clear</button>
           </div>
 
