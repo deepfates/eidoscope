@@ -594,6 +594,9 @@
     });
     // read-only introspection seam for the integration suite (drives the REAL built app, asserts real state)
     (window as any).__eido = () => { const d = handle?.debug(); return { grain: m.grain, k: curCount, layout: m.layout, color: m.channels.color, pin: pinned, facetPin, focus: selected, detail: selected !== null, deckOpen: m.deckOpen, deckQ: m.deckQ, deckUnread: m.deckUnread, sort: m.channels.sort, cite: m.citeOn, ghosts: m.ghostsOn, theme, themeName, pal: Array.from({ length: 6 }, (_, i) => col(i)), hover: hovered ? hovered.kind : null, zoom: d?.zoom ?? 0, labels: d?.labels ?? 0, labelsOn, regions: d?.regions ?? 0, rot: d?.rot ?? null, rotX: d?.rotX ?? null, target: d?.target ?? null, span3: d?.span3 ?? null, filters: chips.map((c) => c.label), filterCounts: chips.map((c) => c.n), selectMode: m.selectMode, selection: selection?.length ?? 0, selShareable: m.selShareable, derived: m.derivedDims.length, dims: m.allDims.map((x) => x.key), views: (m.data?.views ?? []).length, drawing: !!lasso, visible: visibleCount, dirty, file: currentFileName(), inPlace: canWriteInPlace() }; };
+    // region labels as the renderer placed them (screen px, nudge applied) — so a test can ask whether
+    // two of them overlap. A TextLayer draws to the canvas and leaves nothing in the DOM to measure.
+    (window as any).__eidoLabels = () => handle?.labelBoxes() ?? [];
     // the map no longer fills the window (a toolbar sits above it), so both seams speak PAGE coordinates —
     // what a test's mouse/touch actually uses — and convert at the canvas edge.
     const rect = () => canvas.getBoundingClientRect();

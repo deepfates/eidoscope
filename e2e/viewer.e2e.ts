@@ -894,6 +894,27 @@ try {
   }
   await p.setViewportSize({ width: 2200, height: 1050 }); await p.waitForTimeout(250);
 
+  // REGION LABELS MUST NOT BE DRAWN ON TOP OF EACH OTHER. The edge nudge (keeping long names on-screen)
+  // used to run AFTER the declutter chose survivors, so it shoved an edge label into one the overlap test
+  // had cleared — two region names through each other at 375px. Boxes come from the renderer's own
+  // placement (nudge included) and are sized with the real glyph metrics of the font it draws in.
+  const labelCollisions = async (pg: typeof p) => pg.evaluate(() => {
+    const L = (window as any).__eidoLabels?.() ?? [];
+    const cx = document.createElement("canvas").getContext("2d")!;
+    cx.font = "700 13px ui-monospace, monospace";
+    const box = L.map((d: any) => { const w = cx.measureText(d.text).width; return { x0: d.sx - w / 2, x1: d.sx + w / 2, y0: d.sy - 9, y1: d.sy + 9 }; });
+    let n = 0;
+    for (let i = 0; i < box.length; i++) for (let j = i + 1; j < box.length; j++)
+      if (Math.min(box[i].x1, box[j].x1) - Math.max(box[i].x0, box[j].x0) > 0 && Math.min(box[i].y1, box[j].y1) - Math.max(box[i].y0, box[j].y0) > 0) n++;
+    return { placed: box.length, n };
+  });
+  for (const w of [420, 900, 2200]) {
+    await p.setViewportSize({ width: w, height: 1050 }); await p.waitForTimeout(800);
+    const r = await labelCollisions(p);
+    ok(r.n === 0, `labels @${w}: ${r.placed} region labels placed, none overlapping (${r.n})`);
+  }
+  await p.setViewportSize({ width: 2200, height: 1050 }); await p.waitForTimeout(250);
+
   ok(consoleErrs.length === 0, "no console errors during the run" + (consoleErrs.length ? " — " + consoleErrs[0] : ""));
 } finally {
   await browser.close();

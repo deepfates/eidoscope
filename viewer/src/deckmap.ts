@@ -31,6 +31,7 @@ export type MapHandle = {
   // second binding for region.drill (M-A1): drill from any member index — same code path as double-click.
   drillIndex: (i: number) => void;
   destroy: () => void;
+  labelBoxes: () => { c: number; text: string; sx: number; sy: number }[];   // read-only seam: placed region labels in screen px
   debug: () => { zoom: number; labels: number; regions: number; grain: number; rot: number | null; rotX: number | null; target: number[] | null; span3: number };  // read-only seam for integration tests
   project: (world: number[]) => number[];  // world [x,y,z?] → screen px, so tests can click exact nodes/ghosts
   // A card's FULL projection in the current layout: [screenX, screenY, ndcZ]. The third component is the
@@ -174,14 +175,24 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     const charPx = 8;                                             // ~monospace advance at 13px bold
     const hw = (len: number) => (len * charPx) / 2 + charPx * 1.0; // half-width + ~1-char gap between neighbours
     const lineH = 30;                                             // vertical clearance in px (row spacing; long region names stack otherwise)
-    const fits = (d: any, into: typeof cand) => into.every((q) => Math.abs((q.p[0] - d.p[0]) * scale) > hw(q.label.length) + hw(d.label.length) || Math.abs((q.p[1] - d.p[1]) * scale) > lineH);
+    // NUDGE FIRST, THEN DECLUTTER. Labels whose centroid sits near a screen edge get pushed back on-screen
+    // so long region names don't clip. That nudge used to happen AFTER the overlap test had chosen the
+    // survivors, so an edge label was shoved inward on top of a label the test had just cleared — at 375px
+    // "Ambient Drones and…" was drawn straight through "Stand-up Comedy and Pop-C…". Decluttering against
+    // the position a label will ACTUALLY occupy costs nothing and cannot disagree with itself.
+    // Width is the CANVAS, not the window: with the reading pane docked open the map is much narrower than
+    // the page, and measuring the page put the "edge" off the side of the map.
+    const W = canvas.clientWidth || canvas.width || 1200, tx = viewState?.target?.[0] ?? 0;
+    for (const d of cand as any[]) {
+      const sx = W / 2 + (d.p[0] - tx) * scale, vw = (d.label.length * charPx) / 2 + 4;
+      d.dx = sx - vw < 6 ? 6 - (sx - vw) : sx + vw > W - 6 ? (W - 6) - (sx + vw) : 0;
+      d.sx = sx + d.dx;                                       // where the label really lands, nudge included
+    }
+    const fits = (d: any, into: typeof cand) => into.every((q: any) => Math.abs(q.sx - d.sx) > hw(q.label.length) + hw(d.label.length) || Math.abs((q.p[1] - d.p[1]) * scale) > lineH);
     // Seed with the isolated region so clicking a legend entry ALWAYS surfaces its label (landmark you asked for),
     // even if a bigger neighbour would otherwise crowd it out; then greedy-place the rest biggest-first.
     const placed: typeof cand = highlight != null ? cand.filter((d) => d.c === highlight) : [];
     for (const d of cand) if (!placed.includes(d) && fits(d, placed)) placed.push(d);
-    // nudge labels whose centroid sits near a screen edge back on-screen (long region names were clipping on mobile)
-    const W = typeof window !== "undefined" ? window.innerWidth : 1200, tx = viewState?.target?.[0] ?? 0;
-    for (const d of placed as any[]) { const sx = W / 2 + (d.p[0] - tx) * scale, vw = (d.label.length * charPx) / 2 + 4; d.dx = sx - vw < 6 ? 6 - (sx - vw) : sx + vw > W - 6 ? (W - 6) - (sx + vw) : 0; }
     return placed;
   };
   // A held SELECTION is the strongest emphasis source — it outranks focus and highlight, because the user
@@ -465,6 +476,14 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     setFocus: (i) => { focus = i; fSet = i == null ? null : new Set<number>([i, ...(D.nbr[i] || [])]); paint(); },
     setHighlight: (c) => { highlight = c; paint(); },
     fitToIndices: (idx) => fit(idx),
+    // the labels the declutter actually placed, in screen pixels with the edge nudge already applied —
+    // the only way a test can ask "do two region names overlap?", since a TextLayer draws to canvas and
+    // leaves nothing in the DOM to measure.
+    labelBoxes: () => {
+      const scale = Math.pow(2, viewState?.zoom ?? 0), tx = viewState?.target?.[0] ?? 0, ty = viewState?.target?.[1] ?? 0;
+      const H = canvas.clientHeight || canvas.height || 800;
+      return (decluttered() as any[]).map((d) => ({ c: d.c, text: d.label as string, sx: d.sx as number, sy: H / 2 - (d.p[1] - ty) * scale }));
+    },
     debug: () => ({ zoom: (deck.getViewports?.()?.[0] as any)?.zoom ?? viewState?.zoom ?? 0, labels: decluttered().length, regions: members.filter((m) => m.length).length, grain, rot: viewState?.rotationOrbit ?? null, rotX: viewState?.rotationX ?? null, target: viewState?.target ?? null, span3 }),
     project: (world) => { const vp = (deck as any).getViewports?.()[0]; return vp ? vp.project([world[0], world[1], world[2] ?? 0]).slice(0, 2) : [0, 0]; },  // honors z, so 3D layouts project correctly (was hardcoded z=0)
     projectIndex: (i) => { const vp = (deck as any).getViewports?.()[0]; if (!vp || i < 0 || i >= n) return null; const q = pos(i); return vp.project([q[0], q[1], q[2] ?? 0]); },
