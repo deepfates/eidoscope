@@ -77,7 +77,10 @@ Also closed since: run durability, gated by an e2e that kills the browser and re
 score, artist and author riding as placeable dimensions (`eid-xmf0`); scale swaps, closed by
 measurement under the ≤100k ruling (`eid-cl83`).
 
-Micro-UX sweep since (`eid-kzv2`, `Hac-2hjp`): a map filtered down to nothing now says so and offers the
+Micro-UX sweep since (`eid-kzv2`, `Hac-2hjp`, `Hac-u1cn`): region labels no longer draw through each
+other on a narrow screen (the edge nudge used to run after the declutter had already cleared the
+overlap), and the 3D views' total lack of a declutter is filed for a ruling.
+Earlier in the same sweep: a map filtered down to nothing now says so and offers the
 way out, and stops drawing region labels over the empty space; a restored view naming a dimension this
 map does not have reports it instead of silently drawing the default; and the toolbar's fold now decides
 on measured overflow rather than an estimate that under-counted by 53-94px and let controls overlap. Pole

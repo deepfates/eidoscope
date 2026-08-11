@@ -57,9 +57,15 @@ Rules that keep it honest:
   the main thread: 29ms on one run, 1206ms on the next, straddling the budget. When it lost, the modal
   stayed up and ate the next click. Wait for the thing itself; optional timeouts are only for genuinely
   optional things.
-- **A screenshot is a test.** Two live bugs this pass came from looking at a picture, not from an
-  assertion: region labels floating over a map filtered down to nothing, and a status message drawn on
-  top of the controls beside it. Both passed every check we had.
+- **A screenshot is a test.** Three live bugs came from looking at a picture, not from an assertion:
+  region labels floating over a map filtered down to nothing, a status message drawn on top of the
+  controls beside it, and two region names drawn through each other at 375px. All passed every check we
+  had. So photograph the states nobody has looked at — each layout, both 3D views, the dark themes, the
+  deck, mobile — and actually look.
+- **When something draws to a canvas, expose where it put things.** A TextLayer leaves nothing in the
+  DOM, so "do two labels overlap?" was unanswerable until `labelBoxes()` returned the renderer's own
+  placement. Then size the boxes with the real glyph metrics of the font it draws in, not with the
+  layout code's own approximation — otherwise the test agrees with the bug.
 - **Measure the expensive path, not the cheap one.** A lasso timing that only measured
   `pointInPolygon` on random points said "fast" while skipping the projection work the real path
   pays. Falsify by measuring the thing that would hurt.
