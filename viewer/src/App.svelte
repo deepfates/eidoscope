@@ -589,6 +589,9 @@
       // what you were reading, with no way back but an undiscoverable Back. Nothing you are holding
       // moves unless you move it: the pane closes on Escape or its own ✕, never on a near-miss.
       onClick: (i) => { if (m.selectMode || i < 0) return; focusCard(i); },
+      // drilling changes the GRAIN and nothing else: close the card the first click of the double-click
+      // optimistically opened, so the reading pane does not sit over the map you just drilled into
+      onDrill: () => focusCard(null),
       onHover: (h, x, y) => (hovered = h == null ? null : { ...h, x, y }),
       onGrainChange: (g) => m.setGrain(g),
     });

@@ -61,7 +61,7 @@ const hull2d = (pts: number[][]): number[][] => {
 };
 
 export type HoverPayload = { kind: "point"; i: number } | { kind: "ghost"; g: any };
-export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts & { onClick?: (i: number) => void; onHover?: (h: HoverPayload | null, x: number, y: number) => void; onGrainChange?: (g: number) => void }): MapHandle {
+export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts & { onClick?: (i: number) => void; onDrill?: () => void; onHover?: (h: HoverPayload | null, x: number, y: number) => void; onGrainChange?: (g: number) => void }): MapHandle {
   const n = D.ids.length;
   // a11y: reduced-motion means BRIEF motion, not none. Camera fits, layout eases and position morphs carry
   // object constancy — which point became which, where the camera went — and the interaction law leans on
@@ -89,7 +89,13 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   let selectMode = false;
   let highlight: number | null = null;
   let citeOn = init.citeOn ?? false, ghostsOn = init.ghostsOn ?? false;
-  let suppressClickUntil = 0;  // wall-clock deadline set by dblclick so a trailing deck onClick can't open a card (timestamp, not a timer — Date.now() isn't throttled like setTimeout in a hidden tab)
+  // A CLICK BELONGS TO THE GESTURE THAT STARTED IT. When a double-click drills, deck still delivers the
+  // trailing click of that same gesture — and it arrives LATE, because drilling rebuilds every layer and
+  // starts a camera flight before deck can dispatch: measured 647ms after the dblclick, sailing past the
+  // 350ms window this used to guard with. That trailing click re-opened the card the drill had just closed,
+  // so every drill ended with a reading pane over the map and the whole cloud dimmed behind it. No window
+  // now: pointerdown opens a new gesture, and the dblclick marks the current one as already spent.
+  let gesture = 0, spentGesture = -1;
   // The map's ink is read from the ACTIVE THEME's own tokens, not from a hardcoded dark/light binary:
   // ground = base-100, ink = base-content, and "dark" is simply L(base-100) < 0.5. Any theme — stock,
   // custom, one we've never seen — lands legible ink on its own canvas. Alpha levels are unchanged.
@@ -354,14 +360,14 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     },
     layers: cur,
     onClick: (info: any) => {
-      if (Date.now() < suppressClickUntil) return;  // ignore the click deck fires right after a double-click
+      if (spentGesture === gesture) return;   // the trailing click of a gesture that already drilled
       // labels are hover-pickable (full-name reveal) but must be click-TRANSPARENT: a label floating over
       // the cloud must not eat the card click under it — re-pick with the label layer excluded.
       if (info?.layer?.id === "labels") info = (deck as any).pickObject({ x: info.x, y: info.y, radius: 8, layerIds: ["points", "ghosts"] }) ?? info;
       if (info?.layer?.id === "ghosts" && info.object?.url) { window.open(info.object.url, "_blank"); return; }  // ghosts open immediately
       const idx = info?.layer?.id === "points" && info.index >= 0 ? info.index : -1;
       // OPTIMISTIC card-open (eid-54lx): fire immediately — no debounce taxing every click. If a dblclick
-      // follows, its handler undoes the open (onClick(-1)) and drills instead.
+      // follows, its handler closes the card (onDrill) and drills instead.
       init.onClick?.(idx);
     },
     onHover: (info: any) => {
@@ -404,11 +410,17 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     fit(members[levels[newGrain][nodeIdx]] || []);
     init.onGrainChange?.(newGrain);
   };
+  canvas.addEventListener("pointerdown", () => { gesture++; }, true);   // a new press = a new gesture
   canvas.addEventListener("dblclick", (e) => {
     if (selectMode) return;   // in select mode the pointer draws; it does not drill
-    suppressClickUntil = Date.now() + 350;  // swallow the trailing onClick deck fires right after a dblclick
+    spentGesture = gesture;   // this gesture's trailing click is already accounted for, whenever it lands
     const info = (deck as any).pickObject({ x: (e as MouseEvent).offsetX, y: (e as MouseEvent).offsetY, radius: 8, layerIds: ["points"] });  // labels/ghosts never drill
-    if (info && info.layer?.id === "points" && info.index >= 0) { init.onClick?.(-1); drill(info.index); }  // undo the optimistic card-open, then drill
+    // Drilling has its OWN channel, and this is why: it used to undo the optimistic card-open by calling
+    // onClick(-1), i.e. by overloading "which card was clicked" with a sentinel meaning "close the card".
+    // When a click that hits empty space stopped closing the reading pane (a near-miss must not punish you),
+    // that sentinel quietly stopped meaning anything, and every drill left a card open over the map with
+    // the whole cloud dimmed behind it. One channel, two meanings, and the second one died in silence.
+    if (info && info.layer?.id === "points" && info.index >= 0) { init.onDrill?.(); drill(info.index); }
   });
   return {
     update: (o) => {

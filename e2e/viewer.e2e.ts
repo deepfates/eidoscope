@@ -131,9 +131,24 @@ try {
   await btn(/^reset view$/).click(); await p.waitForTimeout(200); const gd = (await st()).grain;
   await p.mouse.dblclick(cx, cy); await p.waitForTimeout(400); s = await st();
   ok(s.grain > gd, `double-click drills one step finer — grain ${gd}→${s.grain}`);
-  // NOTE: the "drill must not ALSO open a card" debounce is real (real-device dblclick fires deck.onClick
-  // twice), but Playwright's synthetic mouse doesn't drive deck's onClick deterministically, so asserting
-  // it here would pass vacuously — deliberately NOT asserted rather than give false confidence.
+  // The note that used to sit here said this could not be asserted because Playwright's synthetic mouse
+  // does not drive deck's onClick deterministically. Measured on the real 19,299-card map, it does — the
+  // trailing click just arrives LATE (647ms, because drilling rebuilds every layer and starts a camera
+  // flight before deck can dispatch), which is exactly how it slipped past the old 350ms time guard and
+  // re-opened the card the drill had closed. So: wait past the flight, then assert.
+  await p.waitForTimeout(1400); s = await st();
+  ok(!s.detail, "drilling changes the grain and NOTHING else — no card left open over the map");
+  // …and the guard must not outlive its gesture: the very next click still opens a card. Click a node
+  // whose position we ASK for — the drill flies the camera to the region it drilled, so a fixed screen
+  // coordinate is no longer over anything in particular.
+  const spot = await p.evaluate(() => {
+    for (let i = 0; i < 90; i++) { const q = (window as any).__eidoProjectIndex(i); if (q && q[0] > 40 && q[1] > 90) return [q[0], q[1]]; }
+    return null;
+  });
+  ok(!!spot, "a card is on screen after the drill's camera flight");
+  if (spot) { await p.mouse.click(Math.round(spot[0]), Math.round(spot[1])); await p.waitForTimeout(600); s = await st();
+    ok(s.detail, "a click right after a drill still opens a card — the drill's guard does not linger"); }
+  await p.keyboard.press("Escape"); await p.waitForTimeout(200);
 
   // 6. tap/click a card → detail panel (exact node-0 pixel via project; desktop click shares this onClick path)
   await btn(/^reset view$/).click(); await p.waitForTimeout(200);
