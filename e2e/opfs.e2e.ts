@@ -74,6 +74,10 @@ const ok = (cond: boolean, msg: string) => { if (cond) console.log("  ✓", msg)
 // mocked OpenRouter (same shapes as ingest.e2e.ts) with per-kind counters — the receipt
 let llmCalls = { card: 0, axes: 0, region: 0 };
 let cardDelayMs = 0;   // stretches card answers so cancel-mid-cards has a real window
+let cardSeq = 0;       // …and STAGGERS them: with every card answering at the same instant there is no
+                       // mid-flight moment to cancel in, and the window shrank to nothing when card
+                       // concurrency became the measured 48 (eid-7ll4). Staggered answers are also
+                       // closer to a real provider than a uniform delay.
 function mockLLM(bodyStr: string): string {
   const body = JSON.parse(bodyStr);
   const sys: string = body.messages[0]?.content ?? "";
@@ -108,8 +112,11 @@ async function rigPage(pg: import("playwright").Page): Promise<void> {
   if (process.env.EIDO_E2E_DEBUG) pg.on("console", (m) => console.error("[page]", m.type(), m.text().slice(0, 300)));
   await pg.route("https://openrouter.ai/**", async (route) => {
     const body = route.request().postData() ?? "{}";
-    if (cardDelayMs && /`Restatement`/.test(body)) await new Promise((r) => setTimeout(r, cardDelayMs));
-    route.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: mockLLM(body) });
+    // COUNT AT ARRIVAL, not after the delay: a request issued by one pass but answered during the next
+    // would otherwise be charged to the wrong pass (the cancel pass leaves answers in flight by design).
+    const answer = mockLLM(body);
+    if (cardDelayMs && /`Restatement`/.test(body)) await new Promise((r) => setTimeout(r, cardDelayMs + 400 * (cardSeq++ % 12)));
+    route.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: answer });
   });
   // the library's documented seams, exactly as ingest.e2e.ts sets them: weights from /hf, ort wasm from
   // /tfwasm (the old `__EIDO_TF_CDN` name pointed at nothing — the run stalled fetching wasm from the
@@ -201,7 +208,9 @@ try {
   // ── PASS 3: CANCEL MID-APPEND (eid-yhj7 review) — terminate the run's worker while cards are being
   // written+flushed, then re-ingest: the flushed lines must survive, the file must stay parseable, and
   // the re-run must resume from them instead of re-spending everything ─────────────────────────────
-  cardDelayMs = 2500;                                // 12 cards at concurrency 8 → two ~2.5s waves: a real window
+  cardSeq = 0;
+  cardDelayMs = 700;                                 // 12 cards answering 0.7s..5.1s apart: a real window
+                                                     // to cancel inside, at ANY concurrency
   const cardsAtC0 = llmCalls.card;
   await p.goto(base + "/index.html");
   await p.waitForSelector("[data-testid=open-panel]", { timeout: 15000 });
