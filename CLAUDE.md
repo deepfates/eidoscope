@@ -53,6 +53,8 @@ cards. Operators — QUERY, SELECT, DERIVE, DESCEND, grain — all produce or co
 
 - **Look, don't imagine.** Verify in a real browser with real gestures on real corpora. A claim you
   didn't watch happen is a guess. Screenshots and measurements beat reasoning about what should be.
+  `docs/VERIFY.md` holds the three instruments and what each one can and cannot catch — read it
+  before adding a fourth.
 - **Libraries over invention.** Thin glue around thick, battle-tested code. The invention budget is
   spent on the grammar and the seams — never on re-rolling a dropdown, a slider, or an SVD.
 - **Finish; don't defer.** Solve the problem instead of filing a ticket to dodge it. Done means the
