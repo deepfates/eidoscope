@@ -322,6 +322,13 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   const deck = new Deck({
     canvas, views: [view()], viewState,
     controller: controllerFor(layout), pickingRadius: 8,
+    // A CLICK SHOULD NOT WAIT TO SEE IF IT IS A DOUBLE-CLICK. deck's gesture recogniser (mjolnir's tap)
+    // holds every tap for its `interval` — 300ms by default, "maximum time between multiple taps" —
+    // which is exactly the 316-329ms measured between pointerup and a card opening on the 19,299-card
+    // map. eid-54lx deleted OUR 220ms debounce for this reason and the library's own remained.
+    // Dropping the interval is safe here because drilling listens to the browser's native dblclick
+    // (below), not to deck's doubletap, and the optimistic-open/undo pair already handles the race.
+    eventRecognizerOptions: { click: { interval: 0 } },   // deck names mjolnir's tap recogniser `click`
     onViewStateChange: ({ viewState: vs }: any) => {
       const zoomed = Math.abs((vs?.zoom ?? 0) - (viewState?.zoom ?? 0)) > 0.08;
       viewState = vs; deck.setProps({ viewState });
