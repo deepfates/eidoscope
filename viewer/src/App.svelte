@@ -697,9 +697,17 @@
         mountMap(S);
         applyUrlState(); urlReady = true;  // restore any deep-linked view/card, then start mirroring state → URL
       } catch (e: any) {
-        // no bundled/hosted map answered → the EMPTY STATE: the app opens corpora, it doesn't apologize
+        // The EMPTY STATE — but say WHICH thing failed and WHY. Falling back to the front door with
+        // "no bundled map: Failed to fetch" was a lie in two directions: a reader who asked for a
+        // specific file by name was told there was no map, and a file that arrived but could not be
+        // DECODED was reported as a network failure (eid-3w7x, found by opening an old-format file).
         status = ""; noMap = true; urlReady = true;
-        noMapHint = String(e?.message ?? e);
+        const asked = new URLSearchParams(location.search).get("map") || new URLSearchParams(location.search).get("url");
+        const why = String(e?.message ?? e);
+        const unreadable = /not an eidoscope map|damaged|magic|EIDOBIN|decode|unexpected|invalid/i.test(why);
+        noMapHint = asked
+          ? (unreadable ? `“${asked}” arrived, but ${why.replace(/^this /, "")}` : `couldn't open “${asked}” — ${why}`)
+          : `no map came with this page — ${why}`;
       }
     })();
     // Escape closes the topmost OVERLAY — but a toolbar menu is not an overlay: Bits UI already closes it on
@@ -1470,7 +1478,7 @@
           </label>
         </div>
         <div class="mt-3 font-mono text-[11px] opacity-50">…or drag a folder or a .eido anywhere onto this page</div>
-        {#if noMapHint}<div class="mt-4 font-mono text-[10px] leading-snug opacity-40">no bundled map: {noMapHint}</div>{/if}
+        {#if noMapHint}<div data-testid="no-map-why" class="mt-4 font-mono text-[10px] leading-snug opacity-50">{noMapHint}</div>{/if}
       </div>
     </div>
   {/if}

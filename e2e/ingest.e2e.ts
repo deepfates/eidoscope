@@ -26,6 +26,7 @@ const server = Bun.serve({
   fetch(req) {
     const path = new URL(req.url).pathname; if (process.env.EIDO_E2E_DEBUG) console.error("[srv]", path);
     if (path === "/map.eido") return new Response("not here", { status: 404 });
+    if (path === "/notamap.eido") return new Response("plain text, definitely not a compressed eidoscope map");
     // the ort wasm binaries + MiniLM weights, served from the LOCAL package (hermetic ingest e2e); the
     // transformers.js RUNTIME itself is bundled into the app (same npm package as the node pipeline)
     if (path.startsWith("/tfwasm/")) { const f = join(TDIST, path.slice("/tfwasm/".length)); return existsSync(f) ? new Response(Bun.file(f)) : new Response("", { status: 404 }); }
@@ -214,6 +215,15 @@ try {
   ok((await p.locator("[data-testid=hf-dialog], [data-testid=hf-url]").count()) > 0 || (await p.getByText(/HuggingFace/i).count()) > 0, "the HF connector dialog actually opens from the with-map state");
   await p.keyboard.press("Escape");
   ok((await p.locator("[data-testid=open-folder]").count()) === 1, "the ONE persistent folder input exists outside every conditional block");
+
+  // 9. A FILE THAT IS NOT A MAP SAYS SO (eid-3w7x): a decode failure used to surface as "Failed to
+  // fetch" — a network story for a file that arrived fine — and the front door blamed a missing
+  // bundled map even when the reader had asked for one by name.
+  await p.goto(base + "/index.html?map=notamap.eido");
+  await p.waitForSelector("[data-testid=no-map-why]", { timeout: 20000 });
+  const why = (await p.locator("[data-testid=no-map-why]").textContent())?.trim() ?? "";
+  ok(/notamap\.eido/.test(why), `the message names the file the reader asked for — "${why}"`);
+  ok(/not an eidoscope map/i.test(why), "…and says it is not a map, rather than blaming the network");
 
   ok(pageErrs.length === 0, "no page errors through the whole ingest" + (pageErrs.length ? " — " + pageErrs[0] : ""));
   ok(blocked.length === 0, "no request needed the real network" + (blocked.length ? ` — blocked: ${blocked[0]}` : ""));

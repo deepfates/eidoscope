@@ -8,8 +8,19 @@ export type { Store };
 //  - FETCHED : a hosted app pulls ./map.eido (or any url) — the same decoder either way.
 
 async function gunzip(bytes: Uint8Array): Promise<Uint8Array> {
+  // Check the gzip signature FIRST so a wrong file can be named as one. A decompression stream that
+  // chokes surfaces through Response as "Failed to fetch" — indistinguishable from the network being
+  // down, which is how an old-format map once looked like an offline browser (eid-3w7x).
+  if (bytes.length < 2 || bytes[0] !== 0x1f || bytes[1] !== 0x8b) {
+    const head = new TextDecoder().decode(bytes.slice(0, 24)).replace(/[^\x20-\x7e]/g, "·");
+    throw new Error(`this is not an eidoscope map — expected a compressed .eido, the file begins “${head}”`);
+  }
   const stream = new Blob([bytes as BlobPart]).stream().pipeThrough(new DecompressionStream("gzip"));
-  return new Uint8Array(await new Response(stream).arrayBuffer());
+  try {
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  } catch {
+    throw new Error("this .eido is damaged — it is compressed, but the compressed data could not be read");
+  }
 }
 
 // Which map to load: honor a `?map=<name>.eido` query so ONE built viewer can serve several corpora
