@@ -17,6 +17,8 @@
 // create as its wasm-init promise (onnx.js `wasmInitPromise ??= sessionPromise`), so a FAILED webgpu
 // attempt poisons every later wasm session in the page — create-then-catch-then-retry cannot work.
 
+import { embedThroughCache } from "../../src/embed-core";
+
 let extractorP: Promise<any> | null = null;
 
 // Progress the caller can surface while the (one-time) model download runs — so the first query isn't a
@@ -104,20 +106,22 @@ export async function embedItems(
   onModel?: (p: EmbedProgress) => void,
   cache?: EmbedStore,
 ): Promise<number[][]> {
-  const out: (number[] | null)[] = items.map((it) => embCache.get(it.id) ?? (cache?.get(it.id) as number[] | undefined) ?? null);
-  const misses = items.map((it, i) => ({ it, i })).filter((x) => out[x.i] === null);
-  let done = items.length - misses.length;
-  onProgress?.(done, items.length);
-  if (!misses.length) return out as number[][];
-  const ex = await extractor(embedderId, onModel);
-  for (let b = 0; b < misses.length; b += batch) {
-    const chunk = misses.slice(b, b + batch);
-    const res: any = await ex(chunk.map((m) => m.it.text || " "), { pooling: "mean", normalize: true });
-    const arr: number[][] = res.tolist();
-    chunk.forEach((m, j) => { out[m.i] = arr[j]; embCache.set(m.it.id, arr[j]); cache?.put(m.it.id, arr[j]); });
-    done += chunk.length;
-    onProgress?.(done, items.length);
-    await new Promise((r) => setTimeout(r, 0));   // yield so the progress UI actually paints
-  }
-  return out as number[][];
+  // The BROWSER binding of the shared loop (src/embed-core.ts). What is genuinely this host's: the
+  // two-level cache (a session map in front of a persistent OPFS Store), download progress, and a yield
+  // after each batch so the progress bar actually paints. The batching, ordering and write-back are not
+  // reimplemented here — one implementation, injected differently (eid-sh90).
+  return embedThroughCache(items, async () => {
+    const ex = await extractor(embedderId, onModel);
+    return async (texts) => (await ex(texts, { pooling: "mean", normalize: true })).tolist();
+  }, {
+    batch,
+    cache: {
+      get: (id) => embCache.get(id) ?? (cache?.get(id) as number[] | undefined),
+      set: (id, v) => { embCache.set(id, v); cache?.put(id, v); },
+    },
+    onBatch: async (done, total) => {
+      onProgress?.(done, total);
+      await new Promise((r) => setTimeout(r, 0));
+    },
+  });
 }
