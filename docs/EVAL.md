@@ -147,6 +147,37 @@ already costs several times more than landmarking does.**
   → 7.95× → 3.21×). The landmark decision is therefore a second-order choice inside an already lossy
   view, and it should be made on cost, not defended as free.
 
+## How much of a lift is just the proper noun? — 2026-08-12
+
+`artist` is the row most vulnerable to leakage: the Pitchfork corpus title is literally `Artist — Album`,
+`cardText` puts the title first, and the restatement names the artist throughout. So 40.9× could be
+measuring name retention rather than musical relatedness. Falsified by re-embedding one fixed 4,000-card
+sample three ways with the same MiniLM and scoring same-artist prec@10 on each.
+
+| card text | prec@10 | lift | vs shipped |
+|---|---|---|---|
+| as shipped (title first) | 0.0182 | **23.60×** | — |
+| title removed | 0.0148 | 19.19× | −19% |
+| **artist name masked everywhere** (title, restatement, axis notes) | 0.0078 | **10.10×** | **−57%** |
+
+**The name is 57% of the signal. The other 43% is real: with the artist unnameable in 99.2% of cards, a
+reader's ten nearest dots are still 10× likelier than chance to be the same artist.** That is the card
+bottleneck recognizing an artist from described sound alone — the strongest evidence so far that it
+carries substance and not just vocabulary.
+
+Read the sample lifts only against each other, never against the 40.9× in the baseline table: 4,000 cards
+is a sparser neighbourhood with its own baseline (0.00077 vs 0.0014 at full corpus).
+
+Two reasons 10.10× is a **lower** bound, both worth saying out loud: the mask replaces the name with the
+token `ARTIST` in almost every card, which mildly homogenizes the corpus; and it blanks every name word
+over three characters, so an artist called *Girls* or *Life* loses real content along with the proper noun.
+Nothing here inflates the surviving lift.
+
+Reproducing: decode `out/pitchfork/pitchfork.eido`, rebuild `cardText` per `geometry.ts:111` for a seeded
+sample, apply the three treatments, embed each with `poolEmbed`, and brute-force cosine prec@10 against the
+`artist` metadata column with a 200,000-pair baseline drawn from the same sample. (Scratch harness, run and
+discarded per CLAUDE.md; the numbers are the artefact.)
+
 Reproducing the landmark rows: on `agent/landmark`, call `projectAndCluster` from `src/geometry.ts` with
 `{ knn: nodeKnn, knnTo: nodeKnnTo, layoutApprox, landmarks: s }` over the unit-normalized `vectors` of
 `out/pitchfork/pitchfork.eido`, dump each `.xy` to JSON, then score with
