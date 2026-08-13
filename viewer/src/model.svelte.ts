@@ -419,7 +419,22 @@ export class ViewModel {
   });
   resetScrub() { this.scrubLo = null; this.scrubHi = null; this.onScrubReset?.(); }
   // called from an $effect in App: park the scrubber on a real field once the registry exists
-  ensureScrubKey() { if (!this.channels.scrub && this.scrubFields.length) this.channels.scrub = (this.scrubFields.find((d) => d.kind === "temporal") ?? this.scrubFields[0]).key; }
+  // Which dimension the window opens on when nothing is chosen (eid-m6l8). A temporal field first —
+  // windowing a timeline is the case where a range filter obviously means something. Failing that, a
+  // METADATA scalar (connections, length): its numbers have units a reader can interpret. Only then a
+  // discovered axis, because windowing a unitless PCA projection is legal but nearly meaningless as a
+  // filter — measured on pathfinder.eido, which has 0 of 13,796 documents dated and no temporal field at
+  // all, so the control used to open parked on "Scholarly vs Alchemical Combat -0.51 – 0.57".
+  // The ticket offered two fixes — say "this corpus has no dates", or default to the most interpretable
+  // scalar. Taking the second: it adds no chrome, and a control that opens on something meaningful needs
+  // no note explaining why it opened on something meaningless.
+  ensureScrubKey() {
+    if (this.channels.scrub || !this.scrubFields.length) return;
+    const pick = this.scrubFields.find((d) => d.kind === "temporal")
+      ?? this.scrubFields.find((d) => d.source === "meta")
+      ?? this.scrubFields[0];
+    this.channels.scrub = pick.key;
+  }
 
   // ---- queries as dimensions ----
   addQuery(text: string, raw: number[]): string {
