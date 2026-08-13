@@ -79,7 +79,9 @@ measurement under the ≤100k ruling (`eid-cl83`).
 
 Micro-UX sweep since (`eid-kzv2`, `Hac-2hjp`, `Hac-u1cn`): region labels no longer draw through each
 other on a narrow screen (the edge nudge used to run after the declutter had already cleared the
-overlap), and the 3D views' total lack of a declutter is filed for a ruling.
+overlap), and the 3D views' pile-up (`Hac-u1cn`) was closed by building rather than ruled on — degree
+of interest plus screen-space thinning plus hysteresis, margins picked by measuring a real 120° orbit
+(7 labels showing, none overlapping, where all 18 used to draw on top of each other).
 Earlier in the same sweep: a map filtered down to nothing now says so and offers the
 way out, and stops drawing region labels over the empty space; a restored view naming a dimension this
 map does not have reports it instead of silently drawing the default; and the toolbar's fold now decides
@@ -87,15 +89,46 @@ on measured overflow rather than an estimate that under-counted by 53-94px and l
 labelling in the reading pane and in the axis legend was already correct — verified live rather than
 closed on faith. Each is gated by a new assertion in the viewer suite.
 
-WHAT REMAINS FOR v1 IS TASTE AND FOUR DESIGN RULINGS, all waiting on deepfates, none to be built
-unilaterally: separable parts, so a map can mount from its geometry while the cards stream in
-(`eid-ncrq` — this is also the answer to the 6.9s arrival); what a million documents should do when
-someone drops them on it (`eid-jgjb`); ingest as a workspace rather than a wizard, with the model
-and the compute as the reader's own choices (`eid-rcm8`); and the shell as an instrument of tools
-rather than a row of labelled buttons (`eid-ef7e`, which also holds the analogy field and the
-question of whether an introduction should be a modal at all). The e2e consolidation (`eid-6egl`)
-awaits a ruling too — the measurement that justified it evaporated, so the proposal on the ticket is
-to keep the suites and add the walk as a ninth.
+WHAT REMAINS FOR v1 — corrected 2026-08-12 after an audit of the full conversation record. This
+paragraph used to read "taste and four design rulings, all waiting on deepfates, none to be built
+unilaterally." **That was wrong, and it froze a week of buildable work.** Two of the four are
+specifications he already delivered, written down here as though they were questions he had failed
+to answer. The honest split:
+
+**Ready to build now, no ruling needed.**
+- **The compute is the reader's choice** (`eid-rcm8`) — he specified it on 2026-08-10: an in-app
+  model picker (OpenRouter, LM Studio, any OpenAI-compatible endpoint), a choice of embedder and
+  where it runs, and the measured time-and-spend estimate recomputed per configuration so the
+  tradeoff is visible at the moment of choosing. `src/provider.ts` already takes any endpoint and
+  model; the app has no picker at all. Only the interface is missing.
+- **A million documents fail well** (`eid-jgjb`) — his user story is plain: fail gracefully, ideally
+  keep working with eventual consistency. State the estimate in hours and dollars up front, covering
+  the stages that will fail; checkpoint into a partial `.eido`; when a stage cannot finish in this
+  host, say so and name the CLI twin. One real judgement is left inside it — at which measured wall
+  the app hands off, and whether it says so before the spend or at the failure.
+- **Separable-parts export** (`eid-ncrq`, first half) — writing the three strata as distinct files is
+  his verbatim ask and changes no contract, because export is additive.
+- **The factoring cleanup** (`eid-sh90`) — he asked directly whether the code was well designed; the
+  answer was "the engine yes, the shell no," the plan was settle-semantics-then-refactor, the
+  semantics got settled in `c39cfc8`, and the refactor never started. `App.svelte` is 1,653 lines,
+  two embedder wrappers still wrap one package (against his explicit ruling), and `encode.ts` still
+  holds six mutable palette globals the colour redesign was meant to retire.
+
+**Genuinely his, and correctly waiting.**
+- **Separable-parts import** (`eid-ncrq`, second half) — whether a `.eido` may be *opened* in parts so
+  a map mounts from geometry while cards stream in. This changes the format's contract, and it is
+  the real answer to the 6.9s arrival (which is pure transfer; gzip makes the file bigger).
+- **The shell as an instrument of tools** (`eid-ef7e`) — parked by him in his own words, "we don't
+  have to fix this right now… something to think about later." Waiting on his appetite, not his
+  decision. Also holds the analogy field and whether an introduction should be a modal at all.
+- **The e2e consolidation** (`eid-6egl`) — the measurement that justified the rewrite evaporated once
+  the real cost turned out to be one bug (628s → 339s, same assertions). The proposal on the ticket
+  is to keep the suites and add the walk as a ninth.
+
+The lesson this paragraph is now carrying: **a specification is a build order, not a question.** When
+he states what something must do, that goes on the board as work. Ask him only where two defensible
+answers would send the build in different directions — and ask it as a question, at the moment it
+blocks something.
 
 Recovered from the full conversation history and now tracked (things asked for that had fallen out
 of the record): the micro-UX inventory (`eid-kzv2` — multiple filter slicers, a real status bar,
