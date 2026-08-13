@@ -14,7 +14,7 @@
 // Every export flows FROM THE CARDS, which is the contract's own rule: the cards are the source truth
 // and every outbound artefact is a view onto them.
 import { gzipSync, zipSync, strToU8 } from "fflate";
-import { injectEido, vaultEntries, deckJSONL } from "../../src/export";
+import { injectEido, vaultEntries, deckJSONL, separableParts } from "../../src/export";
 import { encodeContainer } from "../../src/eido-container";
 import type { MapContract } from "../../src/schema";
 
@@ -45,6 +45,15 @@ export function vaultArtifact(D: MapContract, base: string): Artifact {
 /** Export → deck: one JSON object per card, for anything that reads a stream of records. */
 export function deckArtifact(D: MapContract, base: string): Artifact {
   return { data: deckJSONL(D), name: base + "-deck.jsonl", type: "application/x-ndjson" };
+}
+
+/** Export → parts: the three strata as separate files in one zip (eid-ncrq). The cards are source
+ *  truth, the vectors and geometry are caches derived from them, the views are your work — and each
+ *  becomes a file something else can read without knowing anything about .eido. */
+export function partsArtifact(D: MapContract, base: string): Artifact {
+  const entries: Record<string, Uint8Array> = {};
+  for (const p of separableParts(D)) entries[p.name] = p.bytes ?? strToU8(p.text ?? "");
+  return { data: zipSync(entries), name: base + "-parts.zip", type: "application/zip" };
 }
 
 /** Export → selection: the held set as {ids,titles,urls}, the shape the CLI descend verb reads.

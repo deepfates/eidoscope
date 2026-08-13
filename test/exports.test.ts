@@ -4,7 +4,7 @@
 // eid-ncrq is about to add separable-parts export on top of this, which is the other reason to pin it now.
 import { test, expect } from "bun:test";
 import { unzipSync, strFromU8, gunzipSync } from "fflate";
-import { exportBase, eidoBytes, htmlArtifact, vaultArtifact, deckArtifact, selectionArtifact, appShell } from "../viewer/src/exports";
+import { exportBase, eidoBytes, htmlArtifact, vaultArtifact, deckArtifact, partsArtifact, selectionArtifact, appShell } from "../viewer/src/exports";
 import { decodeContainer } from "../src/eido-container";
 import type { MapContract } from "../src/schema";
 import { synthMap } from "../e2e/synth";
@@ -86,4 +86,71 @@ test("the app shell falls back to the live document when the page can't be fetch
   const serving = (async () => ({ ok: true, text: async () => "<html>served</html>" })) as unknown as typeof fetch;
   expect(await appShell(serving, "/index.html")).toContain("served");
   delete (globalThis as any).document;
+});
+
+// ── SEPARABLE PARTS (eid-ncrq) ───────────────────────────────────────────────────────────────────────
+// deepfates asked for the three things to come apart: "the embeddings are one thing that we're storing,
+// and the metadata about how to display them is another, and the LLM generated structure/text is another
+// one. And so we should be able to export things separately."
+test("the parts export splits into cards, vectors, geometry and a manifest", () => {
+  const D = mapOf();
+  const a = partsArtifact(D, "readwise");
+  expect(a.name).toBe("readwise-parts.zip");
+  const files = unzipSync(a.data as Uint8Array);
+  expect(Object.keys(files).sort()).toContain("cards.jsonl");
+  expect(Object.keys(files).sort()).toContain("geometry.json");
+  expect(Object.keys(files).sort()).toContain("manifest.json");
+});
+
+test("the cards part is source truth: one line per card, joinable by id", () => {
+  const D = mapOf();
+  const files = unzipSync(partsArtifact(D, "x").data as Uint8Array);
+  const lines = strFromU8(files["cards.jsonl"]).trim().split("\n");
+  expect(lines).toHaveLength(D.ids.length);
+  expect(lines.map((l) => JSON.parse(l).id)).toEqual(D.ids);   // same order as every other part
+});
+
+test("the geometry part carries ids, so its arrays can be rejoined without trusting order", () => {
+  const D = mapOf();
+  const g = JSON.parse(strFromU8(unzipSync(partsArtifact(D, "x").data as Uint8Array)["geometry.json"]));
+  expect(g.ids).toEqual(D.ids);
+  expect(g.xy).toHaveLength(D.ids.length);
+  expect(g.axes).toEqual(D.axes);
+});
+
+// The vectors are written as a raw f32 buffer precisely so numpy/torch can read them with no bespoke
+// decoder. If the byte length ever stops matching n × dim × 4, that promise is broken.
+test("the vectors part is a raw f32 buffer whose shape the manifest states", () => {
+  const D = mapOf();
+  const files = unzipSync(partsArtifact(D, "x").data as Uint8Array);
+  const man = JSON.parse(strFromU8(files["manifest.json"]));
+  expect(D.vectors?.data?.length).toBeGreaterThan(0);   // the fixture must exercise this branch, or the test proves nothing
+  expect(files["vectors.f32"].byteLength).toBe(D.ids.length * D.vectors!.dim * 4);
+  expect(man.files["vectors.f32"]).toContain(String(D.vectors!.dim));
+  // and it round-trips as real numbers, not garbage
+  const back = new Float32Array(files["vectors.f32"].buffer, files["vectors.f32"].byteOffset, D.ids.length * D.vectors!.dim);
+  expect(Number.isFinite(back[0])).toBe(true);
+});
+
+test("the manifest describes every file it shipped, and none it didn't", () => {
+  const D = mapOf();
+  const files = unzipSync(partsArtifact(D, "x").data as Uint8Array);
+  const man = JSON.parse(strFromU8(files["manifest.json"]));
+  expect(man.format).toBe("eidoscope-parts/1");
+  expect(man.cards).toBe(D.ids.length);
+  for (const named of Object.keys(man.files)) expect(files[named]).toBeDefined();
+  // views.json only exists when there IS work — an empty one would imply work that isn't there.
+  // The fixture carries no views, so assert that side here and the other side below; testing only the
+  // branch your fixture happens to take is how a conditional assertion quietly stops meaning anything.
+  expect(D.views?.length ?? 0).toBe(0);
+  expect("views.json" in man.files).toBe(false);
+  expect(files["views.json"]).toBeUndefined();
+});
+
+test("…and a map that HAS saved work ships views.json, described in the manifest", () => {
+  const D = { ...mapOf(), views: [{ name: "the good bit", created: 0, state: {} }] } as unknown as MapContract;
+  const files = unzipSync(partsArtifact(D, "x").data as Uint8Array);
+  expect(files["views.json"]).toBeDefined();
+  expect(JSON.parse(strFromU8(files["views.json"]))[0].name).toBe("the good bit");
+  expect(JSON.parse(strFromU8(files["manifest.json"])).files["views.json"]).toContain("1 saved view");
 });

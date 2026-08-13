@@ -94,3 +94,68 @@ export function deckJSONL(D: MapContract): string {
   }
   return rows.join("\n") + "\n";
 }
+
+// ── SEPARABLE PARTS (eid-ncrq) ───────────────────────────────────────────────────────────────────────
+// deepfates' ask, verbatim: "the embeddings are one thing that we're storing, and the metadata about how
+// to display them is another, and the LLM generated structure/text is another one. And so we should be
+// able to export things separately. Maybe as separate files within a single folder, or a compressed
+// something."
+//
+// So the split follows HIS three, which are also the .eido's three strata (docs/ARCHITECTURE.md):
+//   cards.jsonl   — the LLM-generated structure and text. SOURCE TRUTH; not recomputable.
+//   vectors.f32   — the embeddings. A cache: expensive, re-derivable from the cards with a model.
+//   geometry.json — how to display them: positions, regions, the grain ladder, colour coordinates, axes.
+//                   Also a cache, re-derivable from the vectors.
+//   views.json    — the work: named views, selections, derived axes. Only written when there is some.
+//   manifest.json — provenance, how it was derived, and what each file holds, so the folder is legible
+//                   without this code.
+//
+// This is EXPORT only, and deliberately so: writing the parts out is additive and changes no contract.
+// Whether a .eido may be OPENED in parts is a different question (it changes what "a file" means) and
+// is deepfates'. Nothing here presumes that answer.
+export type PartsEntry = { name: string; text?: string; bytes?: Uint8Array };
+
+export function separableParts(D: MapContract): PartsEntry[] {
+  const n = D.ids.length;
+  const out: PartsEntry[] = [];
+
+  // 1. THE CARDS — source truth. Same row shape as deckJSONL, which is already the card-as-a-record
+  //    format; one format for "a card outside the file", not two that drift.
+  out.push({ name: "cards.jsonl", text: deckJSONL(D) });
+
+  // 2. THE EMBEDDINGS — raw little-endian f32, row-major, n × dim. A plain buffer any tool can read
+  //    (numpy fromfile, torch frombuffer) rather than a bespoke encoding; the shape is in the manifest.
+  if (D.vectors?.data?.length) {
+    const v = D.vectors;
+    out.push({ name: "vectors.f32", bytes: new Uint8Array(v.data.buffer, v.data.byteOffset, v.data.byteLength).slice() });
+  }
+
+  // 3. HOW TO DISPLAY THEM — positions, regions, ladder, colour coordinates, axes and their scores.
+  out.push({ name: "geometry.json", text: JSON.stringify({
+    ids: D.ids,                       // so every array here can be joined back to a card without guessing order
+    xy: D.xy, xyz: D.xyz,
+    cluster: D.cluster, k: D.k, levels: D.levels, counts: D.counts,
+    colorCoords: D.colorCoords,
+    axes: D.axes, scores: D.scores, rawScores: D.rawScores,
+    metaFields: D.metaFields, cols: D.cols,
+  }, null, 1) });
+
+  // 4. THE WORK — only when there is some. An empty views.json would imply work that isn't there.
+  if (D.views?.length) out.push({ name: "views.json", text: JSON.stringify(D.views, null, 1) });
+
+  // 5. THE MANIFEST — last, because it describes the others. Says what each file is IN WORDS, so someone
+  //    opening the folder cold does not have to read this source to understand it.
+  out.push({ name: "manifest.json", text: JSON.stringify({
+    format: "eidoscope-parts/1",
+    provenance: D.provenance, derivedBy: D.derivedBy,
+    cards: n,
+    files: {
+      "cards.jsonl": `${n} cards, one JSON object per line — the LLM's restatement and per-axis placements. Source truth: everything else is derived from these.`,
+      ...(D.vectors?.data?.length ? { "vectors.f32": `${n} × ${D.vectors.dim} float32, little-endian, row-major, row i = card i in cards.jsonl. The card embeddings.` } : {}),
+      "geometry.json": "positions (xy, xyz), region assignment and the grain ladder, colour coordinates, discovered axes and their per-card scores. All re-derivable from the vectors.",
+      ...(D.views?.length ? { "views.json": `${D.views.length} saved view(s) — named camera/channel/filter states.` } : {}),
+    },
+  }, null, 1) });
+
+  return out;
+}

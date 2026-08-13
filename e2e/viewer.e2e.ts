@@ -831,6 +831,22 @@ try {
   ok(strFromU8(zipEntries[zipNames.find((n) => n.endsWith(".md"))!]).startsWith("---"), "export vault: cards carry their frontmatter");
   const dDeck = await grab("deck");
   ok(dDeck.suggestedFilename() === "saved-deck.jsonl", `export deck: named after the document — "${dDeck.suggestedFilename()}"`);
+
+  // SEPARABLE PARTS (eid-ncrq): the three strata come apart into files something else can read — the
+  // cards as source truth, the embeddings as a raw f32 buffer, the display geometry, and a manifest
+  // saying what each one is. Driven here rather than only unit-tested, because the menu wiring is the
+  // half a unit test cannot see.
+  const dParts = await grab("parts");
+  ok(dParts.suggestedFilename() === "saved-parts.zip", `export parts: named after the document — "${dParts.suggestedFilename()}"`);
+  const partsEntries = unzipSync(new Uint8Array(readFileSync(await dParts.path())));
+  const partNames = Object.keys(partsEntries).sort();
+  ok(partNames.includes("cards.jsonl") && partNames.includes("geometry.json") && partNames.includes("manifest.json"),
+    `export parts: the strata are separate files — ${partNames.join(", ")}`);
+  const partsMan = JSON.parse(strFromU8(partsEntries["manifest.json"]));
+  ok(partsMan.cards === 90, `export parts: the manifest counts the real corpus — ${partsMan.cards} cards`);
+  ok(strFromU8(partsEntries["cards.jsonl"]).trim().split("\n").length === 90, "export parts: one card per line, all 90");
+  ok(!!partsEntries["vectors.f32"] && partsEntries["vectors.f32"].byteLength % 4 === 0,
+    `export parts: the embeddings are a raw f32 buffer — ${partsEntries["vectors.f32"]?.byteLength} bytes`);
   const deckLines = readFileSync((await dDeck.path())!, "utf8").trim().split("\n");
   const row0 = JSON.parse(deckLines[0]);
   ok(deckLines.length === 90 && !!row0.id && !!row0.core && !!row0.axes, `export deck: one card-shaped row per card — ${deckLines.length} lines`);

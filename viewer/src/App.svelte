@@ -17,7 +17,7 @@
   import type { CorpusPayload } from "./connectors/types";
   import { engine, filesFromFileList, filesFromDataTransfer, loadCompute, type IngestFile, type IngestStatus } from "./ingest";
   import type { MapContract } from "../../src/schema";
-  import { exportBase as base, eidoBytes, htmlArtifact, vaultArtifact, deckArtifact, selectionArtifact, appShell, type Artifact } from "./exports";
+  import { exportBase as base, eidoBytes, htmlArtifact, vaultArtifact, deckArtifact, partsArtifact, selectionArtifact, appShell, type Artifact } from "./exports";
   import { setSource, currentFileName, canWriteInPlace, supportsFSA, openViaPicker, openRecent, listRecents, writeEido, download, type RecentFile } from "./file";
 
   // THE MODEL — channels, filters, scrubber, the dimension registry, URL (de)serialization. App keeps the DOM,
@@ -518,6 +518,7 @@
   async function exportHTML() { const D = store?.map(); if (D) emit(htmlArtifact(D, exportBase(), await appShell())); }
   function exportVault() { const D = store?.map(); if (D) emit(vaultArtifact(D, exportBase())); }
   function exportDeck() { const D = store?.map(); if (D) emit(deckArtifact(D, exportBase())); }
+  function exportParts() { const D = store?.map(); if (D) emit(partsArtifact(D, exportBase())); }
   function openView(v: SavedView) {
     m.resetViewState();   // a saved view applies EXACTLY — no residue from the view you were just in
     scrubNonce++;
@@ -1202,6 +1203,9 @@
         </DropdownMenu.Item>
         <DropdownMenu.Item class="rounded-field flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm hover:bg-base-200" data-opt="{scope}:export:deck" onSelect={exportDeck}>
           <span class="flex-1">deck</span><span class="font-mono text-[10px] opacity-50">.jsonl — one card per line</span>
+        </DropdownMenu.Item>
+        <DropdownMenu.Item class="rounded-field flex cursor-pointer items-center gap-2 px-3 py-1.5 text-sm hover:bg-base-200" data-opt="{scope}:export:parts" onSelect={exportParts}>
+          <span class="flex-1">separable parts</span><span class="font-mono text-[10px] opacity-50">.zip — cards, vectors, geometry apart</span>
         </DropdownMenu.Item>
         <DropdownMenu.Item class="rounded-field flex items-center gap-2 px-3 py-1.5 text-sm {selection ? 'cursor-pointer hover:bg-base-200' : 'pointer-events-none opacity-40'}" data-opt="{scope}:export:selection" onSelect={exportSelection}>
           <span class="flex-1">selection</span><span class="font-mono text-[10px] opacity-50">{selection ? `.json — the ${selection.length} held cards` : "nothing held — circle cards first"}</span>
