@@ -28,7 +28,7 @@ export type { IngestFile, IngestStatus };
 // ── the reader's compute choice, key included (eid-rcm8) ────────────────────────────────────────────
 // The key is no longer a lone field: it belongs to the endpoint it authenticates, so it travels inside
 // Compute. viewer/src/compute.ts owns the shape, the persistence and the model registry.
-export { loadCompute, saveCompute, defaultCompute, listModels, estimate, LOCAL_FREE, PRESETS, EMBEDDERS, isLocal, fmtUsd, fmtTokens, type Compute, type ModelInfo } from "./compute";
+export { loadCompute, saveCompute, defaultCompute, listModels, estimate, runEstimate, fmtDuration, LOCAL_FREE, PRESETS, EMBEDDERS, isLocal, fmtUsd, fmtTokens, type Compute, type ModelInfo, type Stage, type RunEstimate } from "./compute";
 import { loadCompute, type Compute } from "./compute";
 
 // ── collecting the folder's files (picker or drop) ──────────────────────────────────────────────────

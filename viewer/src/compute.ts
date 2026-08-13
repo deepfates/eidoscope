@@ -150,3 +150,69 @@ export const fmtUsd = (usd: number): string =>
 
 export const fmtTokens = (t: number): string =>
   t >= 1e6 ? `${(t / 1e6).toFixed(1)}M` : t >= 1e3 ? `${Math.round(t / 1e3)}k` : String(t);
+
+// ── HOW LONG, AND WHAT WON'T FINISH HERE (eid-jgjb a + c) ────────────────────────────────────────────
+// The spend estimate above answers "what will this cost". This answers the other two questions someone
+// should be able to ask BEFORE the first call: how long, and is there a stage that will not finish in
+// this tab at all.
+//
+// Every rate here is measured and cited. None is extrapolated past what was measured — where we do not
+// know, the estimate says so instead of producing a confident number, because a made-up hour is worse
+// than an admitted unknown when someone is deciding whether to spend real money.
+//
+//   EMBED_DOCS_PER_SEC — 19,299 documents embedded in ~8 min on WebGPU (eid-jgjb, 2026-08-10) ≈ 40/s.
+//     ONLY valid for WebGPU. The wasm path is slower and was never timed, so a wasm run reports the
+//     stage as unmeasured rather than guessing a multiplier.
+//   CARD_DOCS_PER_SEC — 450 cards/min at concurrency 48 (eid-jgjb) = 7.5/s. Measured against
+//     gemini-flash; a slower model is slower, which is why the panel replaces this with the run's OWN
+//     measured rate as soon as a few cards land.
+//   LAYOUT_MEASURED_TO — the exact layout and grain ladder were measured at 100k (73.6s and 44.2s) and
+//     300k (604s) ON THE CLI HOST, where eid-cl83 calls 100k "comfortable" at 12.3GB peak. Those are
+//     NOT browser-tab numbers and are not presented as any. In the tab we have measured up to ~19k.
+export const EMBED_DOCS_PER_SEC = 40;
+export const CARD_DOCS_PER_SEC = 7.5;
+export const TAB_MEASURED_TO = 20_000;    // the largest corpus actually carried through a tab end to end
+
+export type Stage = { name: string; seconds: number | null; why: string };
+export type RunEstimate = Estimate & {
+  stages: Stage[];
+  // The sum of the stages we could time — a REAL number, because an estimate that refuses to add up is
+  // useless. `timedAll` says whether it covers the whole run, so the panel can label a partial total
+  // honestly instead of passing it off as a whole one. (My first cut returned null whenever any stage
+  // was untimed — and layout never is — so the total was null for EVERY corpus and the UI branch that
+  // rendered it was dead code. Caught by svelte-check, not by the unit tests, which do not typecheck.)
+  totalSeconds: number;
+  timedAll: boolean;
+  untimed: string[];              // stage names with no measured rate, so the caller can name them
+  beyondMeasured: boolean;        // larger than anything we have taken through a browser tab
+};
+
+export const fmtDuration = (s: number): string => {
+  if (s < 90) return `${Math.round(s)}s`;
+  if (s < 5400) return `${Math.round(s / 60)} min`;
+  const h = s / 3600;
+  return h < 10 ? `${h.toFixed(1)} hours` : `${Math.round(h)} hours`;
+};
+
+export function runEstimate(corpusChars: number, docs: number, m: ModelInfo | null, device: Compute["device"]): RunEstimate {
+  const spend = estimate(corpusChars, docs, m);
+  const stages: Stage[] = [
+    device === "wasm"
+      ? { name: "embed", seconds: null, why: "on wasm — never timed, so no number is offered" }
+      : { name: "embed", seconds: docs / EMBED_DOCS_PER_SEC, why: "measured 19,299 docs in ~8 min on WebGPU" },
+    { name: "write cards", seconds: docs / CARD_DOCS_PER_SEC, why: "measured 450 cards/min at concurrency 48, on gemini-flash" },
+  ];
+  const beyondMeasured = docs > TAB_MEASURED_TO;
+  stages.push(beyondMeasured
+    ? { name: "layout + regions", seconds: null, why: `larger than any corpus taken through a browser tab (~${(TAB_MEASURED_TO / 1000) | 0}k); the timings we have at 100k and 300k are from the CLI host, not a tab` }
+    : { name: "layout + regions", seconds: null, why: "seconds at this size, and never the wall — the 19,299-card map lays out in a tab without trouble" });
+
+  const timed = stages.filter((s) => s.seconds != null);
+  const untimed = stages.filter((s) => s.seconds == null).map((s) => s.name);
+  return {
+    ...spend, stages, beyondMeasured,
+    totalSeconds: timed.reduce((a, s) => a + (s.seconds ?? 0), 0),
+    timedAll: untimed.length === 0,
+    untimed,
+  };
+}

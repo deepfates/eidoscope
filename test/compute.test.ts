@@ -1,7 +1,7 @@
 // The compute choice (eid-rcm8) — the model registry and the spend estimate. These matter more than
 // most tests here because the estimate makes a claim about the reader's MONEY before they spend it.
 import { test, expect } from "bun:test";
-import { listModels, estimate, isLocal, loadCompute, defaultCompute, CARD_COMPLETION_TOKENS, CHARS_PER_TOKEN, type ModelInfo } from "../viewer/src/compute";
+import { listModels, estimate, runEstimate, fmtDuration, isLocal, loadCompute, defaultCompute, CARD_COMPLETION_TOKENS, CHARS_PER_TOKEN, EMBED_DOCS_PER_SEC, CARD_DOCS_PER_SEC, type ModelInfo } from "../viewer/src/compute";
 
 const res = (body: unknown, ok = true, status = 200) =>
   ({ ok, status, statusText: ok ? "OK" : "Bad", json: async () => body }) as unknown as Response;
@@ -86,4 +86,63 @@ test("the pre-compute key field is carried into the new shape", () => {
   };
   expect(loadCompute()).toMatchObject({ key: "sk-or-old", model: defaultCompute().model });
   delete (globalThis as any).localStorage;
+});
+
+// ── HOW LONG, AND WHAT WON'T FINISH HERE (eid-jgjb a + c) ────────────────────────────────────────────
+// The point of these is restraint: the estimate must decline to answer where nothing was measured,
+// because a confident wrong hour is worse than an admitted unknown when someone is about to spend money.
+test("a small corpus on WebGPU gets a whole-run time from measured rates", () => {
+  const r = runEstimate(400_000, 1_000, priced, "auto");
+  const embed = r.stages.find((s) => s.name === "embed")!;
+  const card = r.stages.find((s) => s.name === "write cards")!;
+  expect(embed.seconds).toBeCloseTo(1_000 / EMBED_DOCS_PER_SEC, 3);
+  expect(card.seconds).toBeCloseTo(1_000 / CARD_DOCS_PER_SEC, 3);
+  expect(r.beyondMeasured).toBe(false);
+  // and it produces a REAL total, not a null. My first cut returned null whenever any stage was
+  // untimed — and layout never is — so the total was null for every corpus and the UI branch was dead.
+  expect(r.totalSeconds).toBeGreaterThan(0);
+  expect(r.totalSeconds).toBeCloseTo(1_000 / EMBED_DOCS_PER_SEC + 1_000 / CARD_DOCS_PER_SEC, 3);
+});
+
+test("on wasm the embed stage is reported as untimed rather than guessed at", () => {
+  const r = runEstimate(400_000, 1_000, priced, "wasm");
+  const embed = r.stages.find((s) => s.name === "embed")!;
+  expect(embed.seconds).toBeNull();
+  expect(embed.why).toMatch(/never timed/i);
+});
+
+// The one that matters most: a partial sum is fine to show, but must be LABELLED as partial, and the
+// caller must be able to name which stages are missing rather than implying the total covers them.
+test("a partial total is still a number, but it says which stages it does not cover", () => {
+  const r = runEstimate(400_000, 1_000, priced, "wasm");
+  expect(r.timedAll).toBe(false);
+  expect(r.untimed).toContain("embed");
+  expect(r.untimed).toContain("layout + regions");
+  expect(r.totalSeconds).toBeCloseTo(1_000 / CARD_DOCS_PER_SEC, 3);   // carding only — embed is untimed on wasm
+});
+
+test("a corpus larger than anything taken through a tab is flagged, and its layout is not timed", () => {
+  const r = runEstimate(400_000_000, 1_000_000, priced, "auto");
+  expect(r.beyondMeasured).toBe(true);
+  const layout = r.stages.find((s) => s.name === "layout + regions")!;
+  expect(layout.seconds).toBeNull();
+  expect(layout.why).toMatch(/CLI host, not a tab/);
+  expect(r.timedAll).toBe(false);        // so the panel must not present the total as the whole run
+  expect(r.untimed).toContain("layout + regions");
+});
+
+// Sanity against the run we actually paid for: 19,299 Pitchfork documents. Carding at the measured rate
+// is ~43 min; the ticket's own figure for that corpus is in the same neighbourhood.
+test("the carding time lands where the real Pitchfork run landed", () => {
+  const r = runEstimate(110_000_000, 19_299, priced, "auto");
+  const card = r.stages.find((s) => s.name === "write cards")!.seconds!;
+  expect(card / 60).toBeGreaterThan(30);
+  expect(card / 60).toBeLessThan(60);
+});
+
+test("durations read as a person would say them, not as raw seconds", () => {
+  expect(fmtDuration(45)).toBe("45s");
+  expect(fmtDuration(600)).toBe("10 min");
+  expect(fmtDuration(3600 * 2.5)).toBe("2.5 hours");
+  expect(fmtDuration(3600 * 37)).toBe("37 hours");
 });

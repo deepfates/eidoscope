@@ -4,7 +4,7 @@
   // engine itself runs in the engine Web Worker (viewer/src/engine.worker.ts → src/engine.ts), so the
   // page stays interactive for the whole run and cancel really terminates the work. Emits the finished
   // MapContract upward — App mounts it through the SAME in-memory path a dropped .eido takes.
-  import { engine, CancelledError, loadCompute, saveCompute, listModels, estimate, LOCAL_FREE, PRESETS, EMBEDDERS, isLocal, fmtUsd, fmtTokens,
+  import { engine, CancelledError, loadCompute, saveCompute, listModels, estimate, runEstimate, fmtDuration, LOCAL_FREE, PRESETS, EMBEDDERS, isLocal, fmtUsd, fmtTokens,
     type Compute, type ModelInfo, type IngestFile, type IngestStatus } from "./ingest";
   import type { Store } from "../../src/store";
 
@@ -32,6 +32,8 @@
   const chosen = $derived(models?.find((m) => m.id === compute.model) ?? null);
   // a local endpoint is known-free from its URL — no model list needed to say so honestly
   const est = $derived(estimate(corpusChars, files.length, chosen ?? (local ? LOCAL_FREE : null)));
+  // how long, and what won't finish here (eid-jgjb) — measured rates only; unknown stages say so
+  const run = $derived(runEstimate(corpusChars, files.length, chosen ?? (local ? LOCAL_FREE : null), compute.device));
 
   // Load the endpoint's own model list. Failure is reported plainly and never blocks: the model field
   // stays a free-text input, so an endpoint that will not list still runs if you know its model name.
@@ -86,7 +88,11 @@
 </script>
 
 <div class="fixed inset-0 z-[65] grid place-items-center bg-black/60 p-4 backdrop-blur-sm">
-  <div role="dialog" aria-label="open a corpus" class="rounded-box w-full max-w-md border border-base-300 bg-base-100 p-6 shadow-2xl">
+  <!-- The panel scrolls rather than growing past the window. It grew a compute section and, for a large
+       corpus, a handoff warning; without a ceiling the start button gets pushed off-screen and becomes
+       unclickable — which is exactly how the durability e2e failed (the button resolved but was never
+       visible). A dialog that can outgrow the viewport must be able to scroll. -->
+  <div role="dialog" aria-label="open a corpus" class="rounded-box flex max-h-[90vh] w-full max-w-md flex-col overflow-y-auto border border-base-300 bg-base-100 p-6 shadow-2xl">
     <div class="text-lg font-bold">map this folder 🔭</div>
     <div class="mt-1 font-mono text-[11px] opacity-60" data-testid="ingest-corpus">{name} · {files.length} file{files.length === 1 ? "" : "s"}</div>
 
@@ -117,6 +123,21 @@
             {:else}
               <span class="font-bold">≈{fmtUsd(est.usd)}</span>
               <span class="opacity-60">for {files.length} documents (~{fmtTokens(est.promptTokens)} in, ~{fmtTokens(est.completionTokens)} out). A floor — axes and region naming add a little.</span>
+            {/if}
+          </div>
+          <!-- HOW LONG, and what may not finish here (eid-jgjb). Measured rates only; a stage we have
+               never timed says so rather than offering a number someone might plan around. -->
+          <div class="mt-1 border-t border-base-300 pt-1" data-testid="compute-time">
+            <span class="font-bold">≈{fmtDuration(run.totalSeconds)}</span>
+            <span class="opacity-60">
+              — {run.stages.filter((s) => s.seconds != null).map((s) => `${s.name} ${fmtDuration(s.seconds ?? 0)}`).join(" · ")}{#if !run.timedAll}{" · "}<span class="text-warning">{run.untimed.join(" and ")} not timed, so this is a floor</span>{/if}
+            </span>
+            {#if run.beyondMeasured}
+              <div class="mt-1 text-warning" data-testid="compute-beyond">
+                This is larger than any corpus we have taken through a browser tab. The tab may run out of
+                memory in layout after the carding is paid for — the CLI (<span class="font-mono">bun run src/cli.ts &lt;folder&gt;</span>)
+                is the durable path for a corpus this size, and reads and writes the same files.
+              </div>
             {/if}
           </div>
         </div>
