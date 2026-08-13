@@ -17,7 +17,7 @@
   import Ingest from "./Ingest.svelte";
   import HuggingFace from "./connectors/HuggingFace.svelte";
   import type { CorpusPayload } from "./connectors/types";
-  import { engine, filesFromFileList, filesFromDataTransfer, getKey, type IngestFile, type IngestStatus } from "./ingest";
+  import { engine, filesFromFileList, filesFromDataTransfer, loadCompute, type IngestFile, type IngestStatus } from "./ingest";
   import type { MapContract } from "../../src/schema";
   import { injectEido, vaultEntries, deckJSONL } from "../../src/export";
   import { setSource, currentFileName, canWriteInPlace, supportsFSA, openViaPicker, openRecent, listRecents, writeEido, download, type RecentFile } from "./file";
@@ -331,7 +331,7 @@
     descendErr = "";
     descending = { phase: "axes", label: "descending…" };
     try {
-      const child = await engine.descend(D, sel.map((i) => D.ids[i]), getKey(), (s) => (descending = s));
+      const child = await engine.descend(D, sel.map((i) => D.ids[i]), loadCompute(), (s) => (descending = s));
       mountMap(child, { intro: true });   // the child IS the working document now (a Store, decoded from the worker's container bytes)
     } catch (e: any) {
       descendErr = String(e?.message ?? e);
@@ -597,7 +597,7 @@
       onGrainChange: (g) => m.setGrain(g),
     });
     // read-only introspection seam for the integration suite (drives the REAL built app, asserts real state)
-    (window as any).__eido = () => { const d = handle?.debug(); return { grain: m.grain, k: curCount, layout: m.layout, color: m.channels.color, pin: pinned, facetPin, focus: selected, detail: selected !== null, deckOpen: m.deckOpen, deckQ: m.deckQ, deckUnread: m.deckUnread, sort: m.channels.sort, cite: m.citeOn, ghosts: m.ghostsOn, theme, themeName, pal: Array.from({ length: 6 }, (_, i) => col(i)), hover: hovered ? hovered.kind : null, zoom: d?.zoom ?? 0, labels: d?.labels ?? 0, labelsOn, regions: d?.regions ?? 0, rot: d?.rot ?? null, rotX: d?.rotX ?? null, target: d?.target ?? null, span3: d?.span3 ?? null, filters: chips.map((c) => c.label), filterCounts: chips.map((c) => c.n), selectMode: m.selectMode, selection: selection?.length ?? 0, selShareable: m.selShareable, derived: m.derivedDims.length, dims: m.allDims.map((x) => x.key), views: (m.data?.views ?? []).length, drawing: !!lasso, visible: visibleCount, dirty, file: currentFileName(), inPlace: canWriteInPlace() }; };
+    (window as any).__eido = () => { const d = handle?.debug(); return { grain: m.grain, k: curCount, layout: m.layout, color: m.channels.color, pin: pinned, facetPin, focus: selected, detail: selected !== null, deckOpen: m.deckOpen, deckQ: m.deckQ, deckUnread: m.deckUnread, sort: m.channels.sort, cite: m.citeOn, ghosts: m.ghostsOn, theme, themeName, pal: Array.from({ length: 6 }, (_, i) => col(i)), hover: hovered ? hovered.kind : null, zoom: d?.zoom ?? 0, labels: d?.labels ?? 0, labelsOn, regions: d?.regions ?? 0, rot: d?.rot ?? null, rotX: d?.rotX ?? null, target: d?.target ?? null, span3: d?.span3 ?? null, filters: chips.map((c) => c.label), filterCounts: chips.map((c) => c.n), selectMode: m.selectMode, selection: selection?.length ?? 0, selShareable: m.selShareable, derived: m.derivedDims.length, dims: m.allDims.map((x) => x.key), views: (m.data?.views ?? []).length, drawing: !!lasso, visible: visibleCount, dirty, file: currentFileName(), inPlace: canWriteInPlace(), cardModel: madeBy?.cardModel ?? null, embedder: madeBy?.embedder?.id ?? null }; };
     // region labels as the renderer placed them (screen px, nudge applied) — so a test can ask whether
     // two of them overlap. A TextLayer draws to the canvas and leaves nothing in the DOM to measure.
     (window as any).__eidoLabels = () => handle?.labelBoxes() ?? [];

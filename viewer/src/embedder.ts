@@ -27,6 +27,16 @@ export type EmbedProgress = { phase: "runtime" | "download" | "embed"; pct?: num
 // pipeline resolves, so callers/tests can verify the honest device rather than trusting the feature check.
 export let embedDevice: "webgpu" | "wasm" | null = null;
 
+// The reader's device CHOICE (eid-rcm8), distinct from what got detected. "auto" asks WebGPU for an
+// adapter and falls back; "wasm" declines the GPU outright. Changing it drops the cached extractor,
+// because the device is bound when the pipeline is created and a stale one would silently ignore the
+// choice. The vectors are the same either way — this is a speed/heat decision, not a fidelity one.
+let devicePref: "auto" | "wasm" = "auto";
+export function setEmbedDevice(pref: "auto" | "wasm"): void {
+  if (pref === devicePref) return;
+  devicePref = pref; extractorP = null; embedDevice = null;
+}
+
 // Test seam (same spirit as window.__eido): the integration suite serves the model weights and the ort
 // wasm binaries from localhost so an ingest e2e is hermetic — both knobs are the library's DOCUMENTED
 // env fields (env.remoteHost / env.backends.onnx.wasm.wasmPaths); production never sets these and uses
@@ -52,6 +62,7 @@ async function extractor(id: string, onProgress?: (p: EmbedProgress) => void): P
         else if (e?.status === "done" || e?.status === "ready") onProgress({ phase: "download", pct: 100, label: "model ready" });
       };
       const device = await (async () => {
+        if (devicePref === "wasm") return "wasm" as const;
         try { return (await (navigator as any).gpu?.requestAdapter()) ? "webgpu" as const : "wasm" as const; }
         catch { return "wasm" as const; }
       })();

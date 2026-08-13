@@ -10,6 +10,15 @@ import { readFileSync, existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+// The compute section (eid-rcm8) is collapsed for a reader who ALREADY has a key — the panel shows a
+// summary instead. A run that needs to type a key therefore opens it first, the way a person would.
+const openComputeIfCollapsed = async (pg: any) => {
+  if (await pg.locator("[data-testid=ingest-key]").count()) return;
+  const t = pg.locator("[data-testid=compute-toggle]");
+  if (await t.count()) await t.click();
+};
+
+
 const ROOT = join(import.meta.dir, "..");
 const distIndex = join(ROOT, "viewer", "dist", "index.html");
 if (!existsSync(distIndex)) { console.error("✗ viewer/dist/index.html missing — run `cd viewer && bun run build` first"); process.exit(2); }
@@ -136,6 +145,8 @@ await rigPage(p);
 async function ingestOnce(pg = p, dir = corpusDir): Promise<number> {
   await pg.waitForSelector("[data-testid=open-panel]", { timeout: 15000 });
   await pg.setInputFiles("[data-testid=open-folder]", dir);
+  await pg.waitForSelector("[data-testid=compute]", { timeout: 10000 });
+  await openComputeIfCollapsed(pg);
   await pg.waitForSelector("[data-testid=ingest-key]", { timeout: 10000 });
   await pg.fill("[data-testid=ingest-key]", "sk-or-e2e-test");
   const t0 = Date.now();
@@ -215,6 +226,8 @@ try {
   await p.goto(base + "/index.html");
   await p.waitForSelector("[data-testid=open-panel]", { timeout: 15000 });
   await p.setInputFiles("[data-testid=open-folder]", corpusC);
+  await p.waitForSelector("[data-testid=compute]", { timeout: 10000 });
+  await openComputeIfCollapsed(p);
   await p.waitForSelector("[data-testid=ingest-key]", { timeout: 10000 });
   await p.fill("[data-testid=ingest-key]", "sk-or-e2e-test");
   await p.click("[data-testid=ingest-start]");

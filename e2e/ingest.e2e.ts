@@ -157,7 +157,7 @@ try {
   await p.click("[data-testid=ingest-start]");
   await p.waitForSelector('[data-testid=ingest-status][data-phase="need-key"]', { timeout: 120000 });
   const gate = await p.locator("[data-testid=ingest-status]").textContent();
-  ok(/axes discovered/.test(gate ?? "") && /Carding needs an LLM key/.test(gate ?? ""), "keyless run stops AFTER axes with the honest line (cards are the bottleneck and the point)");
+  ok(/axes discovered/.test(gate ?? "") && /Carding needs a model/.test(gate ?? ""), "keyless run stops AFTER axes with the honest line (cards are the bottleneck and the point)");
   ok(llmCalls.card === 0, `no card calls were spent without a key — card calls: ${llmCalls.card}`);
 
   // 4. enter the key and RESUME — embeddings + axes are kept, carding runs, the map mounts
@@ -182,9 +182,16 @@ try {
   ok(llmCalls.axes >= 1 && llmCalls.region >= 1, `axis naming (${llmCalls.axes}) and region naming (${llmCalls.region}) went through the same mocked endpoint`);
   ok(s.dims.some((d: string) => d.startsWith("axis:") || d === "hub"), "the dimension registry is populated from the freshly built map");
 
-  // 5. the key stayed in the browser and out of the document
-  const stored = await p.evaluate(() => localStorage.getItem("eido-llm-key"));
-  ok(stored === "sk-or-e2e-test", "the key is held in localStorage (this browser only)");
+  // 5. the key stayed in the browser and out of the document. It now travels inside the reader's whole
+  // COMPUTE choice (eid-rcm8: endpoint + model + embedder + key), because a credential belongs to the
+  // endpoint it authenticates — but the invariant is the one it always was: this browser, never a file.
+  const compute = await p.evaluate(() => JSON.parse(localStorage.getItem("eido-compute") ?? "null"));
+  ok(compute?.key === "sk-or-e2e-test", "the key is held in localStorage (this browser only)");
+  ok(!!compute?.apiURL && !!compute?.model && !!compute?.embedder, `the compute choice is remembered with it — ${compute?.model} via ${compute?.apiURL}`);
+  // and the run STAMPED what it actually used, rather than a hardcoded default (eid-rcm8 provenance)
+  const made = await p.evaluate(() => { const d = (window as any).__eido(); return { cardModel: d.cardModel, embedder: d.embedder }; });
+  ok(made.cardModel === compute.model, `derivedBy.cardModel records the model the reader chose — ${made.cardModel}`);
+  ok(made.embedder === compute.embedder, `derivedBy.embedder records the embedder the reader chose — ${made.embedder}`);
 
   // 6. the cards ARE the mocked LLM's cards — open the deck and read one core
   await p.keyboard.press("Escape"); // intro

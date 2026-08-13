@@ -10,6 +10,15 @@ import { readFileSync, existsSync, mkdtempSync, writeFileSync, mkdirSync, append
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+// The compute section (eid-rcm8) is collapsed for a reader who ALREADY has a key — the panel shows a
+// summary instead. A run that needs to type a key therefore opens it first, the way a person would.
+const openComputeIfCollapsed = async (pg: any) => {
+  if (await pg.locator("[data-testid=ingest-key]").count()) return;
+  const t = pg.locator("[data-testid=compute-toggle]");
+  if (await t.count()) await t.click();
+};
+
+
 const LOG = join(tmpdir(), "eido-durability-e2e.log");   // progress on disk: a hang must be visible, never silent
 const t0 = Date.now();
 const log = (...a: unknown[]) => appendFileSync(LOG, `[${((Date.now() - t0) / 1000).toFixed(1)}s] ${a.join(" ")}\n`);
@@ -97,7 +106,7 @@ async function ingest(ctx: BrowserContext, label: string) {
   await step(`${label}: goto`, () => p.goto(base + "/index.html"));
   await step(`${label}: wait open-folder`, () => p.waitForSelector("[data-testid=open-folder]", { state: "attached", timeout: 20000 }));
   await step(`${label}: setInputFiles`, () => p.setInputFiles("[data-testid=open-folder]", corpusDir));
-  await step(`${label}: wait key gate`, () => p.waitForSelector("[data-testid=ingest-key]", { timeout: 20000 }));
+  await step(`${label}: wait key gate`, async () => { await p.waitForSelector("[data-testid=compute]", { timeout: 20000 }); await openComputeIfCollapsed(p); await p.waitForSelector("[data-testid=ingest-key]", { timeout: 20000 }); });
   await step(`${label}: fill key`, () => p.fill("[data-testid=ingest-key]", "sk-or-e2e-test"));
   await step(`${label}: click start`, () => p.click("[data-testid=ingest-start]"));
   const tick = setInterval(async () => {

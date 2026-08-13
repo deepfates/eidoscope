@@ -13,6 +13,7 @@ import { buildMap } from "../src/engine.ts";
 import { poolEmbedWith } from "../src/geometry.ts";
 import type { Embedder } from "../src/map.ts";
 import { IngestRun } from "../viewer/src/run.ts";
+import { defaultCompute } from "../viewer/src/compute";
 
 // Deterministic fake embedder: a seeded 32-dim vector from each chunk's content hash. Same text in,
 // same vector out, on both faces — so any divergence downstream is REAL stage divergence, not noise.
@@ -83,5 +84,5 @@ test("in-page engine ≡ node pipeline on the 24-doc example corpus (axes, score
 // estimates) — an empty corpus is still a plain, named error.
 test("IngestRun: an empty folder is a plain, named error", async () => {
   const run2 = new IngestRun([{ path: "a/nope.png", name: "nope.png", text: "x" }], "empty", () => {});
-  expect(run2.start("sk-test")).rejects.toThrow(/no documents found/);
+  expect(run2.start({ ...defaultCompute(), key: "sk-test" })).rejects.toThrow(/no documents found/);
 });

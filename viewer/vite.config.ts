@@ -7,6 +7,9 @@ import { viteSingleFile } from "vite-plugin-singlefile";
 //  - default `vite build` + singlefile → ONE portable eidoscope.html (the self-contained artifact)
 //  - the same app can be served/hosted and fetch its data (see the loader, eid-enqr)
 export default defineConfig({
+  // Honour $PORT so a harness (or a second checkout) can run the dev server without fighting whatever
+  // already owns vite's default 5173. Unset = vite's own default, unchanged for everyone else.
+  server: { port: Number(process.env.PORT) || undefined },
   plugins: [
     svelte(),
     tailwindcss(),

@@ -4,14 +4,21 @@
     {
       "name": "viewer",
       "runtimeExecutable": "bun",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
       "cwd": "viewer",
-      "port": 5173
+      "port": 5173,
+      "autoPort": true
     },
     {
       "name": "eidoscope-app",
       "runtimeExecutable": "/Users/deepfates/.bun/bin/bun",
-      "runtimeArgs": ["run", "/Users/deepfates/Hacking/github/deepfates/eidoscope/bin/serve-app.ts"],
+      "runtimeArgs": [
+        "run",
+        "/Users/deepfates/Hacking/github/deepfates/eidoscope/bin/serve-app.ts"
+      ],
       "port": 5178
     }
   ]

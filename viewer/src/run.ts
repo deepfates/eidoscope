@@ -14,8 +14,9 @@ import { poolEmbedWith } from "../../src/geometry";
 import { discoverAxes, type Axis, type AxesProgress } from "../../src/axes";
 import { Store } from "../../src/llm";
 import { CARD_CONCURRENCY, DEFAULT_MODEL, DEFAULT_API_URL, DEFAULT_EMBED_MODEL, DEFAULT_MAX_DOC_CHARS } from "../../src/defaults";
+import { isLocal, type Compute } from "./compute";
 import type { MapContract } from "../../src/schema";
-import { embedItems, type EmbedProgress } from "./embedder";
+import { embedItems, setEmbedDevice, type EmbedProgress } from "./embedder";
 import { opfsStore, cacheFileName, persistSummary, requestDurableStorage } from "./opfs";
 // the kNN regime seam (agent/knn-regimes): exact WebGPU whenever this worker's context exposes an
 // adapter (WebGPU is available in dedicated workers), calibrated hnswlib-wasm without one — the same
@@ -37,8 +38,15 @@ const corsSafeFetch = ((input: RequestInfo | URL, init?: RequestInit) => {
   return fetch(input, init);
 }) as typeof fetch;
 
-export const pageLLM = (key: string) =>
-  ai({ name: "openai", apiKey: key, apiURL: DEFAULT_API_URL, config: { model: DEFAULT_MODEL, stream: false }, options: { fetch: corsSafeFetch } } as any);
+// The LLM the READER chose (eid-rcm8), not a hardcoded one. `apiKey` is sent even when empty because a
+// local server (LM Studio, Ollama) needs no credential and rejects nothing — the same call shape serves
+// both, which is why this is one seam and not two code paths.
+export const pageLLM = (c: Compute) =>
+  ai({ name: "openai", apiKey: c.key, apiURL: c.apiURL, config: { model: c.model, stream: false }, options: { fetch: corsSafeFetch } } as any);
+
+// A local endpoint needs no key; a hosted one does. This is an ENVIRONMENT branch (what the endpoint is),
+// never a data-size branch — the distinction deepfates ruled on when the kNN crossover was deleted.
+export const computeReady = (c: Compute): boolean => !!c.key.trim() || isLocal(c.apiURL);
 
 // `meta` (eid-xmf0): connector-carried row metadata (an HF row's non-text columns, a file's mtime) —
 // plain JSON values only (it crosses postMessage); docsFromFiles moves it onto the Doc, and
@@ -95,8 +103,8 @@ const axesNarration = (set: (s: IngestStatus) => void, n: () => number, named: b
 // as a plain MapContract the app mounts through the SAME in-memory path a dropped .eido takes.
 // The key is OPTIONAL — the cards already exist, so without one the child opens honest-but-unnamed:
 // PC axis names + deterministic contrastive-term region labels (naming can be applied later with a key).
-export async function descendInPage(P: DescendParent, selIds: string[], key: string, onStatus: (s: IngestStatus) => void): Promise<MapContract> {
-  const llm = key ? pageLLM(key) : undefined;
+export async function descendInPage(P: DescendParent, selIds: string[], compute: Compute, onStatus: (s: IngestStatus) => void): Promise<MapContract> {
+  const llm = computeReady(compute) ? pageLLM(compute) : undefined;
   const ax = axesNarration(onStatus, () => selIds.length, false);
   const regionRate = new Rate();
   try {
@@ -187,9 +195,10 @@ export class IngestRun {
 
   // Run (or resume) as far as honesty allows. Returns the finished map, or null when stopped at the
   // axes stage for want of a key.
-  async start(key: string): Promise<MapContract | null> {
+  async start(compute: Compute): Promise<MapContract | null> {
     if (this.running) return null;
     this.running = true;
+    setEmbedDevice(compute.device);   // the reader's GPU/CPU choice, applied before the first embed
     const ax = axesNarration((s) => this.set(s), () => this.docs?.length ?? 0, true);
     try {
       const docs = this.parse();
@@ -197,13 +206,13 @@ export class IngestRun {
       await this.openCaches();
       // the read line carries the honest cache-durability state (OPFS / contended / memory-only)
       this.set({ phase: "read", label: `read ${docs.length} documents from ${this.fileCount} files`, note: `${persistSummary().line} · stage times are estimated from this run's measured rates — cancel any time` });
-      const llm = key ? pageLLM(key) : undefined;
+      const llm = computeReady(compute) ? pageLLM(compute) : undefined;
 
       // full-text embeddings (chunk-pooled, exactly like the CLI's embedDocs) — computed once, kept
       // in-session AND in the persistent chunk cache (content+model addressed, like map.ts poolEmbed)
       const embedChunks = (label: string) => (items: { id: string; text: string }[]) => {
         const embedRate = new Rate();   // fresh slope per pass (documents vs cards embed at different sizes)
-        return embedItems(items, DEFAULT_EMBED_MODEL,
+        return embedItems(items, compute.embedder,
           (done, total) => {
             const eta = embedRate.eta(done, total);
             this.set({ phase: "embed", label: `${label} ${done}/${total} chunks`, done, total, note: eta != null ? `≈${fmtEta(eta)} left ${label} — measured from this run's chunk rate` : `${label}: measuring the chunk rate…` });
@@ -230,8 +239,8 @@ export class IngestRun {
         this.set({
           phase: "need-key",
           label: `${this.axes.axes.length} axes discovered (${this.axes.realDims} dimensions above the noise floor) from ${docs.length} documents. ` +
-            `Carding needs an LLM key: the cards — one readable restatement + placements per document — are what the map is built from. ` +
-            `Enter an OpenRouter API key to continue; it stays in this browser and is never written into any file.`,
+            `Carding needs a model: the cards — one readable restatement + placements per document — are what the map is built from. ` +
+            `Choose where it runs and give it a key if it needs one; the key stays in this browser and is never written into any file.`,
         });
         return null;
       }
@@ -245,7 +254,7 @@ export class IngestRun {
         concurrency: CARD_CONCURRENCY,
         name: this.name,
         source: this.source ?? `folder (in-page ingest) · ${this.fileCount} files`,
-        cardModel: DEFAULT_MODEL, embedderId: DEFAULT_EMBED_MODEL,
+        cardModel: compute.model, embedderId: compute.embedder,
         onProgress: (p: EngineProgress) => {
           if (p.stage === "cards") {
             this.cardsFailed = p.failed;

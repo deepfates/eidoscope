@@ -17,6 +17,7 @@
 // never poll an abort signal; the OPFS caches are append-only + content-addressed (and DRAINED before
 // any result posts), so everything flushed before a kill is honestly resumable.
 import { IngestRun, descendInPage, type IngestFile, type IngestStatus } from "./run";
+import type { Compute } from "./compute";
 import { embedQuery, type EmbedProgress } from "./embedder";
 import { encodeContainer } from "../../src/eido-container";
 import { opfsDrain } from "./opfs";
@@ -32,8 +33,8 @@ const applySeams = (s?: Seams) => {
 };
 
 export type WorkerOp =
-  | { op: "ingest"; runId: string; files: IngestFile[]; name: string; key: string; source?: string }
-  | { op: "descend"; map: DescendParent; selIds: string[]; key: string }
+  | { op: "ingest"; runId: string; files: IngestFile[]; name: string; compute: Compute; source?: string }
+  | { op: "descend"; map: DescendParent; selIds: string[]; compute: Compute }
   | { op: "embed-query"; text: string; embedderId?: string }
   | { op: "dispose" };   // graceful shutdown: self.close() tears the (large wasm) heap down ON THIS thread
 export type WorkerReq = { id: number; seams?: Seams } & WorkerOp;
@@ -74,12 +75,12 @@ self.onmessage = async (ev: MessageEvent<WorkerReq>) => {
       if (!run) { run = new IngestRun(m.files, m.name, (s) => post({ id: m.id, t: "status", s }), m.source); runs.set(m.runId, run); }
       else run.onStatus = (s: IngestStatus) => post({ id: m.id, t: "status", s });
       try {
-        const D = await run.start(m.key);
+        const D = await run.start(m.compute);
         if (D && !run.cardsFailed) runs.delete(m.runId);   // clean completion: nothing left to resume
         await postMap(m.id, D, run.cardsFailed, run.warnings);
       } catch (e) { runs.delete(m.runId); throw e; }        // failure: OPFS is the resume state
     } else if (m.op === "descend") {
-      const D = await descendInPage(m.map, m.selIds, m.key, (s) => post({ id: m.id, t: "status", s }));
+      const D = await descendInPage(m.map, m.selIds, m.compute, (s) => post({ id: m.id, t: "status", s }));
       await postMap(m.id, D, 0, []);
     } else if (m.op === "embed-query") {
       const vec = await embedQuery(m.text, m.embedderId, (p) => post({ id: m.id, t: "embed-status", p }));

@@ -25,10 +25,11 @@ export type { IngestFile, IngestStatus };
 // the connectors' pre-download guard (see src/defaults.ts — the ingest-RUN refusal is dead, this
 // bounds only what a connector will pull into the page when the row count is known up front)
 
-// ── the user-held LLM key: a field the user fills, kept in localStorage, never in any file ───────────
-export const KEY_STORAGE = "eido-llm-key";
-export const getKey = (): string => { try { return localStorage.getItem(KEY_STORAGE) ?? ""; } catch { return ""; } };
-export const setKey = (k: string): void => { try { k ? localStorage.setItem(KEY_STORAGE, k) : localStorage.removeItem(KEY_STORAGE); } catch {} };
+// ── the reader's compute choice, key included (eid-rcm8) ────────────────────────────────────────────
+// The key is no longer a lone field: it belongs to the endpoint it authenticates, so it travels inside
+// Compute. viewer/src/compute.ts owns the shape, the persistence and the model registry.
+export { loadCompute, saveCompute, defaultCompute, listModels, estimate, LOCAL_FREE, PRESETS, EMBEDDERS, isLocal, fmtUsd, fmtTokens, type Compute, type ModelInfo } from "./compute";
+import { loadCompute, type Compute } from "./compute";
 
 // ── collecting the folder's files (picker or drop) ──────────────────────────────────────────────────
 import { SOURCE_EXT } from "../../src/corpus-core";
@@ -164,11 +165,11 @@ export const engine = {
   // state); it survives need-key and failed-cards partials, which the panel resumes in place.
   // `source` = which connector this corpus truthfully came through (connectors/types.ts, from main's
   // HF connector) — rides to the worker's IngestRun and lands in provenance.source.
-  async ingest(runId: string, files: IngestFile[], name: string, key: string, onStatus: (s: IngestStatus) => void, source?: string): Promise<IngestResult> {
+  async ingest(runId: string, files: IngestFile[], name: string, compute: Compute, onStatus: (s: IngestStatus) => void, source?: string): Promise<IngestResult> {
     let b = ingestBridges.get(runId);
     if (!b || b.dead) { b = new Bridge(); ingestBridges.set(runId, b); }
     try {
-      const r = await b.call<DoneMsg>({ op: "ingest", runId, files: toPlain(files), name, key, source }, { onStatus });
+      const r = await b.call<DoneMsg>({ op: "ingest", runId, files: toPlain(files), name, compute: toPlain(compute), source }, { onStatus });
       const complete = !!r.bytes && r.cardsFailed === 0;
       if (complete) { b.dispose(); ingestBridges.delete(runId); }
       return { store: r.bytes ? await decode(r.bytes) : null, cardsFailed: r.cardsFailed, warnings: r.warnings };
@@ -187,7 +188,7 @@ export const engine = {
   // DESCEND the held set into its own map — a fresh worker per call, gone when the call settles.
   // Inbound crosses ONLY what descend reads (engine.ts DescendParent): identity, cards, metadata and
   // one copied vectors buffer (transferred) — the parent's heavy geometry never crosses at all.
-  async descend(map: MapContract, selIds: string[], key: string, onStatus: (s: IngestStatus) => void): Promise<MapStore> {
+  async descend(map: MapContract, selIds: string[], compute: Compute, onStatus: (s: IngestStatus) => void): Promise<MapStore> {
     const parent: DescendParent = {
       ids: toPlain(map.ids), titles: toPlain(map.titles), cores: toPlain(map.cores),
       vectors: map.vectors ? { data: new Float32Array(map.vectors.data), dim: map.vectors.dim } : undefined,
@@ -199,7 +200,7 @@ export const engine = {
     };
     const b = new Bridge();
     try {
-      const r = await b.call<DoneMsg>({ op: "descend", map: parent, selIds: toPlain(selIds), key }, { onStatus },
+      const r = await b.call<DoneMsg>({ op: "descend", map: parent, selIds: toPlain(selIds), compute: toPlain(compute) }, { onStatus },
         parent.vectors ? [parent.vectors.data.buffer as ArrayBuffer] : []);
       b.dispose();   // graceful: the worker closes itself (its heap teardown never blocks the page)
       return await decode(r.bytes!);
