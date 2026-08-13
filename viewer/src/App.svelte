@@ -12,14 +12,12 @@
   import { deriveDirection } from "./derive";
   import { resolveIdSet, type UrlIdSet } from "./idset";
   import { GRAIN_MIN_REGION, GRAIN_RATIO, GRAIN_PALETTE_N, type SavedView, type ViewState } from "../../src/schema";
-  import { encodeContainer } from "../../src/eido-container";
-  import { gzipSync, zipSync, strToU8 } from "fflate";
   import Ingest from "./Ingest.svelte";
   import HuggingFace from "./connectors/HuggingFace.svelte";
   import type { CorpusPayload } from "./connectors/types";
   import { engine, filesFromFileList, filesFromDataTransfer, loadCompute, type IngestFile, type IngestStatus } from "./ingest";
   import type { MapContract } from "../../src/schema";
-  import { injectEido, vaultEntries, deckJSONL } from "../../src/export";
+  import { exportBase as base, eidoBytes, htmlArtifact, vaultArtifact, deckArtifact, selectionArtifact, appShell, type Artifact } from "./exports";
   import { setSource, currentFileName, canWriteInPlace, supportsFSA, openViaPicker, openRecent, listRecents, writeEido, download, type RecentFile } from "./file";
 
   // THE MODEL — channels, filters, scrubber, the dimension registry, URL (de)serialization. App keeps the DOM,
@@ -304,9 +302,8 @@
   // (and the CLI descend verb's input shape). The selection-pane FERRY died with in-page descend;
   // this outbound export is not it coming back.
   function exportSelection() {
-    if (!selection?.length || !data) return;
-    const payload = { ids: selection.map((i) => data!.ids[i]), titles: selection.map((i) => data!.titles[i]), urls: selection.map((i) => data!.urls?.[i]) };
-    download(JSON.stringify(payload, null, 2), exportBase() + "-selection-" + payload.ids.length + ".json", "application/json");
+    const D = store?.map(); if (!D || !selection?.length) return;
+    emit(selectionArtifact(D, exportBase(), selection));
   }
 
   // ═══ DESCEND (eid-kep3) — the held set becomes its OWN map, IN PAGE: subset the carried card
@@ -497,11 +494,10 @@
   const INITIAL_CHANNEL = { color: "region", size: "hub", x: "", y: "", z: "", scrub: "", sort: "hub" } as const;
   let recents = $state<RecentFile[]>([]);
   let fileInput = $state<HTMLInputElement | null>(null);   // the non-FSA open fallback
-  const exportBase = () => currentFileName().replace(/\.eido$/i, "") || "eidoscope";
+  const exportBase = () => base(currentFileName());
   async function saveDoc() {
     const D = store?.map(); if (!D) return;
-    const bytes = gzipSync(encodeContainer(D));   // the SAME shared codec the pipeline emits with
-    const how = await writeEido(bytes);
+    const how = await writeEido(eidoBytes(D));   // the SAME shared codec the pipeline emits with
     dirty = false;
     saveNote = how === "wrote" ? "saved" : "downloaded " + currentFileName();
     setTimeout(() => (saveNote = ""), 4000);
@@ -516,25 +512,12 @@
     else { loadFailed = true; status = "couldn't reopen " + r.name + " — permission declined or the file moved"; }
   }
   // ── EXPORT — one surface, every outbound flow, all fed from the cards (the shared src/export.ts) ──
-  async function exportHTML() {
-    const D = store?.map(); if (!D) return;
-    // the shell is this very app: fetched from the host when served, the live document as the file:// fallback
-    let shell = "";
-    try { const r = await fetch(location.pathname); if (r.ok) shell = await r.text(); } catch {}
-    if (!shell) shell = "<!doctype html>\n" + document.documentElement.outerHTML;
-    download(injectEido(shell, gzipSync(encodeContainer(D))), exportBase() + ".html", "text/html");
-  }
-  function exportVault() {
-    const D = store?.map(); if (!D) return;
-    const { manifest, cards } = vaultEntries(D);
-    const entries: Record<string, Uint8Array> = { [manifest.name]: strToU8(manifest.text) };
-    for (const c of cards) entries[c.name] = strToU8(c.text);
-    download(zipSync(entries), exportBase() + "-vault.zip", "application/zip");
-  }
-  function exportDeck() {
-    const D = store?.map(); if (!D) return;
-    download(deckJSONL(D), exportBase() + "-deck.jsonl", "application/x-ndjson");
-  }
+  // Each export is built in viewer/src/exports.ts and only LANDED here — the component supplies the
+  // open document and its name, and owns the one DOM-touching step.
+  const emit = (a: Artifact | null) => { if (a) download(a.data, a.name, a.type); };
+  async function exportHTML() { const D = store?.map(); if (D) emit(htmlArtifact(D, exportBase(), await appShell())); }
+  function exportVault() { const D = store?.map(); if (D) emit(vaultArtifact(D, exportBase())); }
+  function exportDeck() { const D = store?.map(); if (D) emit(deckArtifact(D, exportBase())); }
   function openView(v: SavedView) {
     m.resetViewState();   // a saved view applies EXACTLY — no residue from the view you were just in
     scrubNonce++;
