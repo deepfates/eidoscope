@@ -327,3 +327,46 @@ export function themeGamut(theme: ThemeTokens): Gamut | null {
 
 /** One OKLCH colour → 0-255 RGB, chroma-clamped into gamut (the ramp builders' pixel step). */
 export const oklchToRgb = (l: number, c: number, h: number): RGB => rgb255({ mode: "oklch" as const, l, c, h });
+
+// ── THE LABEL CHIP (Hac-4adh) ────────────────────────────────────────────────────────────────────────
+// A region label draws a chip of the theme's own ground behind it. The alpha used to be picked by eye
+// (180/255 in dark, 214/255 in light), and in dark themes a dense cluster of bright dots read straight
+// through it — exactly where a region name matters most.
+//
+// FIRST ATTEMPT, RECORDED BECAUSE IT WAS WRONG: derive the alpha from WCAG text contrast — the smallest
+// alpha at which the ink still clears 4.5:1 over the most luminous colour the map can paint. That
+// returned 0.6 for every theme, LOWER than the eyeballed value it was meant to fix. WCAG contrast is
+// the wrong instrument here: it asks whether text stands out from a UNIFORM background, and the actual
+// defect is VISUAL NOISE — dozens of small bright dots showing through, whose average contrast is fine
+// while the busy, high-variance field behind the glyphs is what makes the name hard to read.
+//
+// The right criterion is OCCLUSION: the chip should suppress the DIFFERENCE between whatever happens to
+// sit behind it, so the text sits on something that reads as one flat surface. Measured in OKLab, which
+// is the perceptual space this file already scores palettes in — so the chip is as opaque as it needs to
+// be to bring the whole range of possible backdrops within a just-noticeable difference of each other,
+// and no more.
+// The threshold IS the taste knob, and pretending otherwise would be dishonest: it decides how much of
+// the map a chip swallows. Measured on the black theme's real palette — 0.02 → alpha 0.98 (chips read as
+// solid slabs), 0.08 → 0.92, 0.12 → 0.88. 0.08 is the value here: comfortably past the 0.706 that caused
+// the bug, legible over the densest cluster on the readwise map, and still translucent enough that a
+// label reads as sitting ON the map rather than punched out of it. A quiet palette derives less.
+const CHIP_JND = 0.08;
+
+export function chipAlpha(ground: RGB, ink: RGB, over: RGB[], jnd = CHIP_JND): number {
+  if (!over.length) return 1;
+  const toLab = converter("oklab") as (c: any) => any;
+  const lab = (c: RGB) => toLab({ mode: "rgb", r: c[0] / 255, g: c[1] / 255, b: c[2] / 255 });
+  const mix = (a: number, behind: RGB): RGB =>
+    [0, 1, 2].map((i) => a * ground[i] + (1 - a) * behind[i]) as RGB;
+  // the extremes are what matter: if the most and least luminous backdrop composite to within a JND,
+  // everything between them does too. Include the bare ground, since a label often sits over empty map.
+  const backdrops = [...over, ground];
+  const dE = (p: any, q: any) => Math.hypot(p.l - q.l, p.a - q.a, p.b - q.b);
+  for (let a = 0.6; a < 1; a += 0.02) {
+    const labs = backdrops.map((b) => lab(mix(a, b)));
+    let worst = 0;
+    for (let i = 0; i < labs.length; i++) for (let j = i + 1; j < labs.length; j++) worst = Math.max(worst, dE(labs[i], labs[j]));
+    if (worst <= jnd) return Math.min(1, a);
+  }
+  return 1;   // a palette too vivid to hide at any partial alpha: the chip goes solid
+}

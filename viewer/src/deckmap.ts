@@ -2,8 +2,8 @@ import { Deck, OrthographicView, OrbitView, LinearInterpolator } from "@deck.gl/
 import { ScatterplotLayer, LineLayer, TextLayer } from "@deck.gl/layers";
 import { DataFilterExtension } from "@deck.gl/extensions";
 import type { MapContract } from "../../src/schema";
-import { col, setActiveTheme, type RGB } from "./encode";
-import { themePalette } from "./palette";
+import { col, palette, setActiveTheme, type RGB } from "./encode";
+import { themePalette, chipAlpha } from "./palette";
 import { easeCubicInOut } from "d3-ease";
 import { selectInPolygon } from "./lasso";
 
@@ -99,7 +99,11 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   const ink = (): RGB => pal()?.ink ?? (dark() ? [255, 255, 255] : [38, 38, 52]);
   const ground = (): RGB => pal()?.bg ?? (dark() ? [10, 12, 18] : [255, 255, 255]);
   const spokeCol = () => [...ink(), 110] as [number, number, number, number];
-  const labelBg = () => [...ground(), dark() ? 180 : 214] as [number, number, number, number];
+  // The chip's opacity is DERIVED per theme (palette.ts chipAlpha), not chosen by eye: the smallest
+  // alpha at which label text still clears the WCAG text-contrast floor over the most luminous colour
+  // the map can paint underneath it. The eyeballed 180/255 in dark themes let bright clusters read
+  // through the chip (Hac-4adh) — precisely where a region name is most needed.
+  const labelBg = () => [...ground(), Math.round(255 * chipAlpha(ground(), ink(), palette()))] as [number, number, number, number];
   const ghostCol = () => [...ink(), dark() ? 190 : 205] as [number, number, number, number];
   setActiveTheme(theme);   // the palette must be live before the first getFillColor call
 
