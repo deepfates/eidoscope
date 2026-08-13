@@ -1,5 +1,5 @@
 import { Deck, OrthographicView, OrbitView, LinearInterpolator } from "@deck.gl/core";
-import { ScatterplotLayer, LineLayer, PolygonLayer, TextLayer } from "@deck.gl/layers";
+import { ScatterplotLayer, LineLayer, TextLayer } from "@deck.gl/layers";
 import { DataFilterExtension } from "@deck.gl/extensions";
 import type { MapContract } from "../../src/schema";
 import { col, setActiveTheme, type RGB } from "./encode";
@@ -10,7 +10,7 @@ import { selectInPolygon } from "./lasso";
 // The map's rendering + interaction core. ONE Deck for its whole life (canvas pointer capture never lost);
 // layout switches swap the view + camera via setProps. deck.gl gives GPU rendering, a controller with
 // pan/pinch-zoom/inertia (2D) or drag-rotate (3D OrbitView), and finger-sized picking. Composed layers:
-// points (encoded colour/size) · region hulls (PolygonLayer, on highlight) · region labels (TextLayer,
+// points (encoded colour/size) · region labels (TextLayer,
 // collision-decluttered) · neighbour spokes (LineLayer, on focus). Everything drives through update().
 
 export type Layout = "mde" | "axes" | "orbit" | "axes3d";
@@ -50,15 +50,6 @@ export type MapHandle = {
   setCamera: (c: { target?: number[]; zoom?: number; rot?: number | null; rotX?: number | null }) => void;
 };
 type Opts = { getColor: (i: number) => RGB; getRadius: (i: number) => number; layout: Layout; getX: (i: number) => number; getY: (i: number) => number; getZ: (i: number) => number; posSig?: string; showLabels: boolean; grain: number; citeOn?: boolean; ghostsOn?: boolean; theme?: string };
-
-const hull2d = (pts: number[][]): number[][] => {
-  if (pts.length < 3) return pts;
-  const p = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-  const cr = (o: number[], a: number[], b: number[]) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
-  const lo: number[][] = []; for (const q of p) { while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
-  const up: number[][] = []; for (let i = p.length - 1; i >= 0; i--) { const q = p[i]; while (up.length >= 2 && cr(up[up.length - 2], up[up.length - 1], q) <= 0) up.pop(); up.push(q); }
-  return lo.slice(0, -1).concat(up.slice(0, -1));
-};
 
 export type HoverPayload = { kind: "point"; i: number } | { kind: "ghost"; g: any };
 export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts & { onClick?: (i: number) => void; onDrill?: () => void; onHover?: (h: HoverPayload | null, x: number, y: number) => void; onGrainChange?: (g: number) => void }): MapHandle {
@@ -112,7 +103,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   const ghostCol = () => [...ink(), dark() ? 190 : 205] as [number, number, number, number];
   setActiveTheme(theme);   // the palette must be live before the first getFillColor call
 
-  // per-region (at the CURRENT grain level) member indices + label — for hulls, labels, dimming, drill.
+  // per-region (at the CURRENT grain level) member indices + label — for labels, dimming, drill.
   // Recomputed whenever the grain slider moves. Falls back to the default cluster if no ladder is present.
   let members: number[][] = [];
   let labelOf: (c: number) => string = () => "";
@@ -271,19 +262,6 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     getColor: spokeCol(), getWidth: 1,
     updateTriggers: { getSourcePosition: [posVer], getTargetPosition: [posVer], getColor: themeVer },
   });
-  const hullPts = (): number[][] | null => {
-    if (is3d(layout)) return null;
-    const idx = highlight != null ? members[highlight] : null;
-    return idx && idx.length >= 3 ? hull2d(idx.map((i) => pos(i))) : null;
-  };
-  const hullColor = (): RGB => col(highlight ?? 0);
-  const hullLayer = () => { const h = hullPts(); return new PolygonLayer({
-    id: "hull",
-    data: h ? [h] : [],
-    getPolygon: (d: any) => d, stroked: true, filled: true,
-    getFillColor: [...hullColor(), 22] as any, getLineColor: [...hullColor(), 150] as any, getLineWidth: 1.5, lineWidthUnits: "pixels",
-    updateTriggers: { data: [highlight, posVer], getFillColor: [highlight, themeVer], getLineColor: [highlight, themeVer] },
-  }); };
   const labelLayer = () => new TextLayer({
     id: "labels",
     data: decluttered(),
@@ -357,7 +335,6 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     updateTriggers: { getLineColor: themeVer },
   });
   const layers = () => [
-    ...(highlight != null ? [hullLayer()] : []),
     ...(citeOn && D.cite ? [citeLayer()] : []),
     ...(focus != null ? [spokesLayer()] : []),
     pointsLayer(),
