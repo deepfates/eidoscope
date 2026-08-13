@@ -873,6 +873,10 @@
                  between the two layouts is a number the reader can weigh, not a vibe. -->
             <div><span class="font-bold">3D cloud</span> — <span class="opacity-75">an independent 3D embedding of the same card vectors, not the neighbor map with depth added — the two layouts arrange the cards differently{#if data.xyzAgree != null}: on this corpus, {data.xyzAgree.toFixed(1)} of a card's 8 nearest neighbors on the map are still among its 8 nearest in the cloud{/if}.</span></div>
             <div><span class="font-bold">axes</span> — <span class="opacity-75">PCA of the full-text embeddings. A card's place on an axis is its exact projection, so an axis position IS a number you can compare.</span></div>
+            <!-- eid-5d1g: hub is neighbour-graph in-degree. We shipped it labelled "influence", which told
+                 every reader that big dots were important documents. They are not. The label is fixed;
+                 this says plainly what the number counts and what it does not mean. -->
+            <div><span class="font-bold">connections</span> — <span class="opacity-75">how many of the other cards list this one among their 8 nearest neighbours. A high count means a card sits in a crowded, typical part of the map — not that it matters more; nothing is important merely because things are near it. Dot size carries it unless you put something else there.</span></div>
             <div><span class="font-bold">regions</span> — <span class="opacity-75">clusters of the same vectors, named by a model from what each group over-uses. The grain slider walks {nLevels} nested levels, from {data.counts?.[0] ?? data.k} to {data.counts?.[data.counts.length - 1] ?? data.k} regions, ×{GRAIN_RATIO} per notch — a slider pragmatic, since the corpus clumps at every scale and prefers none (measured; no level is more "real"). The top is where splitting would cut regions below {GRAIN_MIN_REGION} cards; the default is the finest level that still fits the {GRAIN_PALETTE_N}-colour palette.</span></div>
           </div>
 
