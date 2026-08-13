@@ -9,7 +9,7 @@ const dist = join(ROOT, "viewer", "dist", "index.html");
 const PUBLIC = join(ROOT, "viewer", "public");
 if (!existsSync(dist)) { console.error("run `cd viewer && bun run build` first"); process.exit(2); }
 const html = readFileSync(dist);
-const TYPES: Record<string, string> = { ".eido": "application/octet-stream", ".json": "application/json", ".svg": "image/svg+xml" };
+const TYPES: Record<string, string> = { ".eido": "application/octet-stream", ".json": "application/json", ".svg": "image/svg+xml", ".html": "text/html; charset=utf-8", ".css": "text/css", ".js": "text/javascript", ".wasm": "application/wasm", ".png": "image/png" };
 
 Bun.serve({
   port: 5178,
