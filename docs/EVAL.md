@@ -189,55 +189,59 @@ while a rerun from the file uses their f16-quantized copies.)
 ## What does the bottleneck COST? — 2026-08-14
 
 The question this harness existed to answer and never asked. Every table above scores the **card**
-neighbourhood against the world and finds real lift. None of them asked what the *same corpus* scores
-with the bottleneck removed — so "the cards carry real relatedness" was established and "the cards are
-worth what they cost" was never examined. Those are different claims, and only the second one is a
-defence of the design.
+neighbourhood against the world and finds real lift. None asked what the *same corpus* scores with the
+bottleneck removed — so "the cards carry real relatedness" was established and "the cards are worth what
+they cost" was never examined. Different claims, and only the second defends the design.
 
 `--raw <corpus-dir>` embeds the source documents' full text with the same MiniLM the pipeline uses and
-scores that neighbourhood on the same verifiers, at the same k, against the same baselines:
-
-```
-bun run eval:relatedness -- out/pitchfork/pitchfork.eido --raw ~/…/pitchfork
-```
+scores that neighbourhood on the same verifiers, at the same k, against the same baselines.
 
 This is **not** the move the discipline forbids. Routing the shipped geometry around the cards to buy a
 better number is off the table. Measuring what the cards cost is the opposite: it is the only way the
-price is ever stated out loud rather than assumed to be zero.
+price gets stated rather than assumed to be zero.
 
-| corpus | verifier | what it leans on | cards | raw full text | who wins |
+### Every comparison here carries an interval, and that is new
+
+Every number in the sections above is a point estimate with no uncertainty, on corpora as small as 233
+documents — and they were being read against each other. The first version of this section did exactly
+that: it reported "wikicat: cards 3.42× vs raw 3.32×, the cards win" on a 274-document corpus. **That
+difference is noise.** `--raw` and `--layout` comparisons now print a **paired bootstrap** — 2,000
+resamples of the *documents* both spaces scored, same labels, same k — and an interval straddling zero is
+printed as a TIE in as many words.
+
+| corpus | verifier | leans on | cards | raw | paired difference (raw − cards), 95% |
 |---|---|---|---|---|---|
-| pitchfork | **genre** | subject matter | **1.85×** | 1.86× | tie (0.6926 vs 0.6966 prec@10) |
-| simple-wikipedia-400 | **wikicat** | editor-curated topic | **3.42×** | 3.32× | cards |
-| simple-wikipedia-400 | **wikidata_p31** | entity type | **2.34×** | 2.22× | cards |
-| pitchfork | **artist** | the proper noun, mostly | 40.9× | **139×** | raw, by 3.4× |
-| pitchfork | **author** | the critic's voice | 4.03× | **6.41×** | raw, by 1.6× |
-| pitchfork | **score** | nothing topical | 1.07× | 1.05× | neither (both ≈ chance) |
+| pitchfork (17,182) | **genre** | subject matter | 1.85× | 1.86× | +0.0040 `[+0.0002, +0.0077]` — raw, by 0.4pp on a 0.69 base |
+| simple-wiki (274) | **wikicat** | curated topic | 3.42× | 3.32× | −0.0049 `[−0.0163, +0.0062]` — **tie** |
+| simple-wiki (266) | **wikidata_p31** | entity type | 2.34× | 2.22× | −0.0230 `[−0.0348, −0.0110]` — **cards** |
+| pitchfork (19,293) | **artist** | the proper noun | 40.9× | 139× | +0.1346 `[+0.1320, +0.1373]` — **raw, enormously** |
+| pitchfork (19,299) | **author** | the critic's voice | 4.03× | 6.41× | +0.0286 `[+0.0270, +0.0303]` — **raw** |
+| pitchfork (19,299) | **score** | nothing topical | 1.07× | 1.05× | mean\|Δ\| +0.0266 `[+0.0200, +0.0332]` — cards (smaller is better here) |
 
-**The result splits exactly along what a card is for.**
+**The result splits along what a card is for.**
 
-1. **On topical relatedness the bottleneck is free, and on the most independent verifiers it is
-   slightly positive.** Genre is a tie. Wikipedia's category graph and Wikidata's entity type — the two
-   labels in this whole harness that were never visible to any part of the pipeline, and that live
-   outside the local article text entirely — both go to the cards. Whatever the restatement is doing, it
-   is not destroying subject matter, and on genuinely external topic labels it is a small net gain.
+1. **On subject matter the bottleneck is free.** Genre is a statistical win for raw that is a practical
+   nothing — 0.4 percentage points on a 0.69 base, detectable only because n is 17,182. Wikipedia's
+   category graph is a flat tie. Wikidata's entity type — one of the two labels in this harness that no
+   part of the pipeline ever saw — goes to the **cards**, and that one clears its interval. Whatever the
+   restatement does, it does not cost subject matter.
 
-2. **On identity and surface, raw wins enormously, and that is the bottleneck working as specified.**
-   Same-artist is 3.4× better in raw text — unsurprising once you notice that a full review names the
-   artist many times over thousands of words while a ~3,700-character card names them once or twice, and
-   that 57% of even the card lift is the proper noun (measured above). Same-reviewer is 1.6× better in
-   raw, which is the critic's prose style surviving in full text and being flattened by the restatement
-   signature's demand for "one neutral, uniform voice." A reader who wants "more by this artist" is
-   better served by full-text search than by this map, and should be told so.
+2. **On identity and surface, raw wins large, and that is the bottleneck working as specified.**
+   Same-artist is +0.135 absolute — a full review names the artist many times across thousands of words
+   while a ~3,700-character card names them once or twice, and 57% of even the card lift is the proper
+   noun (measured above). Same-reviewer is +0.029: the critic's prose style surviving in full text and
+   being flattened by the restatement signature's demand for "one neutral, uniform voice."
 
-**So the price of the bottleneck is now a number, and it is: you give up name-matching and
-voice-matching, and you give up nothing on what things are about.** That is a defensible trade for an
-instrument whose whole claim is that a heterogeneous set becomes comparable *to itself* — but it was a
-trade nobody had priced, and "the map is not decorative" was doing work that this table should have been
-doing.
+3. **The 2D projection costs more than the bottleneck does.** Every `xy − cards` interval on Pitchfork is
+   negative and clears zero: genre −0.054, artist −0.044, author −0.020 — an order of magnitude more
+   damage than the card step, and it is the step nobody questions because it is the one you look at.
 
-Two things this does not settle, stated so they are not read as settled. It compares neighbourhoods, not
+**So the price of the bottleneck is a number: you give up name-matching and voice-matching, and you give
+up nothing on what things are about.** A reader who wants "more by this artist" is better served by
+full-text search than by this map, and should be told so rather than left to assume.
+
+What this does **not** settle, stated so it is not read as settled. It compares neighbourhoods, not
 readability — the cards' actual justification is that you can read one and cannot read a full-text
-embedding, and no verifier here can see that. And it is two corpora: one where the cards win twice and
-one where they tie once and lose twice, on verifiers of very different independence. A third corpus with
-an external topical label would be worth more than another verifier on these two.
+embedding, and no verifier here can see that. It is two corpora. And raw full text is chunk-pooled across
+a long document while a card is close to a single embedder pass, so the two spaces differ in more than
+the bottleneck.

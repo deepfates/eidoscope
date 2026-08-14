@@ -223,7 +223,29 @@ const REGISTRY: Record<string, Verifier[]> = {
 // ── the measure ──────────────────────────────────────────────────────────────────────────────────────
 const mulberry32 = (a: number) => () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 
-export type Cell = { corpus: string; space: string; verifier: string; k: number; n: number; coverage: number; score: number; base: number; lift: number; metric: "prec@k" | "mean|Δ|" };
+export type Cell = { corpus: string; space: string; verifier: string; k: number; n: number; coverage: number; score: number; base: number; lift: number; metric: "prec@k" | "mean|Δ|";
+  // per-DOCUMENT score (NaN where the document was not counted), so two spaces can be compared PAIRED —
+  // same documents, same labels, same baseline — instead of by eyeballing two point estimates.
+  perDoc: Float64Array };
+
+// PAIRED BOOTSTRAP over documents. Every number this harness printed was a point estimate with no
+// uncertainty attached, on corpora as small as 233 documents, and they were being compared to each
+// other — "3.42× vs 3.32×, the cards win" is not a finding unless the interval excludes zero. Resampling
+// DOCUMENTS (not neighbour pairs) is the right unit: a document is the thing sampled from the world, and
+// pairing removes the between-document variance that dominates the unpaired comparison.
+export function bootstrapDiff(a: Cell, b: Cell, reps = 2000, seed = 0xB0075): { diff: number; lo: number; hi: number; n: number } {
+  const idx: number[] = [];
+  for (let i = 0; i < a.perDoc.length; i++) if (Number.isFinite(a.perDoc[i]) && Number.isFinite(b.perDoc[i])) idx.push(i);
+  const diff = idx.reduce((s, i) => s + (a.perDoc[i] - b.perDoc[i]), 0) / (idx.length || 1);
+  const rnd = mulberry32(seed), draws = new Float64Array(reps);
+  for (let r = 0; r < reps; r++) {
+    let s = 0;
+    for (let t = 0; t < idx.length; t++) { const i = idx[Math.floor(rnd() * idx.length)]; s += a.perDoc[i] - b.perDoc[i]; }
+    draws[r] = s / (idx.length || 1);
+  }
+  draws.sort();
+  return { diff, lo: draws[Math.floor(0.025 * reps)], hi: draws[Math.floor(0.975 * reps)], n: idx.length };
+}
 
 // precision@k over a neighbour list, plus the random-pair baseline for the same label set. Unlabelled
 // neighbours are dropped from the denominator (else a sparsely-labelled corpus looks worse for a reason
@@ -241,11 +263,12 @@ export function scoreSpace(corpus: string, space: string, nbr: number[][], L: La
     return 0;
   };
   let sum = 0, cnt = 0;
+  const perDoc = new Float64Array(L.vals.length).fill(NaN);
   for (const i of idx) {
     const row = nbr[i] ?? [];
     let s = 0, c = 0;
     for (const j of row.slice(0, k)) { if (j === i || !labelled[j]) continue; s += shares(i, j); c++; }
-    if (c) { sum += s / c; cnt++; }
+    if (c) { sum += s / c; cnt++; perDoc[i] = s / c; }
   }
   const obs = sum / (cnt || 1);
   // baseline: seeded random pairs of DISTINCT labelled nodes, same shares() test
@@ -260,7 +283,7 @@ export function scoreSpace(corpus: string, space: string, nbr: number[][], L: La
   const base = bs / pairs;
   return { corpus, space, verifier: "", k, n: cnt, coverage: idx.length / L.vals.length,
     score: obs, base, lift: L.kind === "num" ? base / (obs || 1e-9) : obs / (base || 1e-9),
-    metric: L.kind === "num" ? "mean|Δ|" : "prec@k" };
+    metric: L.kind === "num" ? "mean|Δ|" : "prec@k", perDoc };
 }
 
 // ── spaces ───────────────────────────────────────────────────────────────────────────────────────────
@@ -387,7 +410,36 @@ const w = head.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i].length))
 console.log(head.map((h, i) => pad(h, w[i])).join("  "));
 console.log(w.map((x) => "-".repeat(x)).join("  "));
 for (const r of rows) console.log(r.map((x, i) => pad(x, w[i])).join("  "));
+// ── is a difference between two spaces REAL? ─────────────────────────────────────────────────────────
+// Rows alone invite the mistake this section exists to stop: reading 3.42× next to 3.32× on a 274-document
+// corpus as "the cards win". Every other space is compared to `cards` by a paired bootstrap over the
+// documents both scored, and an interval that straddles zero is printed as a TIE in as many words.
+const byKey = new Map<string, Cell[]>();
+for (const c of cells) { const key = `${c.corpus} ${c.verifier}`; (byKey.get(key) ?? byKey.set(key, []).get(key)!).push(c); }
+const comps: string[] = [];
+for (const [key, group] of byKey) {
+  const ref = group.find((c) => c.space === "cards");
+  if (!ref) continue;
+  for (const c of group) {
+    if (c.space === "cards") continue;
+    const b = bootstrapDiff(c, ref);
+    const [corpus, verifier] = key.split(" ");
+    const real = b.lo > 0 || b.hi < 0;
+    // DIRECTION IS PER-METRIC. prec@k is bigger-is-better; a scalar verifier is scored as mean |Δ| between
+    // neighbours, where SMALLER is better. Reading the raw sign for both printed "raw ahead" on the score
+    // row when raw's neighbours were in fact FURTHER apart in verdict than the cards'.
+    const better = c.metric === "mean|Δ|" ? -b.diff : b.diff;
+    const dir = !real ? "TIE — the interval includes zero" : better > 0 ? `${c.space} ahead` : "cards ahead";
+    comps.push(`${corpus}/${verifier}: ${c.space} − cards = ${b.diff >= 0 ? "+" : ""}${b.diff.toFixed(4)} `
+      + `[95% ${b.lo >= 0 ? "+" : ""}${b.lo.toFixed(4)}, ${b.hi >= 0 ? "+" : ""}${b.hi.toFixed(4)}] over ${b.n} docs — ${dir}`);
+  }
+}
+if (comps.length) {
+  console.log("\npaired bootstrap vs the card space (2,000 resamples of the documents, same labels, same k):");
+  for (const c of comps) console.log("  · " + c);
+}
 if (notes.length) { console.log("\nnotes:"); for (const n of notes) console.log("  · " + n); }
 const out = flag("json");
-if (out) writeFileSync(out, JSON.stringify({ k, pairs, generated: Date.now(), cells, notes }, null, 2));
+// perDoc is a measurement intermediate, not a result — strip it so the JSON report stays readable.
+if (out) writeFileSync(out, JSON.stringify({ k, pairs, generated: Date.now(), cells: cells.map(({ perDoc, ...c }) => c), comparisons: comps, notes }, null, 2));
 }

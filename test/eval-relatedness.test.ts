@@ -61,3 +61,45 @@ test("a corpus with fewer than ten labelled documents is not scored at all", () 
   const sparse: LabelSet = { kind: "cat", vals: alt.vals.map((v, i) => (i < 5 ? (v as string[]) : undefined)) };
   expect(scoreSpace("t", "s", sameLabelNbr, sparse, 4, 1000)).toBeNull();
 });
+
+// ── PAIRED BOOTSTRAP ─────────────────────────────────────────────────────────────────────────────────
+// Added because the harness reported point estimates with no uncertainty and they were being compared to
+// each other: "3.42x vs 3.32x, the cards win" on 274 documents was noise, and nothing in the tool said so.
+import { bootstrapDiff, type Cell } from "../bin/eval-relatedness";
+
+const cellOf = (per: (number | null)[], metric: Cell["metric"] = "prec@k"): Cell => ({
+  corpus: "c", space: "s", verifier: "v", k: 10, n: per.length, coverage: 1, score: 0, base: 0, lift: 0, metric,
+  perDoc: Float64Array.from(per.map((x) => (x === null ? NaN : x))),
+});
+
+test("a real difference excludes zero; an identical pair cannot", () => {
+  const a = cellOf(Array.from({ length: 300 }, (_, i) => (i % 10) / 10));
+  const better = cellOf(Array.from({ length: 300 }, (_, i) => (i % 10) / 10 + 0.2));
+  const w = bootstrapDiff(better, a);
+  expect(w.diff).toBeCloseTo(0.2, 6);
+  expect(w.lo).toBeGreaterThan(0);            // a uniform +0.2 shift is not a coin flip
+  const same = bootstrapDiff(a, cellOf(Array.from({ length: 300 }, (_, i) => (i % 10) / 10)));
+  expect(same.diff).toBe(0);
+  expect(same.lo).toBe(0); expect(same.hi).toBe(0);   // zero variance in the paired differences
+});
+
+// The failure this guards is the one that actually happened in the wild: a difference far smaller than
+// the spread between documents, which looks decisive as two rounded point estimates and is not.
+test("a difference smaller than the between-document spread is reported as straddling zero", () => {
+  const rnd = (s: number) => () => ((s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff);
+  const r = rnd(7);
+  const base = Array.from({ length: 274 }, () => r());
+  const a = cellOf(base);
+  const b = cellOf(base.map((v) => Math.min(1, Math.max(0, v + (r() - 0.5) * 0.4))));   // noise, no true shift
+  const w = bootstrapDiff(b, a);
+  expect(w.lo).toBeLessThan(0); expect(w.hi).toBeGreaterThan(0);
+  expect(w.n).toBe(274);
+});
+
+// Documents only one space could score must be dropped, not treated as zero — otherwise a space with
+// thinner coverage is punished for the coverage rather than judged on the documents it shares.
+test("only documents BOTH spaces scored are paired", () => {
+  const a = cellOf([0.5, 0.5, null, 0.5]);
+  const b = cellOf([0.5, null, 0.9, 0.5]);
+  expect(bootstrapDiff(b, a).n).toBe(2);
+});
