@@ -39,7 +39,8 @@ import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { decodeMap } from "../src/mapbin.ts";
 import type { MapContract } from "../src/schema.ts";
-import { nodeKnn, layoutKnn } from "../src/map.ts";
+import { nodeKnn, layoutKnn, embedDocs } from "../src/map.ts";
+import { folderSource } from "../src/corpus.ts";
 
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..");
 const VDIR = join(REPO, "eval", "verifiers");
@@ -266,7 +267,34 @@ export function scoreSpace(corpus: string, space: string, nbr: number[][], L: La
 // "cards" = the card-vector neighbourhood (what the map IS, before any projection); "xy" = the 2D layout
 // the reader actually looks at. Extra layouts (--layout name=file.json, a bare n×2 array) are scored the
 // same way, which is how one construction gets compared to another on the same verifiers.
-async function spacesOf(D: MapContract, k: number, extra: Record<string, number[][]>) {
+// THE COMPARISON THIS HARNESS WAS MISSING (2026-08-14). Every number it produced measured the CARD space
+// against the world and found real lift — and never once asked what the same corpus scores WITHOUT the
+// bottleneck. That makes "the cards carry real relatedness" true and "the cards are worth their cost"
+// unexamined, which are not the same claim. `--raw <corpus-dir>` embeds the source documents' full text
+// with the same MiniLM the pipeline uses and scores that neighbourhood on the same verifiers, so the two
+// constructions can be read side by side.
+//
+// This is deliberately NOT the forbidden move. Routing the shipped geometry around the cards to buy a
+// better number is off the table; measuring what the cards cost is the opposite — it is the only way the
+// bottleneck's price is ever stated out loud. If raw wins on relatedness, the cards still have a reason
+// to exist (they are the readable atoms; a raw map cannot be read at all), and we say the price instead
+// of implying there isn't one.
+async function rawSpace(D: MapContract, dir: string, k: number): Promise<number[][] | null> {
+  const src = folderSource(dir, {});
+  const { docs } = await src.load();
+  const byId = new Map(docs.map((d) => [d.id, d]));
+  const aligned = D.ids.map((id) => byId.get(id));
+  const hit = aligned.filter(Boolean).length;
+  // Fail loud rather than silently scoring a different corpus: a partial join would quietly compare the
+  // card space over 19,299 documents to a raw space over whatever subset happened to match.
+  if (hit / D.ids.length < 0.98) throw new Error(`--raw: only ${hit}/${D.ids.length} of the map's ids were found in ${dir} — that is a different corpus, not a comparison`);
+  console.error(`raw space: ${hit}/${D.ids.length} ids matched; embedding full text with the pipeline's own embedder…`);
+  const embs = await embedDocs(aligned.map((d, i) => d ?? { id: D.ids[i], title: D.titles[i], body: "" } as any));
+  const X = embs.map((r) => { const m = Math.sqrt(r.reduce((a, x) => a + x * x, 0)) || 1; return r.map((x) => x / m); });
+  return (await nodeKnn(X, k)).idx.map((r) => r.filter((_, t) => t > 0));
+}
+
+async function spacesOf(D: MapContract, k: number, extra: Record<string, number[][]>, rawDir?: string) {
   const out: Record<string, number[][]> = {};
   if (D.vectors) {
     // UNIT-NORMALIZE first: the pipeline lays out `embs.map(unit)` and the kNN kernels rank by dot
@@ -292,6 +320,7 @@ async function spacesOf(D: MapContract, k: number, extra: Record<string, number[
   } else if (D.nbr?.length) out.cards = D.nbr;                                     // lite file: the stored graph
   out.xy = layoutKnn(D.xy, k);
   for (const [name, xy] of Object.entries(extra)) out[`xy:${name}`] = layoutKnn(xy, k);
+  if (rawDir) { const r = await rawSpace(D, rawDir, k); if (r) out.raw = r; }
   return out;
 }
 
@@ -305,7 +334,7 @@ const has = (name: string) => argv.includes(`--${name}`);
 const k = parseInt(flag("k", "10")!, 10), pairs = parseInt(flag("pairs", "200000")!, 10);
 const layouts: Record<string, number[][]> = {};
 argv.forEach((a, i) => { if (a === "--layout") { const [name, path] = argv[i + 1].split("="); layouts[name] = JSON.parse(readFileSync(path, "utf8")); } });
-const files = argv.filter((a, i) => !a.startsWith("--") && !(i > 0 && argv[i - 1].startsWith("--") && ["k", "pairs", "layout", "json"].includes(argv[i - 1].slice(2))));
+const files = argv.filter((a, i) => !a.startsWith("--") && !(i > 0 && argv[i - 1].startsWith("--") && ["k", "pairs", "layout", "json", "raw"].includes(argv[i - 1].slice(2))));
 // default target set: the shipped corpora, under this checkout's out/ — or, when running from a git
 // worktree (where out/ is gitignored and lives only in the main checkout), the main checkout's out/.
 const OUTS = [join(REPO, "out"), join(REPO, "..", "..", "..", "out")];
@@ -340,7 +369,7 @@ for (const f of targets) {
   }
   if (!resolved.length) continue;
 
-  const spaces = await spacesOf(D, k, layouts);
+  const spaces = await spacesOf(D, k, layouts, flag("raw"));
   for (const [space, nbr] of Object.entries(spaces))
     for (const { v, L } of resolved) {
       const c = scoreSpace(CORPUS_KEY, space, nbr, L, k, pairs);

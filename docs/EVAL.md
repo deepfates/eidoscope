@@ -14,6 +14,7 @@ anything.
 bun run eval:relatedness                                   # every corpus with a verifier, k=10
 bun run eval:relatedness -- out/pitchfork/pitchfork.eido   # one corpus
 bun run eval:relatedness -- <eido> --layout landmark=/tmp/xy.json   # score an ALTERNATIVE layout
+bun run eval:relatedness -- <eido> --raw <corpus-dir>       # score the SAME corpus without the bottleneck
 bun run eval:relatedness -- <eido> --fetch                 # (re)build the external verifier sidecars
 bun run eval:relatedness -- <eido> --k 5 --json report.json
 ```
@@ -184,3 +185,59 @@ Reproducing the landmark rows: on `agent/landmark`, call `projectAndCluster` fro
 `--layout exact=… --layout tenth=…`. (The regenerated exact layout scores within noise of the shipped one
 — 1.69× vs 1.71× on genre — the small gap being that the shipped map was fitted on the float32 embeddings
 while a rerun from the file uses their f16-quantized copies.)
+
+## What does the bottleneck COST? — 2026-08-14
+
+The question this harness existed to answer and never asked. Every table above scores the **card**
+neighbourhood against the world and finds real lift. None of them asked what the *same corpus* scores
+with the bottleneck removed — so "the cards carry real relatedness" was established and "the cards are
+worth what they cost" was never examined. Those are different claims, and only the second one is a
+defence of the design.
+
+`--raw <corpus-dir>` embeds the source documents' full text with the same MiniLM the pipeline uses and
+scores that neighbourhood on the same verifiers, at the same k, against the same baselines:
+
+```
+bun run eval:relatedness -- out/pitchfork/pitchfork.eido --raw ~/…/pitchfork
+```
+
+This is **not** the move the discipline forbids. Routing the shipped geometry around the cards to buy a
+better number is off the table. Measuring what the cards cost is the opposite: it is the only way the
+price is ever stated out loud rather than assumed to be zero.
+
+| corpus | verifier | what it leans on | cards | raw full text | who wins |
+|---|---|---|---|---|---|
+| pitchfork | **genre** | subject matter | **1.85×** | 1.86× | tie (0.6926 vs 0.6966 prec@10) |
+| simple-wikipedia-400 | **wikicat** | editor-curated topic | **3.42×** | 3.32× | cards |
+| simple-wikipedia-400 | **wikidata_p31** | entity type | **2.34×** | 2.22× | cards |
+| pitchfork | **artist** | the proper noun, mostly | 40.9× | **139×** | raw, by 3.4× |
+| pitchfork | **author** | the critic's voice | 4.03× | **6.41×** | raw, by 1.6× |
+| pitchfork | **score** | nothing topical | 1.07× | 1.05× | neither (both ≈ chance) |
+
+**The result splits exactly along what a card is for.**
+
+1. **On topical relatedness the bottleneck is free, and on the most independent verifiers it is
+   slightly positive.** Genre is a tie. Wikipedia's category graph and Wikidata's entity type — the two
+   labels in this whole harness that were never visible to any part of the pipeline, and that live
+   outside the local article text entirely — both go to the cards. Whatever the restatement is doing, it
+   is not destroying subject matter, and on genuinely external topic labels it is a small net gain.
+
+2. **On identity and surface, raw wins enormously, and that is the bottleneck working as specified.**
+   Same-artist is 3.4× better in raw text — unsurprising once you notice that a full review names the
+   artist many times over thousands of words while a ~3,700-character card names them once or twice, and
+   that 57% of even the card lift is the proper noun (measured above). Same-reviewer is 1.6× better in
+   raw, which is the critic's prose style surviving in full text and being flattened by the restatement
+   signature's demand for "one neutral, uniform voice." A reader who wants "more by this artist" is
+   better served by full-text search than by this map, and should be told so.
+
+**So the price of the bottleneck is now a number, and it is: you give up name-matching and
+voice-matching, and you give up nothing on what things are about.** That is a defensible trade for an
+instrument whose whole claim is that a heterogeneous set becomes comparable *to itself* — but it was a
+trade nobody had priced, and "the map is not decorative" was doing work that this table should have been
+doing.
+
+Two things this does not settle, stated so they are not read as settled. It compares neighbourhoods, not
+readability — the cards' actual justification is that you can read one and cannot read a full-text
+embedding, and no verifier here can see that. And it is two corpora: one where the cards win twice and
+one where they tie once and lose twice, on verifiers of very different independence. A third corpus with
+an external topical label would be worth more than another verifier on these two.
