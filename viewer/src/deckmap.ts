@@ -127,7 +127,12 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
   // Guard the viewport dimension: if the map mounts into a not-yet-laid-out canvas (embedded/iframe/late
   // layout), innerWidth/Height can be 0 → log2(0) = -Infinity → a non-invertible projection and a blank map
   // that never recovers. Fall back to a sane size so zoom stays finite; deck re-renders once the canvas sizes.
-  const vp = Math.min(window.innerWidth || 0, window.innerHeight || 0) || 800;
+  // THE FRAME IS THE CANVAS, NOT THE WINDOW. The declutter below already learned this — with the reading
+  // pane docked open the map is much narrower than the page, and measuring the page put the "edge" off the
+  // side of the map. Camera framing had the same bug and kept the window measurement, so a docked pane
+  // over-zoomed the fit by the width of the pane. One helper now, so the two can't drift apart again.
+  const vpOf = (): number => Math.min(canvas.clientWidth || 0, canvas.clientHeight || 0) || Math.min(window.innerWidth || 0, window.innerHeight || 0) || 800;
+  const vp = vpOf();
   const fitZoom = Math.log2((vp * 0.92) / span);  // fill more of the canvas (eid-rc20)
   // 3D extent (the fly/orbit layout reads D.xyz) — for camera framing + world-unit point size.
   const bb3 = { minX: Infinity, minY: Infinity, minZ: Infinity, maxX: -Infinity, maxY: -Infinity, maxZ: -Infinity };
@@ -422,7 +427,7 @@ export function createMap(canvas: HTMLCanvasElement, D: MapContract, init: Opts 
     if (!idx.length) return;
     let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
     for (const i of idx) { const p = pos(i); if (p[0] < x0) x0 = p[0]; if (p[0] > x1) x1 = p[0]; if (p[1] < y0) y0 = p[1]; if (p[1] > y1) y1 = p[1]; const z = p[2] ?? 0; if (z < z0) z0 = z; if (z > z1) z1 = z; }
-    const b = Math.min(window.innerWidth, window.innerHeight), h = home(layout);
+    const b = vpOf(), h = home(layout);   // the canvas, not the window (see vpOf) — and re-read, since a dock can open after mount
     const ext = Math.max(x1 - x0 || 0.1, y1 - y0 || 0.1, is3d(layout) ? z1 - z0 || 0.1 : 0);
     const zoom = Math.max(h.minZoom, Math.min(h.maxZoom, Math.log2((b * 0.6) / ext)));
     viewState = { ...viewState, target: [(x0 + x1) / 2, (y0 + y1) / 2, is3d(layout) ? (z0 + z1) / 2 : 0], zoom, transitionDuration: dur(500) };

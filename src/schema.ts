@@ -114,7 +114,10 @@ export type MapContract = {
     embedder?: { id: string; dim: number; pooling?: string; normalized?: boolean };
     geometryBasis?: "card" | "raw";
     neighbors?: string;  // which kNN regime built nbr + the UMAP graph: "exact-gpu" (recall 1.0) | "exact-cpu" | "hnswlib-node" | "hnswlib-wasm"
-    pipelineVersion?: string;
+    // (a `pipelineVersion` field lived here and was never written by either host — the about panel had a
+    //  row for it that could not render on any map ever built. Removed rather than back-filled with a
+    //  hand-bumped constant nobody would remember to bump; `version` above already carries the contract,
+    //  and code provenance can come back when there is a real build-time source for it.)
     generated?: number;
   };
 

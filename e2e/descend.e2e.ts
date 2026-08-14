@@ -119,7 +119,7 @@ try {
   ok(/▸ descent \(30\)/.test(title), `provenance names the lineage — document title "${title}"`);
   await p.click('[data-menu="bar:about"]'); await p.waitForTimeout(250);
   const aboutSrc = await p.evaluate(() => document.querySelector("[data-about]")?.textContent ?? "");
-  ok(/descend of "synth-corpus" — 30 of 90 cards/.test(aboutSrc), "the about pane states the descent source (parent · 30 of 90)");
+  ok(/descend of "synth-corpus-with-a-deliberately-long-name" — 30 of 90 cards/.test(aboutSrc), "the about pane states the descent source (parent · 30 of 90)");
   await p.keyboard.press("Escape"); await p.waitForTimeout(150);
   ok(llmCalls.axes === 0 && llmCalls.region === 0 && llmCalls.card === 0, `keyless descend spent ZERO LLM calls — ${JSON.stringify(llmCalls)}`);
   ok(downloads === 0, "no download occurred — the selection-JSON ferry is dead");

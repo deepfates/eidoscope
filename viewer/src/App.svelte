@@ -17,7 +17,7 @@
   import type { CorpusPayload } from "./connectors/types";
   import { engine, filesFromFileList, filesFromDataTransfer, loadCompute, type IngestFile, type IngestStatus } from "./ingest";
   import type { MapContract } from "../../src/schema";
-  import { exportBase as base, eidoBytes, htmlArtifact, vaultArtifact, deckArtifact, partsArtifact, selectionArtifact, appShell, type Artifact } from "./exports";
+  import { exportBase as base, eidoBytes, htmlArtifact, vaultArtifact, deckArtifact, partsArtifact, selectionArtifact, appShell, portableSource, type Artifact } from "./exports";
   import { setSource, currentFileName, canWriteInPlace, supportsFSA, openViaPicker, openRecent, listRecents, writeEido, download, type RecentFile } from "./file";
 
   // THE MODEL — channels, filters, scrubber, the dimension registry, URL (de)serialization. App keeps the DOM,
@@ -798,6 +798,10 @@
 
   const prov = $derived(data?.provenance);   // so a passed-around file introduces itself
   const provDate = (g?: number) => (g ? new Date(g).toISOString().slice(0, 10) : "");
+  // Hac-3r74 — an older CLI recorded an absolute path here and this panel printed it verbatim, publishing
+  // the builder's home directory to anyone who opened the map. portableSource (src/export.ts) is shared
+  // with the vault + parts manifests so display and re-emit can't disagree about what travels.
+  const provSource = $derived(portableSource(prov?.source));
   $effect(() => { try { document.title = prov?.title ? `${prov.title} · eidoscope 🔭` : "eidoscope 🔭"; } catch {} });
   const weakAxes = $derived(m.layout === "axes" ? (xDim?.weak ? 1 : 0) + (yDim?.weak ? 1 : 0) : 0);
 
@@ -853,7 +857,15 @@
 {#snippet about(scope: string)}
   {#if data}
     <Popover.Root>
-      <Popover.Trigger class="rounded-field min-w-0 cursor-pointer px-1 py-0.5 text-left hover:bg-base-300" data-menu="{scope}:about"
+      <!-- `block w-full` is load-bearing, not tidying. The trigger defaults to inline-block, which sizes
+           shrink-to-fit — and shrink-to-fit floors at the MIN-CONTENT width, which for `truncate` children
+           (white-space: nowrap) is the whole unwrapped corpus name. So a long title made this button wider
+           than the flex cell it sits in and, since nothing on the way up clips, it was drawn straight
+           through the controls beside it: measured 291px inside a 228px cell at 390px viewport, 63px of
+           "Pathfinder-2e-Remaster-SRD-Markdown" under "controls ▴". min-w-0 cannot fix that — it lowers the
+           floor the cell may shrink to, not the width this button asks for. Taking the cell's full width
+           makes the truncate children do the job they were already written to do. -->
+      <Popover.Trigger class="rounded-field block w-full min-w-0 cursor-pointer px-1 py-0.5 text-left hover:bg-base-300" data-menu="{scope}:about"
         aria-label="about this map — how it was made" title="about this map — how it was made">
         <div class="truncate text-sm font-bold leading-tight">{prov?.title ?? "eidoscope"}</div>
         <div class="truncate font-mono text-[10px] leading-tight opacity-60">{data.ids.length} cards · {curCount} regions · about ⓘ</div>
@@ -863,8 +875,8 @@
           <div class="mb-1 font-mono text-[10px] uppercase tracking-widest opacity-60">about this map</div>
           <div class="text-sm font-bold leading-snug">{prov?.title ?? "eidoscope"}</div>
           <div class="mt-0.5 font-mono text-[10px] leading-snug opacity-60">
-            {data.ids.length} documents · {axStats.n} discovered axes · {curCount} regions{#if prov?.generated} · {provDate(prov.generated)}{/if}</div>
-          {#if prov?.source}<div class="mt-0.5 break-all font-mono text-[10px] opacity-60"><span class="uppercase tracking-widest opacity-70">corpus source</span> {prov.source}</div>{/if}
+            {data.ids.length} documents · {axStats.n} discovered axes · {curCount} regions{#if prov?.generated}{" · "}{provDate(prov.generated)}{/if}</div>
+          {#if provSource}<div class="mt-0.5 break-all font-mono text-[10px] opacity-60"><span class="uppercase tracking-widest opacity-70">corpus source</span> {provSource}</div>{/if}
 
           <div class="mt-3 space-y-2 text-[11px] leading-snug">
             <div><span class="font-bold">positions</span> — <span class="opacity-75">{positionsLine}. Distance is relative, not a measured quantity; there are no units.</span></div>
@@ -893,7 +905,11 @@
               {#if madeBy?.cardModel}<dt class="opacity-60">card model</dt><dd class="break-all">{madeBy.cardModel}</dd>{/if}
               {#if madeBy?.embedder}<dt class="opacity-60">embedder</dt><dd class="break-all">{madeBy.embedder.id} · {madeBy.embedder.dim}d</dd>{/if}
               {#if madeBy?.geometryBasis}<dt class="opacity-60">geometry</dt><dd>{madeBy.geometryBasis === "card" ? "card vectors (concept bottleneck)" : "raw full text"}</dd>{/if}
-              {#if madeBy?.pipelineVersion}<dt class="opacity-60">pipeline</dt><dd>{madeBy.pipelineVersion}</dd>{/if}
+              <!-- `neighbors` was recorded on every map and shown on none. It belongs here more than the
+                   dead `pipeline` row it replaces: this panel's first line tells the reader that nearby
+                   cards are alike, and this is whether that neighbourhood was computed exactly or
+                   approximated. A reader weighing the picture as a hypothesis is owed the difference. -->
+              {#if madeBy?.neighbors}<dt class="opacity-60">neighbours</dt><dd>{madeBy.neighbors.startsWith("exact") ? `${madeBy.neighbors} · exact, recall 1.0` : `${madeBy.neighbors} · approximate`}</dd>{/if}
               {#if madeBy?.generated}<dt class="opacity-60">generated</dt><dd>{provDate(madeBy.generated)}</dd>{/if}
               {#if !madeBy}<dt class="opacity-60">provenance</dt><dd>not recorded (pre-v2 file)</dd>{/if}
             </dl>
@@ -1627,10 +1643,15 @@
   <!-- first-run intro (remembered in localStorage) -->
   {#if showIntro && data}
     <div class="fixed inset-0 z-[60] grid place-items-center bg-black/60 p-4 backdrop-blur-sm">
-      <div use:trapFocus tabindex="-1" role="dialog" aria-modal="true" aria-label="welcome" class="rounded-box max-w-md border border-base-300 bg-base-100 p-6 shadow-2xl">
-        <div class="text-lg font-bold">{prov?.title ?? "the forms of the corpus"} 🔭</div>
-        <div class="mt-1 font-mono text-[11px] opacity-60">{data.ids.length} documents · {data.axes.length} discovered axes · {data.k} regions{#if prov?.generated} · {provDate(prov.generated)}{/if}</div>
-        {#if prov?.source}<div class="mt-0.5 truncate font-mono text-[10px] opacity-60"><span class="uppercase tracking-widest opacity-70">corpus source</span> {prov.source}</div>{/if}
+      <!-- `w-full min-w-0` and the wrapping title are load-bearing on a phone. As a grid item this box got
+           `min-width: auto` = its min-content width, which a long unbreakable corpus name sets and
+           `max-w-md` cannot claw back: measured 448px wide inside a 390px viewport, overflowing by 74px
+           with every line of the FIRST THING a reader sees running off the right edge. The e2e never saw
+           it because it runs at 2200px. -->
+      <div use:trapFocus tabindex="-1" role="dialog" aria-modal="true" aria-label="welcome" class="rounded-box w-full min-w-0 max-w-md border border-base-300 bg-base-100 p-6 shadow-2xl">
+        <div class="break-words text-lg font-bold">{prov?.title ?? "the forms of the corpus"} 🔭</div>
+        <div class="mt-1 font-mono text-[11px] opacity-60">{data.ids.length} documents · {data.axes.length} discovered axes · {data.k} regions{#if prov?.generated}{" · "}{provDate(prov.generated)}{/if}</div>
+        {#if provSource}<div class="mt-0.5 truncate font-mono text-[10px] opacity-60"><span class="uppercase tracking-widest opacity-70">corpus source</span> {provSource}</div>{/if}
         <ul class="mt-3 space-y-2 text-sm opacity-80">
           <li><b class="opacity-100">Proximity is similarity</b> — in the neighbour map, nearby cards are alike. In axis scatter, position means each card's score on the two axes you chose.</li>
           <li><b class="opacity-100">Slide the grain</b> to move regions from continents to towns; click a region in the colour menu to isolate it.</li>

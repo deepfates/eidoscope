@@ -593,6 +593,26 @@ try {
   // an emulated mobile device blocks the main thread — measured 29ms on one run and 1206ms on the next,
   // straddling the old fixed 1200ms budget. When it lost the race the modal stayed up and ate the next
   // click. Wait for the thing itself.
+  // …and while it IS up, look at it. This is the first thing anyone sees on a phone and nothing had ever
+  // measured it: the dialog rendered 448px wide in a 390px viewport with every line running off the right
+  // edge, fixed by giving it `w-full min-w-0` so it takes the width it is offered instead of the width its
+  // content asks for. Checked here because this is the only context in the suite that is both mobile and
+  // fresh enough to still have the intro open.
+  //
+  // WHAT THIS ASSERTION IS AND IS NOT (docs/VERIFY.md — say what an instrument cannot catch): it is a
+  // FLOOR, not a reproduction. Reverting the fix leaves it green, because the synth fixture's content does
+  // not drive the box past the viewport the way the shipped Pathfinder map's does. The fix itself was
+  // verified by measuring the real map in a real browser at 390px — 448px/+74 before, 358px/−16 after —
+  // and this line exists to catch a future regression that IS reproducible here. Do not read it as proof
+  // the original bug is covered.
+  const introBox = await mp.evaluate(() => {
+    const d = document.querySelector<HTMLElement>("[role=dialog][aria-label=welcome]");
+    if (!d) return null;
+    const r = d.getBoundingClientRect();
+    return { over: Math.round(Math.max(r.right - window.innerWidth, -r.left)), w: Math.round(r.width), vw: window.innerWidth };
+  });
+  ok(!!introBox, "the first-run intro is actually up on a fresh mobile context (else the check below proves nothing)");
+  ok(!!introBox && introBox.over <= 0, `the intro fits the phone — ${introBox?.w}px dialog in a ${introBox?.vw}px viewport${introBox && introBox.over > 0 ? `, overflowing by ${introBox.over}px` : ""}`);
   await mp.locator("button", { hasText: /explore/i }).first().click();
   await mp.waitForTimeout(300);
   await mp.click('[data-menu="sheet:open"]'); await mp.waitForTimeout(300);
@@ -959,6 +979,32 @@ try {
     await p.setViewportSize({ width: w, height: 1050 }); await p.waitForTimeout(800);
     const r = await labelCollisions(p);
     ok(r.n === 0, `labels @${w}: ${r.placed} region labels placed, none overlapping (${r.n})`);
+  }
+  // NOTHING DRAWN OFF THE SIDE OF A PHONE. This suite runs at 2200px, which is wider than any real
+  // screen, and that is exactly how three chrome bugs reached production together: the about button sized
+  // shrink-to-fit (floored at its min-content width, which `truncate` children make enormous) and was
+  // drawn 59px THROUGH the controls beside it; the first-run dialog took `min-width: auto` as a grid item
+  // and overflowed a 390px viewport by 74px, so every line of the first thing a reader sees ran off the
+  // right edge. Both were invisible to every assertion here, because every assertion here was wide.
+  // One invariant catches the whole class: no laid-out element may cross the viewport's right edge, and
+  // no element may be wider than the box it was put in.
+  const overflowers = async (pg: typeof p) => pg.evaluate(() => {
+    const bad: string[] = [];
+    for (const el of Array.from(document.querySelectorAll<HTMLElement>("header *, [role=dialog], [role=dialog] *"))) {
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0) continue;
+      const id = (el.tagName + "." + String(el.className).split(" ").slice(0, 2).join(".")).slice(0, 48);
+      if (r.right > window.innerWidth + 1) bad.push(`${id} runs ${Math.round(r.right - window.innerWidth)}px past the right edge`);
+      const par = el.parentElement;                                  // …and stays inside the cell it was given
+      if (par && par.getBoundingClientRect().width > 0 && r.width > par.getBoundingClientRect().width + 1)
+        bad.push(`${id} is ${Math.round(r.width - par.getBoundingClientRect().width)}px wider than its parent`);
+    }
+    return bad;
+  });
+  for (const w of [390, 420, 900]) {
+    await p.setViewportSize({ width: w, height: 844 }); await p.waitForTimeout(400);
+    const bad = await overflowers(p);
+    ok(bad.length === 0, `chrome @${w}: nothing drawn outside the viewport or its own cell${bad.length ? " — " + bad.slice(0, 3).join("; ") : ""}`);
   }
   await p.setViewportSize({ width: 2200, height: 1050 }); await p.waitForTimeout(250);
 

@@ -75,7 +75,7 @@ describe("eido sink", () => {
     const dir = mkdtempSync(join(tmpdir(), "eido-sink-"));
     try {
       const files = eidoSink.emit(D, dir);
-      expect(files[0].endsWith("synth-corpus.eido")).toBe(true);
+      expect(files[0].endsWith("synth-corpus.eido")).toBe(true);   // from THIS test's own title above, not the fixture's
       const back = decodeMap(readFileSync(files[0]));
       expect(back.ids).toEqual(D.ids);
       expect(back.k).toBe(D.k);

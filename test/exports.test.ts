@@ -4,7 +4,7 @@
 // eid-ncrq is about to add separable-parts export on top of this, which is the other reason to pin it now.
 import { test, expect } from "bun:test";
 import { unzipSync, strFromU8, gunzipSync } from "fflate";
-import { exportBase, eidoBytes, htmlArtifact, vaultArtifact, deckArtifact, partsArtifact, selectionArtifact, appShell } from "../viewer/src/exports";
+import { exportBase, eidoBytes, htmlArtifact, vaultArtifact, deckArtifact, partsArtifact, selectionArtifact, appShell, portableSource } from "../viewer/src/exports";
 import { decodeContainer } from "../src/eido-container";
 import type { MapContract } from "../src/schema";
 import { synthMap } from "../e2e/synth";
@@ -86,6 +86,38 @@ test("the app shell falls back to the live document when the page can't be fetch
   const serving = (async () => ({ ok: true, text: async () => "<html>served</html>" })) as unknown as typeof fetch;
   expect(await appShell(serving, "/index.html")).toContain("served");
   delete (globalThis as any).document;
+});
+
+// ── PROVENANCE THAT TRAVELS (Hac-3r74) ───────────────────────────────────────────────────────────────
+// Every published map carried the builder's home directory, because the CLI recorded an absolute path
+// and the about panel printed it. Files already in the world still carry it, so display and re-emit both
+// go through portableSource — which means it is worth pinning what it does and does NOT touch.
+test("an absolute source is reduced to the corpus folder's own name", () => {
+  expect(portableSource("/Users/someone/Hacking/eidoscope-testdata/pitchfork")).toBe("pitchfork");
+  expect(portableSource("/Users/someone/data/openrouter-model-cards/current/documents")).toBe("documents");
+  expect(portableSource("/Users/someone/corpus/")).toBe("corpus");        // a trailing slash is not a nameless folder
+  expect(portableSource("~/notes/reading")).toBe("reading");
+  expect(portableSource("C:\\Users\\someone\\corpus")).toBe("corpus");    // the other kind of machine leaks too
+});
+
+// The point is NOT to shorten every source — the connectors write descriptions worth reading whole, and
+// truncating those to one word would destroy real provenance to fix a problem they never had.
+test("a portable description is left exactly as it was written", () => {
+  const hf = 'huggingface:wikimedia/wikipedia (20231101.en/train) · column "text" · 400 rows';
+  expect(portableSource(hf)).toBe(hf);
+  expect(portableSource("folder (in-page ingest) · 285 files")).toBe("folder (in-page ingest) · 285 files");
+  expect(portableSource('descend of "readwise" — 30 of 1385 cards')).toBe('descend of "readwise" — 30 of 1385 cards');
+  expect(portableSource(undefined)).toBeUndefined();   // absent stays absent, never the string "undefined"
+});
+
+test("a vault exported from an old map does not carry the path onward", () => {
+  const D = { ...mapOf(), provenance: { title: "x", source: "/Users/someone/Hacking/readwise/markdown-export" } } as MapContract;
+  const files = unzipSync(vaultArtifact(D, "x").data as Uint8Array);
+  expect(JSON.parse(strFromU8(files["eidoscope-vault.json"])).source).toBe("markdown-export");
+  const parts = unzipSync(partsArtifact(D, "x").data as Uint8Array);
+  expect(JSON.parse(strFromU8(parts["manifest.json"])).provenance.source).toBe("markdown-export");
+  // …and the rest of the provenance is untouched — this sanitizes one field, it does not rewrite the record
+  expect(JSON.parse(strFromU8(parts["manifest.json"])).provenance.title).toBe("x");
 });
 
 // ── SEPARABLE PARTS (eid-ncrq) ───────────────────────────────────────────────────────────────────────

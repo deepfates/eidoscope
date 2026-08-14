@@ -15,6 +15,10 @@
 // and every outbound artefact is a view onto them.
 import { gzipSync, zipSync, strToU8 } from "fflate";
 import { injectEido, vaultEntries, deckJSONL, separableParts } from "../../src/export";
+// Re-exported, not re-implemented: the about panel and the manifests must agree on what provenance
+// travels off this machine (Hac-3r74), so there is one function and the viewer reaches it through the
+// same door it reaches every other outbound concern.
+export { portableSource } from "../../src/export";
 import { encodeContainer } from "../../src/eido-container";
 import type { MapContract } from "../../src/schema";
 

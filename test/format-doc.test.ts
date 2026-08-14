@@ -37,7 +37,10 @@ function fullMap(): MapContract {
   const col = (v: number) => Array.from({ length: n }, () => v);
   return {
     provenance: { title: "t", source: "s", generated: 1, count: n },
-    derivedBy: { cardModel: "m", embedder: { id: "e", dim }, geometryBasis: "card", pipelineVersion: "p", generated: 1 },
+    // This fixture exists to exercise EVERY optional key, and it was exercising a key that no host ever
+    // wrote (`pipelineVersion`) while skipping one every host does (`neighbors` — which kNN regime built
+    // the neighbour graph). Swapped, so "every optional section" means the sections that exist.
+    derivedBy: { cardModel: "m", embedder: { id: "e", dim }, geometryBasis: "card", neighbors: "exact-gpu", generated: 1 },
     metaFields: [{ key: "authors", label: "Author", type: "categorical", source: "col:authors" }],
     vectors: { data: new Float32Array(n * dim).fill(0.5), dim },
     colorCoords: [[0.1, 0.2], [-0.5, 0.5], [0.9, -0.1]],

@@ -41,7 +41,7 @@ flags: --limit N        map only the first N documents
        --frontier       also pull the Semantic Scholar citation frontier (arxiv corpora)
        --embed raw      build the map from raw full-text instead of cards (A/B the bottleneck)
        --out <dir>      write the output bundle to <dir> instead of out/<slug>/
-       --name <title>   title for a descended map
+       --name <title>   title for the map (defaults to the folder's own name)
        --debug-json     also dump map-data.json (debugging; OOMs on big corpora)
 
 env:   OPENROUTER_API_KEY or EIDOSCOPE_API_KEY (the LLM), EIDOSCOPE_API_URL (any OpenAI-compatible
@@ -192,9 +192,19 @@ await attempt(async () => {
     console.error(`loaded ${loaded} docs (${source.describe})${sp.split ? ` → ${docs.length} after splitting` : ""}; embedding full text (local MiniLM)…`);
     embeddings = await embedDocs(docs);
   }
-  // a vault manifest (folderSource read it) carries the SOURCE map's title through the round trip;
-  // otherwise the folder's own name is the honest default.
-  const name = args.includes("--fixture") ? "Readwise library" : (title || dir?.split("/").filter(Boolean).pop() || "Corpus");
+  // The reader's own --name wins; then a vault manifest (folderSource read it) carrying the SOURCE map's
+  // title through the round trip; then the folder's name. `--name` was already a KNOWN_FLAG and already
+  // documented in the usage, but only `descend` ever read it — passing it to a build was silently ignored.
+  // It matters because the folder-name default is only as good as the folder: the shipped maps built this
+  // way are titled "documents", "pages" and "markdown-export", which is what `…/current/documents` and
+  // `…/tldr-src/pages` are called on this disk and tells a reader nothing.
+  const name = args.includes("--fixture") ? "Readwise library" : (val("--name") || title || dir?.split("/").filter(Boolean).pop() || "Corpus");
   const embed = val("--embed") === "raw" ? "raw" : "card";
-  await run(docs, embeddings, { frontier: args.includes("--frontier"), name, source: dir, embed, out: val("--out"), debugJson: args.includes("--debug-json") });
+  // provenance.source describes the corpus, NOT this machine. It used to be the absolute path, so every
+  // published .eido carried the builder's home directory into the about panel of a public web page
+  // (Hac-3r74) — and a path is a fact about one disk that means nothing to anyone the file is handed to.
+  // This is the shape the in-page ingest has always written (run.ts: `folder (in-page ingest) · N files`,
+  // `huggingface:…`); the CLI was the one host still leaking a path.
+  const provSource = dir ? `folder "${basename(dir.replace(/\/+$/, ""))}" · ${docs.length} documents` : undefined;
+  await run(docs, embeddings, { frontier: args.includes("--frontier"), name, source: provSource, embed, out: val("--out"), debugJson: args.includes("--debug-json") });
 });

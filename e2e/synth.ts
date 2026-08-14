@@ -55,7 +55,11 @@ export function synthMap(): MapContract {
     // …and the vectors carry the BLOB STRUCTURE (a one-hot blob component + per-card jitter), so a derived
     // axis over a circled blob is a real contrast the suite can assert, not noise that happens to score.
     vectors: { data: Float32Array.from(ids.flatMap((_, i) => { const b = Math.floor(i / PER); return Array.from({ length: 8 }, (_, j) => (j === b ? 1 : 0) + 0.15 * Math.sin(i * 0.7 + j)); })), dim: 8 },
-    provenance: { title: "synth-corpus", source: "e2e/synth.ts", generated: 1, count: N },
+    // The title is LONG on purpose. It used to be "synth-corpus" (12 chars), which is shorter than every
+    // corpus we actually ship — "Pathfinder-2e-Remaster-SRD-Markdown" is 35 — and chrome that breaks on a
+    // long name therefore passed every assertion in the suite. A fixture that is easier than reality tests
+    // an app that doesn't exist.
+    provenance: { title: "synth-corpus-with-a-deliberately-long-name", source: "e2e/synth.ts", generated: 1, count: N },
     derivedBy: { cardModel: "test/model", embedder: { id: "Xenova/all-MiniLM-L6-v2", dim: 8, pooling: "mean", normalized: true }, geometryBasis: "card" as const, generated: 1 },
   });
 }

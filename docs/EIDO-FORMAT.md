@@ -116,7 +116,7 @@ Stratum letters: **S** = source truth, **C** = cache, **W** = work, **F** = file
 | `version` | number | yes | F | contract version at emit time (currently 2). A capability signal, not a decode gate: readers gate on the `has*` flags and buffer presence, never on this number. |
 | `n` | number | yes | F | document count; every per-node array/buffer has this many rows |
 | `provenance` | object | no | S | `{title?, source?, generated?, count?}` — what corpus, from where, when, how big |
-| `derivedBy` | object | no | C | `{cardModel?, embedder?: {id, dim, pooling?, normalized?}, geometryBasis?: "card"\|"raw", pipelineVersion?, generated?}` — how the map was made; `embedder` lets a tool embed a query into the same space as `vectors` |
+| `derivedBy` | object | no | C | `{cardModel?, embedder?: {id, dim, pooling?, normalized?}, geometryBasis?: "card"\|"raw", neighbors?, generated?}` — how the map was made; `embedder` lets a tool embed a query into the same space as `vectors`, and `neighbors` names the kNN regime that built `nbr` (`exact-gpu`/`exact-cpu` are exact; `hnswlib-*` are approximate) |
 | `metaFields` | array | no | S | typed dimension manifest: `{key, label, type: "categorical"\|"scalar"\|"temporal"\|"boolean", multi?, source}` where `source` is `col:<field>` (a hand-declared top-level column), `mcol:<key>` (the generic column store — a disjoint namespace, so a source column named like a native field never shadows it), `axis:<key>`, or `derived:<k>` |
 | `axes` | array | yes | C | `{key, name, low, high, variance?, weak?}` per discovered axis; order defines the row order of the `scores`/`rawScores` buffers |
 | `k` | number | yes | C | region count at the default cluster grain |

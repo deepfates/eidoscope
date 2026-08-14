@@ -4,6 +4,16 @@
 // CARDS in the MapContract — title + core + placements + the map's judgment — never from side data.
 import type { MapContract } from "./schema.ts";
 
+// PROVENANCE THAT TRAVELS (Hac-3r74). `provenance.source` describes the corpus; it must not describe the
+// machine that built it. Maps built by an older CLI recorded an absolute path there, so every published
+// .eido carried its builder's home directory — visible in the about panel of a public web page, and
+// copied onward into every vault manifest and parts manifest exported from it. The emit side no longer
+// writes paths, but files already in the world cannot be un-published, so every place that DISPLAYS or
+// RE-EMITS this field goes through here. Non-paths pass through untouched: the in-page and HuggingFace
+// connectors write portable descriptions that are worth reading in full.
+export const portableSource = (s?: string): string | undefined =>
+  !s ? s : /^(\/|~\/|[A-Za-z]:[\\/])/.test(s) ? s.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || undefined : s;
+
 // base64 without assuming a host: Buffer where it exists (Bun/Node), chunked btoa in the browser.
 export function toBase64(bytes: Uint8Array): string {
   if (typeof Buffer !== "undefined") return Buffer.from(bytes).toString("base64");
@@ -45,7 +55,7 @@ export function vaultEntries(D: MapContract): { manifest: ExportEntry; cards: Ex
   const manifest: ExportEntry = {
     name: "eidoscope-vault.json",
     text: JSON.stringify({
-      eidoscope: "vault", title: D.provenance?.title, source: D.provenance?.source,
+      eidoscope: "vault", title: D.provenance?.title, source: portableSource(D.provenance?.source),
       exported: Date.now(), count: D.ids.length,
     }, null, 2) + "\n",
   };
@@ -147,7 +157,7 @@ export function separableParts(D: MapContract): PartsEntry[] {
   //    opening the folder cold does not have to read this source to understand it.
   out.push({ name: "manifest.json", text: JSON.stringify({
     format: "eidoscope-parts/1",
-    provenance: D.provenance, derivedBy: D.derivedBy,
+    provenance: { ...D.provenance, source: portableSource(D.provenance?.source) }, derivedBy: D.derivedBy,
     cards: n,
     files: {
       "cards.jsonl": `${n} cards, one JSON object per line — the LLM's restatement and per-axis placements. Source truth: everything else is derived from these.`,
