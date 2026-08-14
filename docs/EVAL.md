@@ -23,6 +23,41 @@ It is **not** in `qa`. It is a measurement, not a gate: it tells you what a chan
 agreement with the world, and a human decides whether that is acceptable. Wiring it as a pass/fail would
 turn it back into the thing it replaces.
 
+## What this instrument can and cannot answer
+
+Written after using it wrong for two days. Read this before any table below.
+
+**It measures agreement with labels people already had.** That makes it a *floor*, not a grade. A lift
+near 1 means the map is noise, and knowing that is worth the whole harness. Above the floor, higher is
+not obviously better: a map that perfectly reproduced Pitchfork's genre tags would have told you nothing
+that wasn't already in the frontmatter, and the entire premise here is finding structure that is *not*
+the existing categorization. This document already concedes the point for `score` — "a map is not
+expected to group by it; lift ≈ 1 is a fact about music criticism, not a defect" — and then never asks
+why the reasoning stops there. It doesn't.
+
+**So there is exactly one thing it decides: how much a LOSSY STEP costs.**
+
+A compression cannot invent structure, only discard it. So when the same corpus is scored before and
+after a step that only throws information away — the 2D projection, landmark interpolation, masking a
+word out of the card text — a drop in external agreement *is* loss, because the verifier didn't move.
+Nothing internal can tell you that: layout-versus-layout comparison says two layouts differ, never which
+one is worse. That gap is why this exists.
+
+**It cannot compare two different representations.** Cards and raw full text are not compressions of each
+other; the card is a rewrite. Lower agreement could mean information was destroyed, or it could mean the
+map found an organization that isn't the label — and no verifier here separates those. That is precisely
+the distinction the project rests on, and this instrument is blind to it.
+
+Which side each table below falls on:
+
+| section | what it compares | licensed? |
+|---|---|---|
+| Baseline report — the `xy` rows against their own `cards` rows | a compression against its input | **yes** |
+| Baseline report — the absolute lifts | nothing; a level | floor only — "not noise", never "good" |
+| Landmark layout | a compression against its input | **yes** — this is the question it was built for |
+| Proper-noun masking | card text with a word removed, against the same text | **yes** — masking only discards |
+| What does the bottleneck cost | two different representations | **no** — reports a real difference between the two spaces, but cannot say which is better |
+
 ## The measure
 
 For each (corpus × verifier × space):
@@ -99,9 +134,13 @@ Shipped `.eido` files as of `out/` on 2026-08-10; k = 10; 200,000 random pairs; 
 
 ### What this baseline says
 
-1. **The card bottleneck carries real relatedness.** Every verifier that could show signal does, on every
+1. **The map clears the floor — it is not noise.** Every verifier that could show signal does, on every
    corpus, including the two that were never visible to the pipeline at all (Wikipedia categories 3.4×,
-   Wikidata type 2.3×). The map is not decorative.
+   Wikidata type 2.3×). That is the strongest thing these absolute numbers support. This point used to
+   read "the card bottleneck carries real relatedness — the map is not decorative", which is a floor
+   being read as a grade: a high number here means the map agrees with a categorization someone already
+   had, and agreeing with it more is not the same as being better. See "What this instrument can and
+   cannot answer" above.
 2. **The one verifier the map does not track is `score` — 1.07×, i.e. essentially random.** Neighbouring
    reviews are as far apart in verdict as any two reviews. That is the eval doing its job: a reader who
    expects the Pitchfork map to separate good records from bad should be told plainly that it does not,
@@ -236,12 +275,19 @@ printed as a TIE in as many words.
    negative and clears zero: genre −0.054, artist −0.044, author −0.020 — an order of magnitude more
    damage than the card step, and it is the step nobody questions because it is the one you look at.
 
-**So the price of the bottleneck is a number: you give up name-matching and voice-matching, and you give
-up nothing on what things are about.** A reader who wants "more by this artist" is better served by
-full-text search than by this map, and should be told so rather than left to assume.
+**Read all of this as a description of how the two spaces DIFFER, never as a verdict on which is better.**
+This section is outside what the instrument can decide (see the boundary at the top): cards and raw full
+text are not compressions of one another, so a lower number can mean information was destroyed or can
+mean the map organized by something other than the label, and nothing here separates those. The rows are
+a real, reproducible fact about where the two spaces agree and where they part company. They are not a
+scoreboard, and the first draft of this section read them as one.
 
-What this does **not** settle, stated so it is not read as settled. It compares neighbourhoods, not
-readability — the cards' actual justification is that you can read one and cannot read a full-text
-embedding, and no verifier here can see that. It is two corpora. And raw full text is chunk-pooled across
-a long document while a card is close to a single embedder pass, so the two spaces differ in more than
-the bottleneck.
+What it usefully supports, at that reduced strength: the card step does not *destroy* topical structure
+(three topical verifiers, one tie, one cards-ahead, one raw-ahead-by-0.4pp), and it does strip proper
+nouns and prose voice, which is what its signature says it is for. A reader who wants "more by this
+artist" is better served by full-text search than by this map, and should be told so.
+
+Three further limits. It compares neighbourhoods, not readability — the cards' actual justification is
+that you can read one and cannot read a full-text embedding, and no verifier here can see that. It is two
+corpora. And raw full text is chunk-pooled across a long document while a card is close to a single
+embedder pass, so the two spaces differ in document-length handling as well as in the bottleneck.
