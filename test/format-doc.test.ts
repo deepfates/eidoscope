@@ -48,7 +48,7 @@ function fullMap(): MapContract {
     notes: [{ x1: "na" }, { x1: "nb" }, { x1: "nc" }],
     axes: [{ key: "x1", name: "Axis", low: "lo", high: "hi" }],
     scores: { x1: col(50) }, rawScores: { x1: col(0.1) },
-    xy: [[0, 0], [1, 1], [2, 2]], xyz: [[0, 0, 0], [1, 1, 1], [2, 2, 2]], xyzAgree: 4,
+    xy: [[0, 0], [1, 1], [2, 2]], xyz: [[0, 0, 0], [1, 1, 1], [2, 2, 2]], xyzAgree: 4, realDims: 9,
     cluster: [0, 0, 1], k: 2, di: 0, levels: [[0, 0, 1]], counts: [2],
     levelLabels: [["r0", "r1"]], levelBlurbs: [["b0", "b1"]],
     clusters: [{ c: 0, n: 2, label: "r0" }, { c: 1, n: 1, label: "r1" }],

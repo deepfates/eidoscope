@@ -907,7 +907,7 @@
           <div class="mb-1 font-mono text-[10px] uppercase tracking-widest opacity-60">about this map</div>
           <div class="text-sm font-bold leading-snug">{prov?.title ?? "eidoscope"}</div>
           <div class="mt-0.5 font-mono text-[10px] leading-snug opacity-60">
-            {data.ids.length} documents · {axStats.n} discovered axes · {curCount} regions{#if prov?.generated}{" · "}{provDate(prov.generated)}{/if}</div>
+            {data.ids.length} documents · {axStats.n} axes · {curCount} regions{#if prov?.generated}{" · "}{provDate(prov.generated)}{/if}</div>
           {#if provSource}<div class="mt-0.5 break-all font-mono text-[10px] opacity-60"><span class="uppercase tracking-widest opacity-70">corpus source</span> {provSource}</div>{/if}
 
           <div class="mt-3 space-y-2 text-[11px] leading-snug">
@@ -927,7 +927,15 @@
           <div class="mt-3 border-t border-base-300 pt-2">
             <div class="mb-1 font-mono text-[10px] uppercase tracking-widest opacity-60">strength</div>
             <div class="text-[11px] leading-snug opacity-75">
-              {axStats.n} axes · {Math.round(axStats.variance * 100)}% of variance{#if axStats.weak} · {axStats.weak} under 2%{/if}
+              <!-- TWO NUMBERS, SAID APART (Hac-pxyy). `axes.length` is a legibility budget of 16; the
+                   data-derived count is realDims, and on every corpus we ship it is 22–60. This line used
+                   to read "16 axes · 27% of variance", with the word "discovered" upstream, which let a
+                   display cap pass for a finding. It now says which of the real ones you are being shown.
+                   Files emitted before 2026-08-14 carry no realDims and simply omit the clause. -->
+              {axStats.n}{#if data.realDims && data.realDims > axStats.n}{" of "}{data.realDims}{/if} axes · {Math.round(axStats.variance * 100)}% of variance{#if axStats.weak} · {axStats.weak} under 2%{/if}
+              {#if data.realDims && data.realDims > axStats.n}
+                <div class="mt-1 opacity-90">{data.realDims} components beat the noise floor; the map offers the strongest {axStats.n}, which is a budget for what a person can read — not a claim that the rest were noise.</div>
+              {/if}
             </div>
           </div>
 
@@ -1716,7 +1724,7 @@
            it because it runs at 2200px. -->
       <div use:trapFocus tabindex="-1" role="dialog" aria-modal="true" aria-label="welcome" class="rounded-box w-full min-w-0 max-w-md border border-base-300 bg-base-100 p-6 shadow-2xl">
         <div class="break-words text-lg font-bold">{prov?.title ?? "the forms of the corpus"} 🔭</div>
-        <div class="mt-1 font-mono text-[11px] opacity-60">{data.ids.length} documents · {data.axes.length} discovered axes · {data.k} regions{#if prov?.generated}{" · "}{provDate(prov.generated)}{/if}</div>
+        <div class="mt-1 font-mono text-[11px] opacity-60">{data.ids.length} documents · {data.axes.length} axes · {data.k} regions{#if prov?.generated}{" · "}{provDate(prov.generated)}{/if}</div>
         {#if provSource}<div class="mt-0.5 truncate font-mono text-[10px] opacity-60"><span class="uppercase tracking-widest opacity-70">corpus source</span> {provSource}</div>{/if}
         <ul class="mt-3 space-y-2 text-sm opacity-80">
           <li><b class="opacity-100">Proximity is similarity</b> — in the neighbour map, nearby cards are alike. In axis scatter, position means each card's score on the two axes you chose.</li>

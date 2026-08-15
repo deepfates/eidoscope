@@ -59,6 +59,9 @@ export function synthMap(): MapContract {
     // corpus we actually ship — "Pathfinder-2e-Remaster-SRD-Markdown" is 35 — and chrome that breaks on a
     // long name therefore passed every assertion in the suite. A fixture that is easier than reality tests
     // an app that doesn't exist.
+    // realDims > axes.length on purpose: the fixture must exercise the case the about panel exists for
+    // (Hac-pxyy) — the budget showing the strongest few of a larger data-supported set.
+    realDims: 9,
     provenance: { title: "synth-corpus-with-a-deliberately-long-name", source: "e2e/synth.ts", generated: 1, count: N },
     derivedBy: { cardModel: "test/model", embedder: { id: "Xenova/all-MiniLM-L6-v2", dim: 8, pooling: "mean", normalized: true }, geometryBasis: "card" as const, generated: 1 },
   });

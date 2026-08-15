@@ -263,7 +263,7 @@ export function encodeContainer(D: MapContract): Uint8Array {
   // here is bounded by axes and the level ladder (O(log n) counts) — NEVER by n or by user-work.
   const meta = {
     version: CONTRACT_VERSION, n, provenance: D.provenance, derivedBy: D.derivedBy, metaFields: D.metaFields,
-    axes: D.axes, k: D.k, di: D.di, xyzAgree: D.xyzAgree, counts: D.counts,
+    axes: D.axes, k: D.k, di: D.di, xyzAgree: D.xyzAgree, realDims: D.realDims, counts: D.counts,
     cols,
     hasLevelLabels: !!D.levelLabels, levelCounts: lls.map((a) => a.length),
     hasBlurbs: !!D.levelBlurbs, blurbCounts: lbs.map((a) => a.length),
@@ -484,7 +484,7 @@ function* decodeGen(buf: Uint8Array): Generator<void, MapContract> {
 
   return {
     version: meta.version, provenance: meta.provenance, derivedBy: meta.derivedBy, metaFields: meta.metaFields, ids, titles, cores, notes,
-    axes: meta.axes, scores, rawScores, xy, xyz, xyzAgree: meta.xyzAgree,
+    axes: meta.axes, scores, rawScores, xy, xyz, xyzAgree: meta.xyzAgree, realDims: meta.realDims,
     cluster, k: meta.k, di: meta.di, levels, counts: meta.counts, colorCoords,
     levelLabels, levelBlurbs, clusters,
     hub, nbr, cite, citec, vectors,

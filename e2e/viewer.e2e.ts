@@ -1039,6 +1039,18 @@ try {
   }
   await p.setViewportSize({ width: 2200, height: 1050 }); await p.waitForTimeout(250);
 
+  // THE AXIS COUNT IS TWO NUMBERS (Hac-pxyy). `axes.length` is a legibility budget of 16; realDims is what
+  // parallel analysis supported, and on every shipped corpus that is 22-60 — never 16. The panel printed
+  // the budget under the word "discovered", so a display cap read as a finding. The fixture carries
+  // realDims 9 against 2 axes, which is exactly the case this copy exists for.
+  await p.click('[data-menu="bar:about"]').catch(() => {});
+  await p.waitForTimeout(300);
+  const strength = await p.evaluate(() => document.querySelector("[data-about]")?.textContent?.replace(/\s+/g, " ") ?? "");
+  ok(/2 of 9 axes/.test(strength), `the about panel states the budget AND the data-derived count — ${/2 of 9 axes/.test(strength) ? '"2 of 9 axes"' : strength.slice(0, 160)}`);
+  ok(!/discovered axes/.test(strength), "...and no longer calls the budget a discovery");
+  ok(/beat the noise floor/.test(strength), "...and says the rest were not noise, only not offered");
+  await p.keyboard.press("Escape"); await p.waitForTimeout(200);
+
   ok(consoleErrs.length === 0, "no console errors during the run" + (consoleErrs.length ? " — " + consoleErrs[0] : ""));
 } finally {
   await browser.close();

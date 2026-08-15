@@ -106,7 +106,7 @@ export async function buildMap(docs: Doc[], embeddings: number[][], opts: BuildO
     geo.levels, geo.counts, deck.map((c) => c.title), deck.map((c) => c.core), scores, axLite,
     { llm: opts.llm, sig: opts.regionSig, concurrency: conc, cache: opts.regionCache, onProgress: (done, total) => on({ stage: "regions", done, total }) });
 
-  const D = assembleContract({ deck, axes, scores, rawScores, geo, levelLabels, levelBlurbs, regionsByLevel, embs, useRaw, name: opts.name, source: opts.source, cardModel: opts.cardModel, embedderId: opts.embedderId });
+  const D = assembleContract({ deck, axes, scores, rawScores, geo, levelLabels, levelBlurbs, regionsByLevel, embs, useRaw, realDims, name: opts.name, source: opts.source, cardModel: opts.cardModel, embedderId: opts.embedderId });
   return { D, deck, axes, embs, deckProjections };
 }
 
@@ -191,6 +191,7 @@ export async function descendMap(P: DescendParent, selIds: string[], opts: Desce
     ids: selIds.slice(), titles, cores,
     notes: idx.map(() => ({})),   // parent notes are placements on the PARENT's axes — honest is empty, not misfiled
     axes: axes.map((a) => ({ key: a.key, name: a.name, low: a.pole_low, high: a.pole_high, variance: a.var, weak: a.var < 0.02 })),
+    realDims,
     scores, rawScores, xy, xyz, xyzAgree, cluster, k, di, levels, counts, levelLabels, levelBlurbs, clusters, hub, nbr, colorCoords,
     cite, citec: sub(P.citec ?? undefined),
     urls: sub(P.urls), sources: sub(P.sources), siteNames: sub(P.siteNames), authors: sub(P.authors),
@@ -219,6 +220,7 @@ export function assembleContract(a: {
   geo: { xy: number[][]; xyz: number[][]; xyzAgree: number; cluster: number[]; k: number; di: number; levels: number[][]; counts: number[]; hub: number[]; nbr: number[][]; knnMethod: string; colorCoords: number[][] };
   levelLabels: string[][]; levelBlurbs: string[][]; regionsByLevel: Region[][];
   embs: number[][]; useRaw: boolean; name?: string; source?: string; cardModel?: string; embedderId?: string;
+  realDims?: number;   // how many components beat the noise floor — NOT axes.length, which is a budget (Hac-pxyy)
 }): MapContract {
   const { deck, axes, geo } = a;
   const clusters = regionCentroids(a.regionsByLevel[geo.di], geo.cluster, geo.k, geo.xy);
@@ -226,6 +228,7 @@ export function assembleContract(a: {
     ids: deck.map((c) => c.id), titles: deck.map((c) => c.title), cores: deck.map((c) => c.core),
     notes: deck.map((c) => Object.fromEntries(axes.map((ax) => [ax.key, c.axes[ax.key]?.note || ""]))),
     axes: axes.map((ax) => ({ key: ax.key, name: ax.name, low: ax.pole_low, high: ax.pole_high, variance: ax.var })),
+    realDims: a.realDims,
     scores: a.scores, rawScores: a.rawScores,
     xy: geo.xy, xyz: geo.xyz, xyzAgree: geo.xyzAgree, cluster: geo.cluster, k: geo.k, di: geo.di, hub: geo.hub, nbr: geo.nbr, colorCoords: geo.colorCoords,
     clusters, levels: geo.levels, counts: geo.counts, levelLabels: a.levelLabels, levelBlurbs: a.levelBlurbs,

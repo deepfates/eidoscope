@@ -56,7 +56,7 @@ will reproduce the neighbor map faithfully but can only approximate the axes. A 
 came from so a tool can do that when the source is reachable. The `derivedBy.geometryBasis`
 field declares which basis the file's own geometry was built on.
 
-Fields: `vectors` (buffer), `color` (buffer), `axes`, `scores`, `rawScores`, `xy`, `xyz`, `xyzAgree`, `cluster`,
+Fields: `vectors` (buffer), `color` (buffer), `axes`, `scores`, `rawScores`, `xy`, `xyz`, `xyzAgree`, `realDims`, `cluster`,
 `k`, `di`, `levels`, `counts`, `levelLabels`, `levelBlurbs`, `clusters`, `hub`, `nbr`, `cite`,
 and the recipe record `derivedBy` (card model, embedder id/dimension, geometry basis, pipeline
 version, generation time).
@@ -122,6 +122,7 @@ Stratum letters: **S** = source truth, **C** = cache, **W** = work, **F** = file
 | `k` | number | yes | C | region count at the default cluster grain |
 | `di` | number | no | C | default level index into `levels`/`counts` |
 | `xyzAgree` | number | no | C | 2D↔3D neighborhood agreement (mean shared 8-nearest-neighbors, 0..8) |
+| `realDims` | number | no | C | how many components beat the parallel-analysis noise floor — **not** `axes.length`, which is a legibility budget (16). 22–60 on every shipped corpus, so a reader can be told they are seeing the strongest 16 of 44 |
 | `counts` | number[] | no | C | per cluster level: region count |
 | `cols` | object | yes | F | which optional per-node columns the `prow_*` rows carry: `{urls, sources, siteNames, authors, tags, dates, read, folders, citec}` booleans — a column marked false decodes as absent, never as an all-null column |
 | `hasLevelLabels` | boolean | yes | F | whether the level-label segment of `rrow_*` is present (distinguishes `[]` from absent) |

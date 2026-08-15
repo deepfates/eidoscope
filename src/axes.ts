@@ -151,11 +151,28 @@ export async function discoverAxes(embeddings: number[][], titles: string[], opt
   const n95 = (k: number) => { const c = noise.map((row) => row[k]).sort((a, b) => a - b); return c[Math.floor(0.95 * (REP - 1))]; };
   let realDims = 0; for (let k = 0; k < Math.min(NC, variance.length); k++) { if (variance[k] > n95(k)) realDims++; else break; }
 
-  // Surface only as many axes as the DATA supports. realDims (the parallel-analysis count of PCs
-  // that beat noise) is the honest ceiling — cap the fixed request by it so we never show more
-  // interpretable axes than are actually real. (This is the fix for a 24-doc corpus with 8 real
-  // dims still showing a hardcoded top-16: half the axes were noise by our own measurement.)
-  const topN = Math.min(opts.topN ?? 16, Math.max(realDims, 2), variance.length);
+  // AXIS_BUDGET is a LEGIBILITY BUDGET, NOT A DISCOVERY (Hac-pxyy). Read the two numbers apart:
+  //
+  //   realDims  — how many components beat the parallel-analysis noise floor. Data-derived, and on every
+  //               corpus we ship it is 22–60, never 16. On tldr and pitchfork it EQUALS NC, which means
+  //               the test wanted more components than we computed and the count is itself censored.
+  //   AXIS_BUDGET — how many of those a person is offered. Not derived from anything. Sixteen contrasts
+  //               is a menu you can read; forty-four is a list you scroll past.
+  //
+  // The cap protects downward too, which is why it is written as a min: a 24-doc corpus with 8 real dims
+  // must not be handed 16 axes of noise. But upward it truncates on EVERY real corpus, and the viewer
+  // used to print "16 discovered axes" — the budget wearing the word `discovered`. Both numbers now ride
+  // in the contract (MapContract.realDims) and the about panel states them separately, so the reader can
+  // see that the map is showing the strongest 16 of 44 rather than all there was to find.
+  //
+  // Measured 2026-08-14 (parallel analysis · broken-stick, p=384, both agree):
+  //   aesop 285→36·36 · graham 233→22·22 · simple-wiki 282→44·44 · open-library 300→38·38 ·
+  //   tldr 6,255→60·46 · pitchfork 19,299→60·60. No classical criterion lands anywhere near 16.
+  // Raising the budget is a product choice with a real cost (one naming call carries every axis, and on
+  // pitchfork 12 of the 16 already shown fall under the `weak` variance floor) — it is not a bug fix, and
+  // it is not made here.
+  const AXIS_BUDGET = 16;
+  const topN = Math.min(opts.topN ?? AXIS_BUDGET, Math.max(realDims, 2), variance.length);
 
   // Label ALL top-N axes in ONE call so the model sees the whole orthogonal set and names each a
   // DISTINCT contrast — instead of 16 isolated calls each rediscovering the dominant one. (Verified:

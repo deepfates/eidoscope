@@ -140,6 +140,11 @@ export type MapContract = {
 
   // the discovered structure
   axes: AxisDef[];
+  // How many components beat the parallel-analysis noise floor — which is NOT how many axes are in
+  // `axes` (Hac-pxyy). `axes.length` is a legibility budget (16); this is what the data supported, and on
+  // every shipped corpus it is 22–60. Carried so the file can say "the strongest 16 of 44" instead of
+  // letting the budget wear the word "discovered". Absent on files emitted before 2026-08-14.
+  realDims?: number;
   scores: Record<string, number[]>;        // axisKey -> per-node rank-normalized 0..100 position
   rawScores?: Record<string, number[]>;    // axisKey -> per-node RAW PCA projection (optional; lets the viewer
                                            // offer an "honest" min-max view of an axis, not just the even-spread rank)

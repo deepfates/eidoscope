@@ -824,3 +824,31 @@ test("projectAndCluster n<5: colour coords derive from the vectors, not the inde
   const same = pca2([[1, 0, 0], [1, 0, 0], [1, 0, 0]], COLOR_SEED);
   for (const p of same) { expect(Math.abs(p[0])).toBeLessThan(1e-9); expect(Math.abs(p[1])).toBeLessThan(1e-9); }
 });
+
+// ── THE AXIS COUNT IS TWO NUMBERS (Hac-pxyy) ─────────────────────────────────────────────────────────
+// `axes.length` is a legibility budget; `realDims` is what parallel analysis supported. They were being
+// conflated — the viewer printed the budget under the word "discovered" — and realDims was computed on
+// every run and thrown away, so no file could tell you how much had been left out.
+test("a discovered map records how many components beat the noise floor, not just how many it shows", async () => {
+  const { discoverAxes } = await import("../src/axes");
+  // 40 docs on 6 planted orthogonal directions + noise: realDims must find real structure, and the
+  // budget must be able to sit BELOW it without the two being mistaken for each other.
+  const dim = 24, n = 240;
+  const embs = Array.from({ length: n }, (_, i) =>
+    Array.from({ length: dim }, (_, j) => (j === i % 6 ? 3 : 0) + Math.sin(i * 7.13 + j * 2.7) * 0.35));
+  const r = await discoverAxes(embs, embs.map((_, i) => "doc " + i), { topN: 3 });
+  expect(r.realDims).toBeGreaterThanOrEqual(3);          // the planted structure is found…
+  expect(r.axes.length).toBe(3);                          // …and the budget still governs what is offered
+  expect(r.axes.length).toBeLessThanOrEqual(r.realDims);  // the budget may cut, never invent
+});
+
+test("the budget cannot hand back more axes than the data supports", async () => {
+  const { discoverAxes } = await import("../src/axes");
+  // near-rank-1 data: one direction and noise. Asking for 16 must not produce 16.
+  const dim = 24, n = 120;
+  const embs = Array.from({ length: n }, (_, i) =>
+    Array.from({ length: dim }, (_, j) => (j === 0 ? (i % 2 ? 4 : -4) : 0) + Math.sin(i * 3.1 + j * 11.7) * 0.02));
+  const r = await discoverAxes(embs, embs.map((_, i) => "doc " + i), { topN: 16 });
+  expect(r.axes.length).toBeLessThanOrEqual(Math.max(r.realDims, 2));
+  expect(r.axes.length).toBeLessThan(16);
+});
