@@ -17,6 +17,8 @@
   import type { CorpusPayload } from "./connectors/types";
   import { engine, filesFromFileList, filesFromDataTransfer, loadCompute, type IngestFile, type IngestStatus } from "./ingest";
   import type { MapContract } from "../../src/schema";
+  import { trapFocus, focusOnOpen } from "./actions";
+  import { measureFold, foldWatch } from "./fold";
   import { exportBase as base, eidoBytes, htmlArtifact, vaultArtifact, deckArtifact, partsArtifact, selectionArtifact, appShell, portableSource, type Artifact } from "./exports";
   import { setSource, currentFileName, canWriteInPlace, supportsFSA, openViaPicker, openRecent, listRecents, writeEido, download, type RecentFile } from "./file";
 
@@ -58,43 +60,9 @@
   const FOLDED = "pointer-events-none invisible absolute";
   const foldCls = (scope: string, tier: number) => (scope === "bar" && tier > 0 && fold >= tier ? FOLDED : "");
   let foldRun = 0;
-  async function measureFold(row: HTMLElement) {
-    const GAP = 4, SLACK = 40;   // the strip's gap-1, + the row's paddings/dividers not itemized below
-    const els = [...row.querySelectorAll<HTMLElement>("[data-fold]")];
-    if (!els.length) return;
-    let fixed = SLACK;
-    for (const el of row.querySelectorAll<HTMLElement>("[data-fold-fixed]")) fixed += el.getBoundingClientRect().width + GAP;
-    const wTrig = (row.querySelector<HTMLElement>("[data-fold-trigger]")?.getBoundingClientRect().width ?? 0) + GAP;
-    const avail = row.clientWidth;
-    let f = 0;
-    for (; f < FOLD_MAX; f++) {
-      let need = fixed + (f > 0 ? wTrig : 0);
-      for (const el of els) { const t = +(el.dataset.fold || 0); if (t === 0 || t > f) need += el.getBoundingClientRect().width + GAP; }
-      if (need <= avail) break;
-    }
-    fold = f;
-    // …AND THEN THE PIXELS DECIDE. The sum above is a LOWER BOUND: it adds up item boxes but cannot know
-    // what the flex layout actually spends on paddings, dividers and the groups' own gaps. Measured on the
-    // live map it under-counted by 53px at 1900 and 94px at 1280, so the strip "fit" on paper while its
-    // middle group really overflowed — "+ axis" drew on top of "open". The estimate now only picks the
-    // starting guess; we fold one more tier at a time until nothing overflows for real. Bounded by
-    // FOLD_MAX, one render per step, and a token so overlapping resize runs can't fight each other.
-    const mine = ++foldRun;
-    while (fold < FOLD_MAX) {
-      await tick();
-      if (mine !== foldRun) return;                 // a newer measurement started; that one owns `fold`
-      if (![...row.children].some((c) => c.scrollWidth > c.clientWidth + 1)) break;
-      fold++;
-    }
-  }
-  function foldWatch(node: HTMLElement) {
-    const run = () => measureFold(node);
-    const ro = new ResizeObserver(run); ro.observe(node);
-    // childList + characterData only (NOT attributes) — our own class flips don't re-trigger, so no loop
-    const mo = new MutationObserver(run); mo.observe(node, { childList: true, subtree: true, characterData: true });
-    run();
-    return { destroy() { ro.disconnect(); mo.disconnect(); } };
-  }
+  // the arithmetic and the DOM reading live in fold.ts, with a test on the estimate that was wrong twice
+  const runFold = (row: HTMLElement) => { const mine = ++foldRun; return measureFold(row, { max: FOLD_MAX, set: (f) => (fold = f), settle: tick, stale: () => mine !== foldRun }); };
+  const foldWatchAction = (node: HTMLElement) => foldWatch(node, () => void runFold(node));
 
   // ── THEMES ────────────────────────────────────────────────────────────────────────────────────────
   // "Theme your own reader": a curated set of DaisyUI themes, stamped on <html data-theme>. The map now
@@ -560,29 +528,6 @@
 
   // focus-trap action (eid-vxm2): on open, move focus into the modal + keep Tab inside it (so keyboard
   // focus can't wander to the background controls behind the overlay); on close, return focus to the opener.
-  function trapFocus(node: HTMLElement) {
-    const opener = document.activeElement as HTMLElement | null;
-    const sel = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
-    const items = () => [...node.querySelectorAll<HTMLElement>(sel)].filter((e) => e.offsetParent !== null);
-    queueMicrotask(() => { const f = items(); (f[0] ?? node).focus(); });
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Tab") return;
-      const f = items(); if (!f.length) { e.preventDefault(); return; }
-      const first = f[0], last = f[f.length - 1], a = document.activeElement;
-      if (e.shiftKey && (a === first || !node.contains(a))) { e.preventDefault(); last.focus(); }
-      else if (!e.shiftKey && a === last) { e.preventDefault(); first.focus(); }
-    };
-    node.addEventListener("keydown", onKey);
-    return { destroy() { node.removeEventListener("keydown", onKey); try { opener?.focus(); } catch {} } };
-  }
-  // the details sidebar is DOCKED, not modal — so it takes focus on open and hands it back on close, but it
-  // deliberately does NOT trap: the toolbar stays operable while a card is open (that's the point of a pane).
-  function focusOnOpen(node: HTMLElement) {
-    const opener = document.activeElement as HTMLElement | null;
-    queueMicrotask(() => { try { node.focus(); } catch {} });
-    return { destroy() { try { opener?.focus(); } catch {} } };
-  }
-
   // Bring a decoded map onto the canvas — used for the first load AND for opening a new file/url at runtime,
   // so the viewer is a general .eido opener, not welded to one bundled map. Tears down the old GPU context,
   // resets per-corpus selection, re-wires the createMap handle + the read-only __eido test seam.
@@ -1326,7 +1271,7 @@
       <!-- desktop: one dense row of labelled menus. PRIORITY COLLAPSE (eid-ef7e): the row is measured
            (use:foldWatch) and lower-priority controls fold into the mobile controls sheet rather than
            ever clipping mid-glyph — the strip shows a whole control or none of it. -->
-      <div use:foldWatch class="relative hidden items-center gap-1 px-2 py-1.5 sm:flex">
+      <div use:foldWatchAction class="relative hidden items-center gap-1 px-2 py-1.5 sm:flex">
         <div data-fold-fixed class="flex min-w-0 max-w-[16rem] flex-none items-center gap-2 pr-1">
           <span class="flex-none text-base leading-none">🔭</span>
           <div class="min-w-0">{@render about("bar")}</div>

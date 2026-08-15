@@ -30,9 +30,14 @@ export const PALX: RGB[] = (() => {
 // The active theme is module-level rather than threaded through every call site: colour is a global
 // property of the page, and `col(c)` is called from deck accessors, legend rows and hover chips alike.
 // setActiveTheme() is called once per theme switch (App.svelte, right after data-theme is stamped) and
-// bumps paletteVer so reactive readers and deck updateTriggers can invalidate off ONE number.
+// returns a version number so reactive readers and deck updateTriggers can invalidate off ONE value.
+//
+// `paletteVer` is deliberately NOT exported. It used to be (`export let` on a mutable counter — a live
+// binding a consumer can read but never subscribe to), and nothing ever imported it: every call site uses
+// the number the setters RETURN, which is the same value delivered at the moment it changes rather than
+// whenever the reader happens to look. The export was a footgun describing a mechanism no one used.
 let activeTheme = "";
-export let paletteVer = 0;
+let paletteVer = 0;
 
 // The current map's colour coordinates (null = file carries none → spread-k fallback), and the
 // current colour-channel GROUPS: per-card group index (region id at the live grain, or a categorical

@@ -1036,6 +1036,16 @@ try {
     await p.setViewportSize({ width: w, height: 844 }); await p.waitForTimeout(400);
     const bad = await overflowers(p);
     ok(bad.length === 0, `chrome @${w}: nothing drawn outside the viewport or its own cell${bad.length ? " — " + bad.slice(0, 3).join("; ") : ""}`);
+    // …and the toolbar's own contract: the priority collapse shows a whole control or none of it, so no
+    // group in the measured strip may be scrolling its content. This is what the fold's settle loop exists
+    // for — the width estimate under-counts real flex spend (measured 53px at 1900, 94px at 1280), and
+    // before the settle loop existed the strip "fit" on paper while "+ axis" drew on top of "open".
+    const spill = await p.evaluate(() => {
+      const row = [...document.querySelectorAll("div")].find((d) => d.className.includes("relative") && d.className.includes("sm:flex") && !!d.querySelector("[data-fold-trigger]"));
+      if (!row) return [] as string[];
+      return [...row.children].filter((c) => c.scrollWidth > c.clientWidth + 1).map((c) => `${String(c.className).slice(0, 24)} ${c.scrollWidth}>${c.clientWidth}`);
+    });
+    ok(spill.length === 0, `toolbar @${w}: no control group overflows its box${spill.length ? " — " + spill.join("; ") : ""}`);
   }
   await p.setViewportSize({ width: 2200, height: 1050 }); await p.waitForTimeout(250);
 
