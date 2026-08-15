@@ -1061,6 +1061,24 @@ try {
   ok(/beat the noise floor/.test(strength), "...and says the rest were not noise, only not offered");
   await p.keyboard.press("Escape"); await p.waitForTimeout(200);
 
+  // AXIS WEIGHT IS A MARK, NOT A TEXT TAG (eid-lcts). Every channel row used to end in "· 27%", which is
+  // accurate and the wrong form: it makes you read and compare strings to learn an ordering the list is
+  // already sorted by. The bar shows the magnitude; the exact share moves to the accessible name, so a
+  // screen reader still gets the number a sighted reader now gets as a length.
+  await p.click('[data-menu="bar:color"]'); await p.waitForTimeout(250);
+  const marks = await p.evaluate(() =>
+    [...document.querySelectorAll('[data-opt*=":color:"]')]
+      .map((r) => { const m = r.querySelector<HTMLElement>("[role=img]"); const fill = m?.querySelector<HTMLElement>("[data-weight-fill]");
+                    return m ? { label: m.getAttribute("aria-label") ?? "", w: fill ? parseFloat(getComputedStyle(fill).width) : -1 } : null; })
+      .filter(Boolean) as { label: string; w: number }[]);
+  ok(marks.length >= 2, `axis rows carry a weight mark — ${marks.length} of them`);
+  ok(marks.every((m) => /% of the variance/.test(m.label)), "…whose accessible name still states the exact share");
+  // the fixture's axes are 40% and 20%, so the marks must differ and preserve the ordering
+  ok(marks[0].w > marks[1].w, `…and the stronger axis is visibly longer — ${marks[0].w}px vs ${marks[1].w}px`);
+  const pctLeft = await p.evaluate(() => [...document.querySelectorAll('[data-opt*=":color:"]')].filter((r) => /·\s*\d+(\.\d+)?%/.test(r.textContent ?? "")).length);
+  ok(pctLeft === 0, `…and no row still carries the percentage as text — ${pctLeft} do`);
+  await p.keyboard.press("Escape"); await p.waitForTimeout(200);
+
   ok(consoleErrs.length === 0, "no console errors during the run" + (consoleErrs.length ? " — " + consoleErrs[0] : ""));
 } finally {
   await browser.close();

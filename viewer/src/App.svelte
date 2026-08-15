@@ -218,7 +218,15 @@
   // thin one (under the 2% floor the pipeline flags as `weak`) says so — same "thin" word the about pane
   // and the scatter caption already use. No hiding, no reordering: just the number, everywhere.
   const pctOf = (v: number) => { const p = v * 100; return (p >= 2 ? Math.round(p) : +p.toFixed(1)) + "%"; };
+  // Native <option> cannot hold markup, so the two <select>s keep the text form. That is a platform
+  // constraint, not a second opinion about the right form — everywhere markup IS possible, the weight is
+  // a mark (see the `weight` snippet).
   const dimTag = (d: { variance?: number }) => (d.variance == null ? "" : ` · ${pctOf(d.variance)}`);
+  // The strongest axis in this map, so a weight bar can be read against something. Normalizing to the
+  // MAXIMUM rather than to 100% is the whole point: every axis share is small in absolute terms (the
+  // leading PC carries 6-9% on our corpora), so absolute bars would all be stubs and would answer a
+  // question nobody is asking. The question a channel menu answers is "which of these matters MORE".
+  const maxVar = $derived(Math.max(...(data?.axes ?? []).map((a) => a.variance ?? 0), 1e-9));
   const readerLabel = (u?: string) => (u && /readwise\.io/.test(u) ? "Readwise" : "open");
   const sourceLabel = (i: number) => data?.siteNames?.[i] || "original";
   const dateOf = (i: number) => { const d = data?.dates?.[i]; return d ? new Date(d).toISOString().slice(0, 10) : ""; };
@@ -829,6 +837,24 @@
   </li>
 {/snippet}
 
+<!-- HOW MUCH THIS DIMENSION MATTERS, AS A MARK (eid-lcts). This was "· 27%" text on every row. The
+     numbers were accurate and the form was wrong: structure belongs in position and marks, not in added
+     text tags, and a percentage makes you read and compare six strings to learn an ordering the list is
+     ALREADY sorted by. The bar makes that ordering visible at a glance and deletes the text rather than
+     joining it. The exact share is not lost — it moves to the accessible name, where a screen reader
+     still gets the number a sighted reader now gets as a length. -->
+{#snippet weight(d: { variance?: number; weak?: boolean })}
+  {#if d.variance != null}
+    <span class="ml-auto flex-none" role="img" aria-label="{pctOf(d.variance)} of the variance{d.weak ? ', a thin axis' : ''}">
+      <span class="block h-1.5 w-14 rounded-full bg-base-content/20">
+        <!-- floored at 4% so the thinnest axis is still a visible mark rather than an empty track that
+             reads as missing data -->
+        <span data-weight-fill class="block h-full rounded-full bg-base-content/70" style="width:{Math.max(4, Math.round((100 * (d.variance ?? 0)) / maxVar))}%"></span>
+      </span>
+    </span>
+  {/if}
+{/snippet}
+
 <!-- ABOUT THIS MAP — the corpus name IS the button. Says how the picture was made (from the .eido's own
      derivedBy + axis stats) so a reader can weigh it as a hypothesis rather than read it as a fact. -->
 {#snippet about(scope: string)}
@@ -1056,7 +1082,7 @@
                 {#if d.ord!.length > 16}<li class="px-3 py-1 text-xs opacity-60">+{d.ord!.length - 16} more</li>{/if}
               {/if}
             {/each}
-            {#each scalarDims as d}<li><button data-opt="{scope}:color:{d.key}" aria-pressed={m.channels.color === d.key} onclick={() => (m.channels.color = d.key)}><span class="w-3">{m.channels.color === d.key ? "✓" : ""}</span><span class="truncate {d.weak ? 'opacity-50' : ''}">{d.name}</span>{#if d.variance != null}<span class="ml-auto flex-none font-mono text-[10px] opacity-50">{pctOf(d.variance)}</span>{/if}</button></li>{/each}
+            {#each scalarDims as d}<li><button data-opt="{scope}:color:{d.key}" aria-pressed={m.channels.color === d.key} onclick={() => (m.channels.color = d.key)}><span class="w-3">{m.channels.color === d.key ? "✓" : ""}</span><span class="truncate {d.weak ? 'opacity-50' : ''}">{d.name}</span>{@render weight(d)}</button></li>{/each}
             {@render propItems(colorDim)}
           </ul>
         </div>
@@ -1087,7 +1113,7 @@
           <li class="menu-title text-[10px] tracking-widest uppercase">size by</li>
           <li><button data-opt="{scope}:size:uniform" aria-pressed={m.channels.size === "uniform"} onclick={() => (m.channels.size = "uniform")}><span class="w-3">{m.channels.size === "uniform" ? "✓" : ""}</span>uniform</button></li>
           {#each allDims.filter((d) => d.kind === "scalar") as d}
-            <li><button data-opt="{scope}:size:{d.key}" aria-pressed={m.channels.size === d.key} onclick={() => (m.channels.size = d.key)}><span class="w-3">{m.channels.size === d.key ? "✓" : ""}</span><span class="truncate {d.weak ? 'opacity-50' : ''}">{d.name}</span>{#if d.variance != null}<span class="ml-auto flex-none font-mono text-[10px] opacity-50">{pctOf(d.variance)}</span>{/if}</button></li>
+            <li><button data-opt="{scope}:size:{d.key}" aria-pressed={m.channels.size === d.key} onclick={() => (m.channels.size = d.key)}><span class="w-3">{m.channels.size === d.key ? "✓" : ""}</span><span class="truncate {d.weak ? 'opacity-50' : ''}">{d.name}</span>{@render weight(d)}</button></li>
           {/each}
           {@render propItems(sizeDim)}
         </ul>
