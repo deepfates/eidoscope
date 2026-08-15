@@ -336,6 +336,17 @@ try {
   const scopeW = await p.evaluate(() => document.querySelector("[data-scope]")?.textContent?.trim());
   ok(scopeW === "1 / 90 cards", `the always-on readout agrees — "${scopeW}"`);
 
+  // 11h. ESCAPE POPS THE MOST RECENT CHIP, WHATEVER KIND IT IS (Hac-aycw). Isolating a region and typing a
+  // find both put a chip in this row and they look identical, but Escape used to pop the region and leave
+  // the find — the back-out ladder had a special case for one filter KIND. Two chips are loaded here (a
+  // find and a window); Escape must take them off one at a time, newest first, exactly as the ✕ would.
+  await p.keyboard.press("Escape"); await p.waitForTimeout(250);
+  s = await st();
+  ok(s.filters.length === 1 && s.filters[0] === "“Doc 0.1”", `Escape pops the newest chip — the window — leaving ${JSON.stringify(s.filters)}`);
+  await p.keyboard.press("Escape"); await p.waitForTimeout(250);
+  s = await st();
+  ok(s.filters.length === 0 && s.visible === 90, `…and again pops the find, which Escape used to ignore entirely — filters=${JSON.stringify(s.filters)} visible=${s.visible}`);
+
   // 12. ?map= loads a DIFFERENT corpus from the SAME built viewer (the dual-deploy path)
   await p.goto(base + "/index.html?map=alt.eido");
   await p.waitForFunction(() => !!(window as any).__eido, null, { timeout: 15000 });
@@ -517,6 +528,26 @@ try {
   ok((await st()).selection === 30, "re-selecting the same clump holds it again");
   await p.click('[data-testid="sel-clear"]'); await p.waitForTimeout(250);
   ok((await st()).selection === 0, "the pane's `clear` verb releases the selection");
+
+  // 14e-ii. A LASSO THAT CATCHES NOTHING SAYS SO (eid-fw7o). A straight drag encloses no area, so it took
+  // zero cards and the app did nothing at all — reported as "select mode is broken", which is what silence
+  // looks like from outside. The two ways to catch nothing say different things because they need
+  // different things from the reader: redraw the shape, versus the shape was fine and empty.
+  const noteAfter = async (path: number[][]) => {
+    await p.evaluate((q) => (window as any).__eidoLasso(q), path);
+    await p.waitForTimeout(250);
+    return p.evaluate(() => document.querySelector("[data-save-note]")?.textContent?.trim() ?? "");
+  };
+  const lineNote = await noteAfter([[bx - 60, by - 60], [bx, by], [bx + 60, by + 60]]);
+  ok(/no area/.test(lineNote), `a zero-area stroke explains itself — "${lineNote}"`);
+  const voidNote = await noteAfter(circle(bx + rad * 8, by + rad * 8, 12));
+  ok(/nothing inside/.test(voidNote), `an empty loop says it was empty, not that it was malformed — "${voidNote}"`);
+  // …and a lasso that DOES catch something leaves no stale message behind it
+  await p.evaluate((path) => (window as any).__eidoLasso(path), circle(bx, by, rad));
+  await p.waitForTimeout(250);
+  const afterReal = await p.evaluate(() => document.querySelector("[data-save-note]")?.textContent?.trim() ?? "");
+  ok((await st()).selection === 30 && !/no area|nothing inside/.test(afterReal), `a successful lasso clears the message — "${afterReal}"`);
+  await p.click('[data-testid="sel-clear"]'); await p.waitForTimeout(250);
 
   // 14f. a SELECTION is shareable: sel=<ids> round-trips through a reload
   await p.evaluate((path) => (window as any).__eidoLasso(path), circle(bx, by, rad));

@@ -211,7 +211,14 @@
     if (m.deckOpen) { m.deckOpen = false; return; }
     if (selection !== null) { m.clearSelection(); return; }
     if (selected !== null) { focusCard(null); return; }
-    if (pinned !== null) togglePin(pinned);
+    // THE LAST RUNG IS "the most recent filter", not "the region isolate" (Hac-aycw). Isolating a region
+    // and typing a find both produce a chip in the same row, and they looked identical — but Escape popped
+    // the region and left the find sitting there, because the ladder had a special case for one filter
+    // KIND while `filters` has always been an ordered list and `removeFilter` has always known how to undo
+    // any of them (it clears `pinned`/`query` as needed). Escape is now exactly the ✕ on the rightmost
+    // chip: same operation, same undo, and the row explains the key.
+    const last = chips[chips.length - 1];
+    if (last) last.remove();
   }
   function requestClose() { if (overlayPushed) { try { history.back(); return; } catch {} } doCloseOverlays(); }
   function dismissIntro() { requestClose(); }
@@ -287,16 +294,29 @@
     window.removeEventListener("pointerup", lassoUp);
     window.removeEventListener("pointercancel", lassoUp);
     const path = lasso; lasso = null; lassoPointer = -1;
-    if (!commit || !path || path.length < 3 || !handle) return;
-    const idx = handle.selectPolygon(path, filterMask);   // hidden cards aren't selectable — the mask rides along
-    if (idx.length) { m.setSelection(idx); mintedKey = null; focusCard(null); }
+    if (!commit || !path) return;
+    lassoFromPath(path);
   }
-  // programmatic seam for the integration suite: synthesize the SAME path the pointer would have drawn
+  // Screen-space area of the drawn path (shoelace, px²). Below a few px² the stroke is a line, not a loop.
+  const pathArea = (p: number[][]) => {
+    let a = 0;
+    for (let i = 0, j = p.length - 1; i < p.length; j = i++) a += (p[j][0] + p[i][0]) * (p[j][1] - p[i][1]);
+    return Math.abs(a / 2);
+  };
+  // THE ONE LASSO OUTCOME — the pointer gesture and the integration suite's synthetic path both land here.
+  // They used to be two functions doing the same thing slightly differently, which meant a change to what
+  // a lasso DOES could be invisible to every test that drives it (and was: the "say something when you
+  // caught nothing" fix below was written into the pointer path only, where no assertion can reach).
   function lassoFromPath(path: number[][]): number {
     if (!handle) return 0;
-    const idx = handle.selectPolygon(path, filterMask);
-    if (idx.length) { m.setSelection(idx); mintedKey = null; focusCard(null); }
-    return idx.length;
+    const idx = path.length < 3 ? [] : handle.selectPolygon(path, filterMask);   // hidden cards aren't selectable — the mask rides along
+    if (idx.length) { m.setSelection(idx); mintedKey = null; focusCard(null); note(""); return idx.length; }
+    // A DRAG THAT TAKES NOTHING SAYS SO (eid-fw7o). A straight or diagonal stroke encloses no area, so it
+    // selected zero cards and the app did absolutely nothing — indistinguishable from select mode being
+    // broken, which is how it was reported. The gesture is fine; the silence was the bug. The two ways to
+    // catch nothing need different things from the reader, so they say different things.
+    note(pathArea(path) < 16 ? "that stroke has no area — draw a loop around some cards" : "nothing inside that loop");
+    return 0;
   }
   // Export-menu data-out: the held set as {ids,titles,urls} JSON — cards flowing to other tools
   // (and the CLI descend verb's input shape). The selection-pane FERRY died with in-page descend;
@@ -489,6 +509,15 @@
   // holds the per-browser truth (FSA write-in-place on Chromium, filename-preserving download elsewhere).
   let dirty = $state(false);
   let saveNote = $state("");   // transient, honest: "saved" (in place) vs "downloaded <name>"
+  // ONE transient line for "what just happened", reused by every verb that would otherwise finish in
+  // silence (eid-fw7o): save, every export, and a lasso that caught nothing. It already existed for save
+  // alone, which is why save was the only gesture that ever confirmed itself.
+  let noteTimer: ReturnType<typeof setTimeout> | undefined;
+  function note(msg: string) {
+    clearTimeout(noteTimer);
+    saveNote = msg;
+    if (msg) noteTimer = setTimeout(() => (saveNote = ""), 4000);
+  }
   let viewNote = $state("");   // transient, honest: a restored view named a dimension this map does not have
   // what a channel falls back to when the view names a dimension that is not here
   const INITIAL_CHANNEL = { color: "region", size: "hub", x: "", y: "", z: "", scrub: "", sort: "hub" } as const;
@@ -499,8 +528,7 @@
     const D = store?.map(); if (!D) return;
     const how = await writeEido(eidoBytes(D));   // the SAME shared codec the pipeline emits with
     dirty = false;
-    saveNote = how === "wrote" ? "saved" : "downloaded " + currentFileName();
-    setTimeout(() => (saveNote = ""), 4000);
+    note(how === "wrote" ? "saved" : "downloaded " + currentFileName());
   }
   async function openDoc() {
     if (supportsFSA()) { const f = await openViaPicker(); if (f) await openFile(f, { named: true }); }
@@ -514,7 +542,11 @@
   // ── EXPORT — one surface, every outbound flow, all fed from the cards (the shared src/export.ts) ──
   // Each export is built in viewer/src/exports.ts and only LANDED here — the component supplies the
   // open document and its name, and owns the one DOM-touching step.
-  const emit = (a: Artifact | null) => { if (a) download(a.data, a.name, a.type); };
+  // Every export SAYS what it wrote (eid-fw7o). A menu item that produces a file and no acknowledgement
+  // reads as a dead menu item — the browser's own download chrome is somewhere else, differs per browser,
+  // and on iOS Safari is a sheet that has already gone by the time you look back at the page. Save had
+  // this and nothing else did, which is exactly the "selection feel forks" the ticket named.
+  const emit = (a: Artifact | null) => { if (!a) return; download(a.data, a.name, a.type); note("downloaded " + a.name); };
   async function exportHTML() { const D = store?.map(); if (D) emit(htmlArtifact(D, exportBase(), await appShell())); }
   function exportVault() { const D = store?.map(); if (D) emit(vaultArtifact(D, exportBase())); }
   function exportDeck() { const D = store?.map(); if (D) emit(deckArtifact(D, exportBase())); }
@@ -866,7 +898,7 @@
            floor the cell may shrink to, not the width this button asks for. Taking the cell's full width
            makes the truncate children do the job they were already written to do. -->
       <Popover.Trigger class="rounded-field block w-full min-w-0 cursor-pointer px-1 py-0.5 text-left hover:bg-base-300" data-menu="{scope}:about"
-        aria-label="about this map — how it was made" title="about this map — how it was made">
+        aria-label="about this map — how it was made">
         <div class="truncate text-sm font-bold leading-tight">{prov?.title ?? "eidoscope"}</div>
         <div class="truncate font-mono text-[10px] leading-tight opacity-60">{data.ids.length} cards · {curCount} regions · about ⓘ</div>
       </Popover.Trigger>
@@ -1053,9 +1085,11 @@
                 {#if d.wide}
                   <!-- too many values for colour to say anything (eid-ml88) — the dimension is still
                        here to ISOLATE by, and still available on sort/find/window; colour just declines -->
-                  <span class="flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-sm opacity-50" data-wide="{scope}:{d.key}" title="{d.ord?.length} distinct values — more than colour can distinguish; isolate, sort and find still use it">
+                  <!-- the reason this row is greyed is now ON the row. It was a `title`, so on a phone the
+                       dimension simply appeared disabled with no explanation anywhere (eid-kzv2 item 7). -->
+                  <span class="flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-sm opacity-50" data-wide="{scope}:{d.key}">
                     <span class="w-3 flex-none"></span><span class="min-w-0 flex-1 truncate">{d.name}</span>
-                    <span class="ml-auto flex-none font-mono text-[10px]">{d.ord?.length} values</span>
+                    <span class="ml-auto flex-none font-mono text-[10px]">{d.ord?.length} values · too many to colour</span>
                   </span>
                 {:else}
                   <button class="min-w-0 flex-1" data-opt="{scope}:color:{d.key}" aria-pressed={m.channels.color === d.key} onclick={() => (m.channels.color = d.key)}><span class="w-3">{m.channels.color === d.key ? "✓" : ""}</span><span class="truncate">{d.name}</span></button>
@@ -1174,8 +1208,8 @@
           {#each mintedDims as qd}
             <div data-minted={qd.key} tabindex="-1" class="rounded-field mt-2 flex items-center gap-1 bg-base-200 px-2 py-1 text-[11px]">
               <span class="min-w-0 flex-1 truncate font-mono opacity-80" title={qd.name}>{qd.name}</span>
-              <button onclick={() => (m.channels.color = qd.key)} title="colour by this axis" aria-label="colour by this axis" class="btn btn-ghost btn-xs">●</button>
-              <button onclick={() => { m.removeDimension(qd.key); if (mintedKey === qd.key) mintedKey = null; }} title="remove this axis" aria-label="remove this axis" class="btn btn-ghost btn-xs">✕</button>
+              <button onclick={() => (m.channels.color = qd.key)} aria-label="colour by this axis" class="btn btn-ghost btn-xs">●</button>
+              <button onclick={() => { m.removeDimension(qd.key); if (mintedKey === qd.key) mintedKey = null; }} aria-label="remove this axis" class="btn btn-ghost btn-xs">✕</button>
             </div>
           {/each}
         </Popover.Content>
@@ -1234,19 +1268,22 @@
     </DropdownMenu.Portal>
   </DropdownMenu.Root>
   <button data-testid="{scope}:save" data-fold="0" class="btn btn-sm flex-none gap-1 normal-case {dirty ? 'btn-primary' : 'btn-ghost'}" onclick={saveDoc}
-    aria-label={dirty ? "save — there is unsaved work" : "save"} title={canWriteInPlace() ? "save — writes " + currentFileName() + " in place" : "save — downloads " + currentFileName()}>
-    save{#if dirty}<span aria-hidden="true" class="text-[9px] leading-none">●</span>{/if}
+    aria-label={(canWriteInPlace() ? "save — writes " + currentFileName() + " in place" : "save — downloads " + currentFileName()) + (dirty ? ", there is unsaved work" : "")}>
+    <!-- WHICH SAVE THIS IS, VISIBLY. Whether the browser writes your file in place or hands you a
+         download is the single most consequential thing about this button, and it lived in a `title` —
+         invisible to every touch reader, on a control that decides where their work goes. The ↓ says
+         "this one downloads"; nothing means it writes the file you opened. -->
+    save{#if !canWriteInPlace()}<span aria-hidden="true" class="text-[10px] leading-none opacity-70">↓</span>{/if}{#if dirty}<span aria-hidden="true" class="text-[9px] leading-none">●</span>{/if}
   </button>
-  {#if saveNote}<span data-save-note class="flex-none font-mono text-[10px] opacity-60">{saveNote}</span>{/if}
   <button class="btn btn-sm btn-ghost flex-none normal-case {foldCls(scope, 3)}" data-fold="3" onclick={() => (m.deckOpen = true)}>deck</button>
   <!-- labels are a property of the region lens; off it the button would be meaningless, so it is
        presence-gated (the codebase's pattern for missing preconditions) rather than disabled-with-a-why -->
   {#if m.channels.color === "region"}
     <button aria-pressed={labelsOn} data-fold="1" class="btn btn-sm flex-none normal-case {foldCls(scope, 1)} {labelsOn ? 'btn-active' : 'btn-ghost'}" onclick={() => (m.showLabels = !m.showLabels)} aria-label="toggle labels">labels</button>
   {/if}
-  <button class="btn btn-sm btn-ghost btn-square flex-none" onclick={toggleTheme} aria-label="toggle light or dark theme" title="toggle light or dark theme">{theme === "dark" ? "☾" : "☀"}</button>
+  <button class="btn btn-sm btn-ghost btn-square flex-none" onclick={toggleTheme} aria-label="toggle light or dark theme">{theme === "dark" ? "☾" : "☀"}</button>
   <DropdownMenu.Root>
-    <DropdownMenu.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case" data-menu="{scope}:theme" aria-label="pick a colour theme" title="pick a colour theme">
+    <DropdownMenu.Trigger class="btn btn-sm btn-ghost flex-none gap-1 normal-case" data-menu="{scope}:theme" aria-label="pick a colour theme">
       <span class="max-w-[6rem] truncate">{themeName}</span><span class="text-[9px] opacity-50">▾</span>
     </DropdownMenu.Trigger>
     <DropdownMenu.Portal>
@@ -1294,7 +1331,7 @@
           {@render rightControls("bar")}
           <!-- the fold trigger — the SAME affordance mobile uses, opening the SAME sheet -->
           <button data-fold-trigger data-menu="bar:controls" class="btn btn-sm btn-ghost flex-none normal-case {fold === 0 ? FOLDED : ''}"
-            onclick={() => (sheetOpen = true)} aria-label="open the folded controls" title="more controls — the ones the narrow window folded away">controls ▴</button>
+            onclick={() => (sheetOpen = true)} aria-label="open the folded controls">controls ▴</button>
         </div>
       </div>
 
@@ -1311,7 +1348,7 @@
       <div class="flex flex-wrap items-center gap-1 border-t border-base-300 px-2 py-1.5">
         {#if chips.length}<span class="font-mono text-[10px] uppercase tracking-widest opacity-50">filters</span>{/if}
         {#each chips as chip}
-          <button onclick={chip.remove} title="remove filter {chip.label}" aria-label="remove filter {chip.label}" class="badge badge-sm badge-neutral gap-1 font-mono">
+          <button onclick={chip.remove} aria-label="remove filter {chip.label}" class="badge badge-sm badge-neutral gap-1 font-mono">
             <span class="max-w-[11rem] truncate">{chip.label}</span><span class="opacity-60">· {chip.n}</span><span class="opacity-60">✕</span>
           </button>
         {/each}
@@ -1344,19 +1381,40 @@
             class="fill-base-content/5 stroke-base-content/70" stroke-width="1.5" stroke-dasharray="4 3" />
         </svg>
       {/if}
-      {#if selectMode && !lasso}
-        <div class="pointer-events-none absolute inset-x-0 top-2 z-10 flex justify-center">
-          <div class="rounded-field bg-base-100/85 px-2 py-1 font-mono text-[10px] shadow backdrop-blur">drag to circle cards · Escape to leave</div>
+      <!-- ONE PLACE ANYTHING TRANSIENT IS SAID (eid-fw7o). It carries the select-mode hint and every
+           verb's outcome — saved, downloaded <name>, a lasso that caught nothing. It lives over the map,
+           not in the toolbar, for two reasons: the answer belongs where the gesture happened, and the
+           toolbar span it replaces was inside the folding strip, so at 390px every one of these messages
+           had nowhere to render at all and the app went silent exactly where it is hardest to tell what
+           just happened. -->
+      {#if (selectMode || saveNote) && !lasso}
+        <div class="pointer-events-none absolute inset-x-0 top-2 z-10 flex justify-center px-2">
+          <div class="rounded-field max-w-full truncate bg-base-100/85 px-2 py-1 font-mono text-[10px] shadow backdrop-blur" data-select-hint data-save-note>{saveNote || "drag to circle cards · Escape to leave"}</div>
         </div>
       {/if}
 
       {#if data && m.layout === "axes" && xDim && yDim}
         {@const xp = poles(xDim)}{@const yp = poles(yDim)}
-        <div class="pointer-events-none absolute inset-0 font-mono text-xs opacity-60">
-          <div class="absolute left-3 top-1/2 max-w-[42%] -translate-y-1/2" title={xp[0]}>← {trunc(xp[0])}</div>
-          <div class="absolute right-3 top-1/2 max-w-[42%] -translate-y-1/2 text-right" title={xp[1]}>{trunc(xp[1])} →</div>
-          <div class="absolute left-1/2 top-3 max-w-[60%] -translate-x-1/2 truncate" title={yp[1]}>↑ {trunc(yp[1])}</div>
-          <div class="absolute bottom-3 left-1/2 max-w-[60%] -translate-x-1/2 truncate" title={yp[0]}>↓ {trunc(yp[0])}</div>
+        <!-- AXIS POLES. The scatter's own gutters are the space these live in, and on a phone the
+             horizontal ones do not exist: measured at 390px the plot leaves ~39px each side (home("axes")
+             frames the [-1,1] box at 40% of the viewport) while the top and bottom bands are ~226px of
+             empty canvas each. So the side placement drew "Scholarly research and occult study" straight
+             across the point cloud, through the right-hand pole, and through a region label (Hac-3rcd).
+             Below `sm` all four move into the vertical bands, where the room actually is: y-poles centred
+             top and bottom, x-poles as one full-width line under them. No truncation is needed there, so
+             the names arrive whole — which is also the only way a touch reader gets them, since the
+             `title` fallback below never fires without a pointer. -->
+        <div class="pointer-events-none absolute inset-0 font-mono text-xs opacity-70">
+          <div class="absolute inset-x-2 top-2 truncate text-center" title={yp[1]}>↑ {trunc(yp[1])}</div>
+          <!-- narrow: x-poles share one line beneath the y-low label, spanning the full width -->
+          <div class="absolute inset-x-2 bottom-7 truncate text-center sm:bottom-3" title={yp[0]}>↓ {trunc(yp[0])}</div>
+          <div class="absolute inset-x-2 bottom-2 flex justify-between gap-3 sm:hidden">
+            <span class="truncate" title={xp[0]}>← {trunc(xp[0], 22)}</span>
+            <span class="truncate text-right" title={xp[1]}>{trunc(xp[1], 22)} →</span>
+          </div>
+          <!-- wide: the classic side gutters, where there is room for them -->
+          <div class="absolute left-3 top-1/2 hidden max-w-[42%] -translate-y-1/2 sm:block" title={xp[0]}>← {trunc(xp[0])}</div>
+          <div class="absolute right-3 top-1/2 hidden max-w-[42%] -translate-y-1/2 text-right sm:block" title={xp[1]}>{trunc(xp[1])} →</div>
         </div>
       {/if}
 
@@ -1421,11 +1479,19 @@
             <button data-testid="sel-filter" class="btn btn-primary btn-xs normal-case" onclick={() => m.filterToSelection()}>filter to these</button>
             <button data-testid="sel-fit" class="btn btn-xs normal-case" onclick={() => fitTo(selection!)}>fit</button>
             <button data-testid="sel-descend" class="btn btn-xs normal-case" disabled={!!descendWhyNot || !!descending}
-              title={descendWhyNot || "re-map these cards as their own space (local axes, in this tab)"} onclick={descendSelection}>descend</button>
+              aria-label={descendWhyNot || "descend — re-map these cards as their own space"} onclick={descendSelection}>descend</button>
             <button data-testid="sel-derive" class="btn btn-xs normal-case" disabled={!!deriveWhyNot || deriving}
               onclick={deriveAxis}>{#if deriving}<span class="loading loading-spinner loading-xs"></span>deriving…{:else}derive axis{/if}</button>
             <button data-testid="sel-clear" class="btn btn-ghost btn-xs normal-case" onclick={() => { m.clearSelection(); mintedKey = null; }}>clear</button>
           </div>
+          <!-- WHY A VERB IS OFF, said out loud. Both of these were `title` text on a disabled button, so a
+               touch reader met a dead control and no reason anywhere on the screen (eid-kzv2 item 7). -->
+          {#if descendWhyNot || deriveWhyNot}
+            <div data-why-not class="mb-2 font-mono text-[10px] leading-snug opacity-60">
+              {#if descendWhyNot}<div>descend — {descendWhyNot}</div>{/if}
+              {#if deriveWhyNot}<div>derive axis — {deriveWhyNot}</div>{/if}
+            </div>
+          {/if}
 
           <!-- descend's honest per-stage progress — the same narration ingest shows, in the pane that owns the verb -->
           {#if descending}
@@ -1457,7 +1523,7 @@
               <div class="mb-1 flex items-center gap-1">
                 <input data-testid="derive-rename" value={m.derived.find((d) => d.key === mintedDim.key)?.label ?? ""} oninput={(e) => m.renameDerived(mintedDim.key, e.currentTarget.value)}
                   aria-label="rename this axis" class="input input-xs min-w-0 flex-1 font-mono" />
-                <button onclick={() => { m.removeDimension(mintedDim.key); mintedKey = null; }} title="remove this axis" aria-label="remove this axis" class="btn btn-ghost btn-xs">✕</button>
+                <button onclick={() => { m.removeDimension(mintedDim.key); mintedKey = null; }} aria-label="remove this axis" class="btn btn-ghost btn-xs">✕</button>
               </div>
               <div class="flex items-center gap-1">
                 <span class="opacity-60">place on</span>
