@@ -1,4 +1,4 @@
-import { nameCluster } from "./signatures.ts";
+import { nameCluster, nameVer } from "./signatures.ts";
 import { hash, Store, pool, withRetry } from "./llm.ts";
 
 // Naming regions the GRUG way: the model does not guess what a region is "about" from a pile of its
@@ -66,7 +66,7 @@ export async function nameLevels(
   let done = 0, fail = 0;
   const progress = opts.onProgress ?? ((dn: number, total: number) => { if (total && (dn % 25 === 0 || dn === total)) (globalThis as any).process?.stderr?.write?.(`  regions ${dn}/${total}\r`); });
   await pool(todo, async (j) => {
-    const ck = hash("name2 " + j.terms.join(",") + " | " + j.axesTxt + " | " + j.samples);
+    const ck = hash("name " + nameVer + " " + j.terms.join(",") + " | " + j.axesTxt + " | " + j.samples);
     let v = store.get(ck);
     if (!v && llm) {
       const r: any = await withRetry(() => sig.forward(llm, { distinctiveTerms: j.terms.join(", ") || "(none stand out)", distinctiveAxes: j.axesTxt || "(none extreme)", memberSamples: j.samples }));

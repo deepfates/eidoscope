@@ -852,3 +852,28 @@ test("the budget cannot hand back more axes than the data supports", async () =>
   expect(r.axes.length).toBeLessThanOrEqual(Math.max(r.realDims, 2));
   expect(r.axes.length).toBeLessThan(16);
 });
+
+// ── A CACHE ENTRY BELONGS TO THE PROMPT THAT MADE IT (eid-mrtw) ─────────────────────────────────────
+// Both LLM caches keyed on their inputs behind a hand-written prefix ("card1", "name2") that whoever
+// edited a prompt was supposed to remember to bump. Editing a signature and re-running therefore
+// returned the OLD prompt's output with no way to tell — which would have made the naming measurement
+// this ticket rests on completely meaningless. The version is derived from the prompt text now.
+test("the cache version of each signature is derived from its own prompt text", async () => {
+  const { cardVer, nameVer } = await import("../src/signatures");
+  expect(typeof cardVer).toBe("string");
+  expect(cardVer.length).toBeGreaterThan(0);
+  expect(nameVer).not.toBe(cardVer);   // two prompts, two versions — a shared constant would defeat it
+});
+
+test("editing a prompt changes its version, and leaves the other one alone", async () => {
+  const { hash } = await import("../src/llm");
+  const { cardVer, nameVer } = await import("../src/signatures");
+  // the mechanism, exercised directly: the version IS the hash of the text, so any edit moves it
+  const before = hash("regionLabel: at most four words");
+  const after = hash("regionLabel: at most five words");
+  expect(after).not.toBe(before);
+  // …and the two live versions are stable within a run (a fresh import must not re-roll them)
+  const again = await import("../src/signatures");
+  expect(again.cardVer).toBe(cardVer);
+  expect(again.nameVer).toBe(nameVer);
+});

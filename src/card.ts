@@ -1,4 +1,4 @@
-import { deriveCard } from "./signatures.ts";
+import { deriveCard, cardVer } from "./signatures.ts";
 import { hash, Store, pool, withRetry, isAuthError, errLine } from "./llm.ts";
 import type { Axis } from "./axes.ts";
 import type { Doc } from "./corpus-core.ts";
@@ -28,7 +28,7 @@ export async function cardCorpus(docs: Doc[], axes: Axis[], opts: { llm?: any; s
   const cache = opts.cache ?? new Store();
   // key = document content + DETERMINISTIC axis geometry (PC index + variance). NOT the LLM labels.
   const geo = axes.map((a) => a.pc + ":" + (a.var ?? 0).toFixed(6)).join("|");
-  const key = (d: Doc) => hash("card1 " + d.title + " " + d.body + " " + geo);
+  const key = (d: Doc) => hash("card " + cardVer + " " + d.title + " " + d.body + " " + geo);
 
   const need = docs.filter((d) => !cache.has(key(d)));
   let done = 0, fail = 0, lastErr: any;
