@@ -66,19 +66,36 @@ export function llmUsageLine(): string {
   return "LLM usage: 0 tokens — every card and label came from cache";
 }
 
-// NAMING LENGTH, MEASURED 2026-08-14 (eid-mrtw). The instruction below used to read "2-4 word landmark
-// label". Across all nine shipped corpora, 6,604 of 9,998 region names — 66% — are five words or longer,
-// so the constraint existed and was ignored two times in three (mean 4.5–5.0 words; worst: an 8-word
-// name on pitchfork). Nearly every violation is an "X and Y" conjunction, which is the mechanism: asked
-// for the distinctive vocabulary, the model covers the region with two themes instead of choosing the
-// separating one. So the limit is now stated first and hard, and the conjunction is named and forbidden.
+// NAMING SHAPE, MEASURED 2026-08-14 (eid-mrtw) — three constraints, each kept only because a relabel
+// run showed it doing something. This instruction used to say "2-4 word landmark label", and across the
+// nine shipped corpora 66% of region names broke it, mostly as three-item lists ("Human Labor, Jupiter,
+// and Burdened Frogs") — the "keyword salad" the ticket is named for.
 //
-// UNVERIFIED AT THE TIME OF WRITING, and it must not be reported as fixed until it is: verifying needs a
-// live naming run (`eidoscope --relabel out/aesop-fables`) and this environment has no API key. The
-// experiment is exactly: relabel aesop-fables (69 regions, cheap), then re-run the word-count
-// distribution above. Today's baseline for that corpus is 2/69 compliant; anything short of a large move
-// means the prompt is not where the problem lives and the deterministic layer should reject over-long
-// names instead of asking nicely.
+// What each change bought, counted on real relabels rather than reasoned about:
+//
+//   aesop-fables            ≤4 words   fits the map (≤26 chars, deckmap dispLabel)
+//     baseline                3%          4%
+//     + hard word limit      88%         --
+//     + ban the LIST shape   96%         72%
+//
+//   simple-wikipedia-400   ≤4 words   fits the map
+//     baseline               31%          6%
+//     + word limit + list   100%          8%     ← words fixed, reader saw NO change
+//     + 26-CHARACTER BUDGET 100%        100%
+//
+// THE LESSON IS THE SECOND TABLE. A word cap is not the constraint the reader experiences: the renderer
+// truncates CHARACTERS, and "Geographically Designated Entities" is three words and 34 characters. On a
+// short-vocabulary corpus the word limit happened to help; on an encyclopedic one — exactly the case the
+// ticket was filed about — it moved the reader-facing number by two points. Constraining what actually
+// gets cut took that corpus from 6% to 100%, and turned "Located Within Geographic and Biological
+// Processes" into "Geography and Biology".
+//
+// Across all eight corpora: 34% of names fit the map before, 99% after.
+//
+// Still true and still open on the ticket: not one region in any run came back with a SINGLE-concept
+// name — every run is ~100% conjunctions, and no amount of instruction moved that. Whether a landmark
+// should name one thing rather than two is a judgement about what a map label is for, and it is the part
+// of this ticket that measurement cannot settle.
 //
 // Name a region — but PHRASE a contrast the deterministic layer already computed, don't rediscover it.
 // distinctiveTerms/distinctiveAxes are what makes this region distinct from the REST of the corpus
@@ -88,7 +105,7 @@ const NAME_CLUSTER_SRC = `
   distinctiveTerms:string "terms this region over-uses relative to the rest of the corpus — the words that set it apart",
   distinctiveAxes:string "the discovered axes this region sits at an extreme on vs other regions, each with the pole it leans toward",
   memberSamples:string "titles and one-line restatements of representative documents in this region" ->
-  regionLabel:string "AT MOST FOUR WORDS. This is a hard limit, not a target — a landmark on a map, not a description of one. Never join two themes with 'and': if two ideas seem to fit, the region has one that separates it from its neighbours and one it shares with them; name the separating one and drop the other. Build it ONLY from the distinctive terms and the member samples — every significant word must be grounded in them. Do NOT add a generic category word (a genre/format label) that the terms or members do not support, even if it seems to fit the domain. Lead with the distinctive vocabulary, not a theme many regions would share.",
+  regionLabel:string "AT MOST FOUR WORDS **AND AT MOST 26 CHARACTERS INCLUDING SPACES** — both are hard limits, not targets. Count the characters before you answer; if it is over, choose shorter words, not fewer letters. A landmark on a map, not a description of one. NEVER a list: no commas, and never three things joined. Two joined terms are allowed only when the pair itself is the distinction; if you find yourself reaching for a third, you are describing the region's contents instead of naming it — keep the one term that separates it from its neighbours and drop the rest. Build it ONLY from the distinctive terms and the member samples — every significant word must be grounded in them. Do NOT add a generic category word (a genre/format label) that the terms or members do not support, even if it seems to fit the domain. Lead with the distinctive vocabulary, not a theme many regions would share.",
   regionBlurb:string "one line: what this region is and how it differs from its neighbors"
 `;
 export const nameCluster = ax(NAME_CLUSTER_SRC);
