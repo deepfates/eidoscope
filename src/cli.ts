@@ -18,6 +18,7 @@ import { basename, join } from "node:path";
 import { folderSource, fixtureSource, splitOversized, type Source } from "./corpus.ts";
 import { embedDocs } from "./map.ts";
 import { run, relabelMap, descendMap } from "./pipeline.ts";
+import { fetchFrontier, buildGhosts } from "./frontier.ts";
 import { decodeMap } from "./mapbin.ts";
 import { eidoSink, vaultSink, deckSink, slugify } from "./sink.ts";
 import { llmUsageLine } from "./signatures.ts";
@@ -34,6 +35,10 @@ const USAGE = `usage: eidoscope <folder> [flags]                 map any folder 
        eidoscope descend <parent.eido> <selection.json> [--out <dir>] [--name <title>]
                                                   re-map a viewer-exported selection as its own child map
        eidoscope --relabel <dir-with-a-.eido>     re-name regions of an existing map (no re-carding)
+       eidoscope --frontier <dir-with-a-.eido> --corpus <source-folder>
+                                                  the telescope: Semantic Scholar citation edges + the
+                                                  papers your library cites but does NOT contain, carded
+                                                  and placed as ghosts on the map you already have
        eidoscope --fixture                        run on the readwise fixture (needs EIDOSCOPE_FIXTURE*)
 
 flags: --limit N        map only the first N documents
@@ -77,7 +82,7 @@ const args = process.argv.slice(2);
 if (args.includes("--help") || args.includes("-h")) { console.log(USAGE); process.exit(0); }
 if (!args.length) { console.error(USAGE); process.exit(1); }
 // a typo'd flag must not silently run with defaults and burn tokens — reject anything unknown
-const KNOWN_FLAGS = new Set(["--limit", "--min-chars", "--frontier", "--embed", "--out", "--name", "--debug-json", "--fixture", "--relabel", "--help", "-h"]);
+const KNOWN_FLAGS = new Set(["--limit", "--min-chars", "--frontier", "--embed", "--out", "--name", "--debug-json", "--fixture", "--relabel", "--corpus", "--top", "--help", "-h"]);
 for (const a of args) if (a.startsWith("--") || a === "-h") { const flag = a.split("=")[0]; if (!KNOWN_FLAGS.has(flag)) { console.error(`unknown flag: ${a} (see --help)`); process.exit(1); } }
 const val = (f: string) => { const i = args.indexOf(f); return i >= 0 ? args[i + 1] : undefined; };
 const dir = args.find((a) => !a.startsWith("--"));
@@ -163,6 +168,39 @@ if (args.includes("--relabel")) {
     const files = eidoSink.emit(D2, d, { slug });   // re-encode so the .eido carries the new labels (the viewer reads it)
     const html = files.find((f) => f.endsWith(".html"));
     console.error(`\n✅ relabeled ${D2.counts?.length ?? 1} grain levels → ${files[0]}${html ? ` + ${basename(html)}` : ""}`);
+    console.error(`   ${llmUsageLine()}`);
+  });
+  process.exit(0);
+}
+
+// --frontier: the TELESCOPE over a map that already exists. Everything buildGhosts needs — the axes, the
+// layout, the card vectors — is already in the .eido, so this cards only the ~80 external papers and
+// places them. No re-carding of the corpus, which is the difference between ~80 LLM calls and thousands.
+// The source folder is a separate argument because provenance.source is now a portable description
+// rather than a path on one disk (Hac-3r74), and arxiv ids live in the documents, not in the map.
+if (args.includes("--frontier") && dir && existsSync(join(dir, "")) && readdirSync(dir).some((f) => f.endsWith(".eido"))) {
+  const corpus = val("--corpus");
+  if (!corpus) { console.error("usage: eidoscope --frontier <dir-with-a-.eido> --corpus <source-folder>"); process.exit(1); }
+  if (!existsSync(corpus)) die(`no such corpus folder: ${corpus}`);
+  preflightKey();   // carding the frontier papers is LLM work
+  const eidoName = readdirSync(dir).filter((f) => f.endsWith(".eido")).sort()[0];
+  const slug = basename(eidoName, ".eido");
+  const D = readEido(join(dir, eidoName));
+  await attempt(async () => {
+    const { docs } = await folderSource(corpus, {}).load();
+    console.error(`frontier: ${docs.length} source docs · ${D.ids.length} cards in the map`);
+    const fr = await fetchFrontier(docs, { cacheFile: join(dir, "s2-cache.json") });
+    const nEdges = fr.cite.reduce((a, r) => a + r.length, 0);
+    if (!fr.corpusArxiv) { console.error("  no arxiv ids in this corpus — frontier is a clean no-op"); return; }
+    // the map's own card vectors ARE the space the ghosts are placed in — read them back out of the file
+    const dim = D.vectors?.dim ?? 0;
+    const embs = dim ? D.ids.map((_, i) => Array.from(D.vectors!.data.subarray(i * dim, (i + 1) * dim))) : [];
+    if (!embs.length) die("this map carries no card vectors (a --no-vectors emit) — the frontier has nothing to place against");
+    const axes = D.axes.map((a) => ({ pc: 0, var: 0, coherence: 5, key: a.key, name: a.name, pole_low: a.low, pole_high: a.high }));
+    const ghosts = await buildGhosts(fr.ranked, axes as any, D.xy, embs, { topN: Number(val("--top") ?? 80), cacheFile: join(dir, "s2-abs-cache.json") });
+    const D2: MapContract = { ...D, ghosts, cite: fr.cite, citec: fr.citec } as MapContract;
+    const files = eidoSink.emit(D2, dir, { slug });
+    console.error(`\n✅ ${fr.corpusArxiv} arxiv docs · ${nEdges} citation edges · ${fr.ranked.length} frontier papers · ${ghosts.length} ghosts placed → ${files[0]}`);
     console.error(`   ${llmUsageLine()}`);
   });
   process.exit(0);
